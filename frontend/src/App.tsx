@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import './App.css'
 import LibraryPage from './LibraryPage'
 
-const API_BASE_URL = 'http://localhost:5555'
+const API_BASE_URL = 'http://localhost:5444'
 
 // 简单的前端 debug 日志工具
 function debugLog(context: string, payload?: unknown) {

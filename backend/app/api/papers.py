@@ -18,7 +18,7 @@ from app.schemas.paper import (
     PaperSearchLocalResponse,
 )
 from app.models.paper import Paper
-from app.services.crawler import ArxivCrawler
+from app.services.crawler import ArxivCrawler, search_across_sources
 from app.config import get_settings
 from app.utils.cache import search_cache
 
@@ -57,42 +57,56 @@ async def search_papers(
             logger.info("命中文献搜索缓存，直接返回缓存结果")
             return cached
 
-        all_papers = []
+        # 2. 通过多源 Orchestrator 搜索
+        #    - 当前支持 arxiv / crossref（后续可扩展）
+        #    - 若前端未显式传 sources，则使用默认 ["arxiv"]
+        try:
+            sources = search_request.sources or ["arxiv"]
+            logger.info(f"使用数据源: {sources}")
 
-        # 2. Arxiv 搜索
-        if "arxiv" in search_request.sources:
-            try:
-                arxiv_crawler = ArxivCrawler(settings)
-                arxiv_papers = arxiv_crawler.search(
-                    keywords=search_request.keywords,
-                    max_results=search_request.limit,
-                    year_from=search_request.year_from,
-                    year_to=search_request.year_to,
+            all_papers = search_across_sources(
+                keywords=search_request.keywords,
+                sources=sources,
+                limit=search_request.limit,
+                year_from=search_request.year_from,
+                year_to=search_request.year_to,
+            )
+        except Exception as e:
+            logger.error(f"多源文献搜索失败: {e}")
+            raise
+
+        # 3. 将结果同步到本地数据库（去重写入）
+        synced_papers: List[Paper] = []
+        for paper in all_papers:
+            existing = None
+
+            # 优先用 doi 匹配
+            if getattr(paper, "doi", None):
+                existing = (
+                    db.query(Paper)
+                    .filter(Paper.doi == paper.doi)
+                    .first()
                 )
 
-                # 保存到数据库 & 避免重复
-                for paper in arxiv_papers:
-                    existing = (
-                        db.query(Paper)
-                        .filter(Paper.arxiv_id == paper.arxiv_id)
-                        .first()
-                    )
+            # 退化到 arxiv_id 匹配（兼容旧逻辑）
+            if existing is None and getattr(paper, "arxiv_id", None):
+                existing = (
+                    db.query(Paper)
+                    .filter(Paper.arxiv_id == paper.arxiv_id)
+                    .first()
+                )
 
-                    if not existing:
-                        db.add(paper)
-                        all_papers.append(paper)
-                    else:
-                        all_papers.append(existing)
+            if existing is None:
+                db.add(paper)
+                synced_papers.append(paper)
+            else:
+                synced_papers.append(existing)
 
-                db.commit()
-                logger.info(f"Arxiv搜索完成: {len(arxiv_papers)} 篇")
-            except Exception as e:
-                logger.error(f"Arxiv搜索失败: {e}")
-
-        # TODO: 添加其他数据源（Google Scholar、PubMed等）
+        db.commit()
+        logger.info(f"多源搜索完成: {len(all_papers)} 篇，入库/复用 {len(synced_papers)} 篇")
 
         paper_responses = [
-            PaperResponse.model_validate(paper) for paper in all_papers
+            PaperResponse.model_validate(paper) for paper in synced_papers
         ]
 
         resp = PaperSearchResponse(

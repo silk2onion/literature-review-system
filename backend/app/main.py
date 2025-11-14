@@ -11,7 +11,7 @@ import uvicorn
 
 from app.config import settings
 from app.database import init_db
-from app.api import papers_router, reviews_router
+from app.api import papers_router, reviews_router, crawl_router
 
 
 @asynccontextmanager
@@ -95,6 +95,7 @@ async def health_check(request: Request):
 # 注册API路由
 app.include_router(papers_router)
 app.include_router(reviews_router)
+app.include_router(crawl_router)
 
 
 # 全局异常处理

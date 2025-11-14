@@ -223,7 +223,7 @@
     - `log: JSON`（错误、告警、统计）
   - 后端落地位置建议：`backend/app/models/crawl_job.py` + 对应 schema 和 CRUD。
 
-- [ ] 给每个数据源设计独立 crawler/service，并抽象 Orchestrator
+- [x] 给每个数据源设计独立 crawler/service，并抽象 Orchestrator
   - 已有：
     - `ArxivCrawler`（[`backend/app/services/crawler/arxiv_crawler.py`](backend/app/services/crawler/arxiv_crawler.py:15)）
   - 待实现：

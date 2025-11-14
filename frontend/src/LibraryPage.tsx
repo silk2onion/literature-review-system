@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type PaperResponse = {
   id: number;
@@ -40,7 +40,11 @@ type SearchLocalResponse = {
 
 type TaskStatus = "idle" | "running" | "done" | "error";
 
-const API_BASE_URL = "http://localhost:5555";
+type SortField = "year" | "title" | "firstAuthor" | "source" | "createdAt";
+type SortOrder = "asc" | "desc";
+type SourceFilter = "all" | "arxiv" | "crossref";
+
+const API_BASE_URL = "http://localhost:5444";
 
 export default function LibraryPage() {
   const [query, setQuery] = useState<string>("urban design");
@@ -55,7 +59,103 @@ export default function LibraryPage() {
   const [taskStatus, setTaskStatus] = useState<TaskStatus>("idle");
   const [taskMessage, setTaskMessage] = useState<string>("");
 
+  // 排序 & 筛选状态
+  const [sortField, setSortField] = useState<SortField>("year");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [filterSource, setFilterSource] = useState<SourceFilter>("all");
+  const [filterYearFromInput, setFilterYearFromInput] = useState<string>("");
+  const [filterYearToInput, setFilterYearToInput] = useState<string>("");
+  const [filterTitleInitial, setFilterTitleInitial] = useState<string>("");
+  const [filterAuthorInitial, setFilterAuthorInitial] = useState<string>("");
+
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 1;
+
+  // 本地排序 + 筛选后的结果
+  const filteredAndSortedItems = useMemo(() => {
+    let result = [...items];
+
+    // 来源筛选
+    if (filterSource !== "all") {
+      result = result.filter((p) => p.source === filterSource);
+    }
+
+    // 年份筛选（独立于上面的后端 year_from/year_to，再做细化）
+    const yf =
+      filterYearFromInput.trim() === ""
+        ? undefined
+        : Number(filterYearFromInput.trim());
+    const yt =
+      filterYearToInput.trim() === ""
+        ? undefined
+        : Number(filterYearToInput.trim());
+
+    if (Number.isFinite(yf)) {
+      result = result.filter((p) => (p.year ?? 0) >= (yf as number));
+    }
+    if (Number.isFinite(yt)) {
+      result = result.filter((p) => (p.year ?? 9999) <= (yt as number));
+    }
+
+    // 标题首字母筛选
+    if (filterTitleInitial.trim()) {
+      const ch = filterTitleInitial.trim().toLowerCase();
+      result = result.filter((p) =>
+        (p.title || "").trim().toLowerCase().startsWith(ch),
+      );
+    }
+
+    // 第一作者首字母筛选
+    if (filterAuthorInitial.trim()) {
+      const ch = filterAuthorInitial.trim().toLowerCase();
+      result = result.filter((p) => {
+        const firstAuthor =
+          p.authors && p.authors.length > 0 ? p.authors[0] : "";
+        return firstAuthor.trim().toLowerCase().startsWith(ch);
+      });
+    }
+
+    // 排序
+    const getKey = (p: PaperResponse): string | number => {
+      switch (sortField) {
+        case "year":
+          return p.year ?? 0;
+        case "title":
+          return (p.title || "").toLowerCase();
+        case "firstAuthor": {
+          const firstAuthor =
+            p.authors && p.authors.length > 0 ? p.authors[0] : "";
+          return firstAuthor.toLowerCase();
+        }
+        case "source":
+          return (p.source || "").toLowerCase();
+        case "createdAt":
+          return p.created_at || "";
+        default:
+          return 0;
+      }
+    };
+
+    result.sort((a, b) => {
+      const dir = sortOrder === "asc" ? 1 : -1;
+      const ka = getKey(a);
+      const kb = getKey(b);
+
+      if (ka < kb) return -1 * dir;
+      if (ka > kb) return 1 * dir;
+      return 0;
+    });
+
+    return result;
+  }, [
+    items,
+    sortField,
+    sortOrder,
+    filterSource,
+    filterYearFromInput,
+    filterYearToInput,
+    filterTitleInitial,
+    filterAuthorInitial,
+  ]);
 
   const fetchData = async (opts?: { resetPage?: boolean }) => {
     try {
@@ -403,7 +503,7 @@ export default function LibraryPage() {
               </tr>
             </thead>
             <tbody>
-              {items.length === 0 && !loading && (
+              {filteredAndSortedItems.length === 0 && !loading && (
                 <tr>
                   <td
                     colSpan={5}
@@ -417,7 +517,7 @@ export default function LibraryPage() {
                   </td>
                 </tr>
               )}
-              {items.map((p) => (
+              {filteredAndSortedItems.map((p) => (
                 <tr
                   key={p.id}
                   style={{
@@ -512,6 +612,15 @@ export default function LibraryPage() {
                         style={{ color: "#38bdf8" }}
                       >
                         DOI
+                      </a>
+                    ) : p.source === "arxiv" && p.arxiv_id ? (
+                      <a
+                        href={`https://arxiv.org/abs/${p.arxiv_id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: "#38bdf8" }}
+                      >
+                        arXiv
                       </a>
                     ) : p.url ? (
                       <a
