@@ -47,3 +47,18 @@ class CrawlJobRunOnceResponse(BaseModel):
     new_papers: int = Field(..., description="本次新增入库的文献数")
     total_fetched: int = Field(..., description="该任务累计抓取文献数")
     message: Optional[str] = None
+
+
+class LatestJobStatusResponse(BaseModel):
+    """最新任务状态响应 (用于前端轮询)"""
+    job_id: int
+    type: Literal['crawl', 'review']  # 匹配前端类型定义
+    status: JobStatus
+    message: str
+    progress_percent: Optional[float] = None
+
+
+class CrawlJobListResponse(BaseModel):
+    """抓取任务列表响应，用于任务列表页"""
+    total: int = Field(..., description="符合条件的任务总数")
+    items: List[CrawlJobResponse] = Field(..., description="当前页的任务列表")

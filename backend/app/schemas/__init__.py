@@ -21,9 +21,18 @@ from .review import (
     ReviewFullExport,
 )
 from .crawl_job import (
+    JobStatus,
     CrawlJobCreate,
     CrawlJobResponse,
     CrawlJobRunOnceResponse,
+    LatestJobStatusResponse,
+    CrawlJobListResponse,
+)
+from .semantic_search import (
+    SemanticSearchRequest,
+    SemanticSearchItem,
+    SemanticSearchDebug,
+    SemanticSearchResponse,
 )
 
 __all__ = [
@@ -45,7 +54,15 @@ __all__ = [
     "ReviewGenerateResponse",
     "ReviewFullExport",
     # crawl job
+    "JobStatus",
     "CrawlJobCreate",
     "CrawlJobResponse",
     "CrawlJobRunOnceResponse",
+    "LatestJobStatusResponse",
+    "CrawlJobListResponse",
+    # semantic search
+    "SemanticSearchRequest",
+    "SemanticSearchItem",
+    "SemanticSearchDebug",
+    "SemanticSearchResponse",
 ]

@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-4"
 
+    # Embedding 模型配置（默认使用 OpenAI 兼容的 embedding 模型）
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+
     # 可选：预设多个模型名称，方便在代码中做校验或切换
     SUPPORTED_LLM_MODELS: List[str] = [
         "gpt-4",
@@ -49,12 +52,28 @@ class Settings(BaseSettings):
         "qwen-turbo",
         "llama-3-70b",
     ]
+
+    SUPPORTED_EMBEDDING_MODELS: List[str] = [
+        "text-embedding-3-small",
+        "text-embedding-3-large",
+    ]
     
     # 爬虫配置
     CRAWLER_DELAY_MIN: int = 1
     CRAWLER_DELAY_MAX: int = 3
     CRAWLER_MAX_RETRIES: int = 3
     CRAWLER_TIMEOUT: int = 30
+
+    # 外部文献数据源配置（预留）
+    # SerpAPI - Google Scholar 代理
+    SERPAPI_API_KEY: str = ""
+    SERPAPI_SCHOLAR_ENABLED: bool = False
+    SERPAPI_SCHOLAR_ENGINE: str = "google_scholar"
+
+    # Scopus API（低等级）预留
+    SCOPUS_ENABLED: bool = False
+    SCOPUS_API_KEY: str = ""
+    SCOPUS_API_BASE_URL: str = "https://api.elsevier.com/content/search/scopus"
     
     # 文件存储路径
     PAPERS_DIR: str = "../data/papers"

@@ -1,6 +1,11 @@
 """
 CrossRef 文献爬虫服务
 通过官方 CrossRef REST API 获取正式出版物元数据
+
+期刊与收录信息支持边界：
+- CrossRef 提供期刊/会议名称 container-title 及部分出版商信息；
+- 不直接提供影响因子、JCR 分区或 SCI/SSCI 等收录平台标记，
+  这些高级期刊指标需要通过外部 Journal/Index 数据库进行补充。
 """
 import logging
 from typing import List, Optional
