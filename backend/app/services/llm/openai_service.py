@@ -22,8 +22,24 @@ class OpenAIService:
             api_key=settings.OPENAI_API_KEY,
             base_url=settings.OPENAI_BASE_URL
         )
-        self.model = settings.OPENAI_MODEL
-    
+
+    @property
+    def model(self) -> str:
+        """
+        当前使用的主 LLM 模型名称。
+
+        为了支持运行时通过 /api/settings/models 调整模型，这里每次访问时
+        都从 settings 读取最新的 OPENAI_MODEL，而不是在 __init__ 时固定。
+        """
+        return getattr(self.settings, "OPENAI_MODEL", "gpt-4")
+
+    @property
+    def model_name(self) -> str:
+        """
+        向后兼容属性，供调用方记录本次调用所使用的模型名称。
+        """
+        return self.model
+     
     async def generate_review_framework(
         self,
         keywords: List[str],
@@ -151,15 +167,16 @@ class OpenAIService:
         for idx, p in enumerate(papers, start=1):
             title = p.title or "Untitled"
             authors = ""
-            if getattr(p, "authors", None):
+            authors_value: Any = getattr(p, "authors", None)
+            if authors_value:
                 # authors 在模型里是 JSON，统一转成字符串
-                if isinstance(p.authors, list):
-                    authors = ", ".join(p.authors[:3])
+                if isinstance(authors_value, list):
+                    authors = ", ".join(str(a) for a in authors_value[:3])
                 else:
-                    authors = str(p.authors)
+                    authors = str(authors_value)
             year = getattr(p, "year", None)
             line = f"{idx}. {title}"
-            meta = []
+            meta: List[str] = []
             if authors:
                 meta.append(f"作者: {authors}")
             if year:
@@ -232,7 +249,7 @@ class OpenAIService:
             topics=topics,
         )
 
-    def _split_markdown_and_json(self, full_text: str) -> (str, Optional[str]):
+    def _split_markdown_and_json(self, full_text: str) -> tuple[str, Optional[str]]:
         """
         从 LLM 返回的文本中切分出:
         - markdown 部分
@@ -264,14 +281,20 @@ class OpenAIService:
         keywords_str = "、".join(keywords)
         
         # 提取文献摘要
-        paper_summaries = []
+        paper_summaries: List[str] = []
         for i, paper in enumerate(papers[:20], 1):  # 最多使用20篇文献
             summary = f"{i}. {paper.title}\n"
-            if paper.authors:
-                authors = ", ".join(paper.authors[:3])  # 最多显示3位作者
-                summary += f"   作者: {authors}\n"
-            if paper.abstract:
-                abstract = paper.abstract[:300] + "..." if len(paper.abstract) > 300 else paper.abstract
+            authors_value: Any = getattr(paper, "authors", None)
+            if authors_value:
+                if isinstance(authors_value, list):
+                    authors_str = ", ".join(str(a) for a in authors_value[:3])
+                else:
+                    authors_str = str(authors_value)
+                summary += f"   作者: {authors_str}\n"
+            abstract_value: Any = getattr(paper, "abstract", None)
+            if abstract_value:
+                abstract_text = str(abstract_value)
+                abstract = abstract_text[:300] + "..." if len(abstract_text) > 300 else abstract_text
                 summary += f"   摘要: {abstract}\n"
             paper_summaries.append(summary)
         
@@ -309,18 +332,25 @@ class OpenAIService:
     ) -> str:
         """构建生成详细内容的prompt"""
         # 提取文献详细信息
-        paper_details = []
+        paper_details: List[str] = []
         for i, paper in enumerate(papers[:20], 1):
             detail = f"{i}. **{paper.title}**\n"
-            if paper.authors:
-                authors = ", ".join(paper.authors)
-                detail += f"   - 作者: {authors}\n"
-            if paper.year:
-                detail += f"   - 年份: {paper.year}\n"
-            if paper.journal:
-                detail += f"   - 期刊: {paper.journal}\n"
-            if paper.abstract:
-                detail += f"   - 摘要: {paper.abstract}\n"
+            authors_value: Any = getattr(paper, "authors", None)
+            if authors_value:
+                if isinstance(authors_value, list):
+                    authors_str = ", ".join(str(a) for a in authors_value)
+                else:
+                    authors_str = str(authors_value)
+                detail += f"   - 作者: {authors_str}\n"
+            year_value: Any = getattr(paper, "year", None)
+            if year_value is not None:
+                detail += f"   - 年份: {year_value}\n"
+            journal_value: Any = getattr(paper, "journal", None)
+            if journal_value:
+                detail += f"   - 期刊: {journal_value}\n"
+            abstract_value: Any = getattr(paper, "abstract", None)
+            if abstract_value:
+                detail += f"   - 摘要: {abstract_value}\n"
             paper_details.append(detail)
         
         papers_text = "\n".join(paper_details)
@@ -357,13 +387,14 @@ class OpenAIService:
             文献摘要
         """
         try:
-            if not paper.abstract:
+            abstract_value: Any = getattr(paper, "abstract", None)
+            if not abstract_value:
                 return "暂无摘要"
             
             prompt = f"""请用2-3句话总结以下文献的核心贡献和主要发现：
 
 标题：{paper.title}
-摘要：{paper.abstract}
+摘要：{abstract_value}
 
 要求：简洁、准确、突出创新点。"""
             
@@ -377,9 +408,16 @@ class OpenAIService:
                 max_tokens=200
             )
             
-            summary = response.choices[0].message.content
-            return summary
+            summary = response.choices[0].message.content or ""
+            if summary:
+                return summary
+            
+            # 如果 LLM 没有返回内容，则回退到截断摘要
+            abstract_text = str(abstract_value)
+            return abstract_text[:200] if abstract_text else "暂无摘要"
             
         except Exception as e:
             logger.error(f"总结文献失败: {e}")
-            return paper.abstract[:200] if paper.abstract else "暂无摘要"
+            abstract_value: Any = getattr(paper, "abstract", None)
+            abstract_text = str(abstract_value) if abstract_value is not None else ""
+            return abstract_text[:200] if abstract_text else "暂无摘要"

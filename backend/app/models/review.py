@@ -23,6 +23,7 @@ class Review(Base):
     framework = Column(JSON)  # 综述框架结构（大纲）
     content = Column(Text)  # 综述正文内容
     abstract = Column(Text)  # 综述摘要
+    analysis_json = Column(JSON)  # 结构化分析数据（例如 timeline / topics），用于前端可视化
     
     # 状态
     status = Column(String(50), default="draft")  # draft, generating, completed, failed
@@ -55,9 +56,9 @@ class Review(Base):
             "language": self.language,
             "paper_count": self.paper_count,
             "word_count": self.word_count,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at is not None else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at is not None else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at is not None else None,
         }
         
         # 内容可能很大，按需包含

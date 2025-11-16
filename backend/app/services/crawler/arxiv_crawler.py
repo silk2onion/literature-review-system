@@ -1,6 +1,10 @@
 """
 Arxiv爬虫服务
 使用官方arxiv API，稳定可靠
+
+期刊与收录信息支持边界：
+- Arxiv 不提供期刊影响因子或 JCR 分区等评价指标；
+- 仅提供学科分类 categories，期刊分区和收录平台信息需通过后续外部期刊数据库进行增强。
 """
 import arxiv
 import logging
@@ -182,13 +186,22 @@ class ArxivCrawler:
         Returns:
             下载的文件路径或None
         """
-        if not paper.pdf_url:
-            logger.warning(f"文献缺少PDF链接: {paper.title}")
+        # 显式取出运行时字段值，避免静态类型分析将其视为 Column[str]
+        pdf_url = getattr(paper, "pdf_url", None)
+        title = getattr(paper, "title", "")
+        arxiv_id_value = getattr(paper, "arxiv_id", None)
+
+        if not pdf_url:
+            logger.warning(f"文献缺少PDF链接: {title}")
+            return None
+
+        if not arxiv_id_value:
+            logger.warning("文献缺少 Arxiv ID，无法下载 PDF")
             return None
         
         try:
             # 使用arxiv库的下载功能
-            search = arxiv.Search(id_list=[paper.arxiv_id])
+            search = arxiv.Search(id_list=[str(arxiv_id_value)])
             result = next(self.client.results(search))
             
             # 下载PDF
@@ -197,5 +210,5 @@ class ArxivCrawler:
             return str(pdf_path)
             
         except Exception as e:
-            logger.error(f"PDF下载失败 (ID: {paper.arxiv_id}): {e}")
+            logger.error(f"PDF下载失败 (ID: {arxiv_id_value}): {e}")
             return None

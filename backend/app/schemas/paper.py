@@ -15,6 +15,10 @@ class PaperBase(BaseModel):
     year: Optional[int] = Field(default=None, description="发表年份")
     journal: Optional[str] = Field(default=None, description="期刊名称")
     venue: Optional[str] = Field(default=None, description="发表场所")
+    journal_issn: Optional[str] = Field(default=None, description="期刊 ISSN")
+    journal_impact_factor: Optional[float] = Field(default=None, description="期刊影响因子")
+    journal_quartile: Optional[str] = Field(default=None, description="期刊分区（如 JCR Q1-Q4 等）")
+    indexing: Optional[List[str]] = Field(default=None, description="收录平台（如 SCI、SSCI、Scopus、CSSCI 等）")
     doi: Optional[str] = Field(default=None, description="DOI")
     arxiv_id: Optional[str] = Field(default=None, description="Arxiv ID")
     pmid: Optional[str] = Field(default=None, description="PubMed ID")
@@ -40,6 +44,10 @@ class PaperUpdate(BaseModel):
     year: Optional[int] = None
     journal: Optional[str] = None
     venue: Optional[str] = None
+    journal_issn: Optional[str] = None
+    journal_impact_factor: Optional[float] = None
+    journal_quartile: Optional[str] = None
+    indexing: Optional[List[str]] = None
     doi: Optional[str] = None
     arxiv_id: Optional[str] = None
     pmid: Optional[str] = None
@@ -115,8 +123,8 @@ class PaperSearchLocal(BaseModel):
     page_size: int = Field(
         default=20,
         ge=1,
-        le=100,
-        description="每页数量，建议不超过 100"
+        le=200,
+        description="每页数量，建议不超过 200"
     )
 
     class Config:

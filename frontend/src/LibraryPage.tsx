@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import CitationGraphPanel from "./CitationGraphPanel";
 
 type PaperResponse = {
   id: number;
@@ -40,14 +41,18 @@ type SearchLocalResponse = {
 
 type TaskStatus = "idle" | "running" | "done" | "error";
 
-const API_BASE_URL = "http://localhost:5555";
+type SortField = "year" | "title" | "firstAuthor" | "source" | "createdAt";
+type SortOrder = "asc" | "desc";
+type SourceFilter = "all" | "arxiv" | "crossref";
+
+const API_BASE_URL = "http://localhost:5444";
 
 export default function LibraryPage() {
-  const [query, setQuery] = useState<string>("urban design");
-  const [yearFrom, setYearFrom] = useState<string>("2015");
-  const [yearTo, setYearTo] = useState<string>("2025");
+  const [query, setQuery] = useState<string>("");
+  const [yearFrom, setYearFrom] = useState<string>("");
+  const [yearTo, setYearTo] = useState<string>("");
   const [page, setPage] = useState<number>(1);
-  const [pageSize] = useState<number>(20);
+  const [pageSize, setPageSize] = useState<number>(20);
 
   const [total, setTotal] = useState<number>(0);
   const [items, setItems] = useState<PaperResponse[]>([]);
@@ -55,15 +60,120 @@ export default function LibraryPage() {
   const [taskStatus, setTaskStatus] = useState<TaskStatus>("idle");
   const [taskMessage, setTaskMessage] = useState<string>("");
 
+  const [selectedPaperId, setSelectedPaperId] = useState<number | null>(null);
+  const [selectedPaperTitle, setSelectedPaperTitle] = useState<string>("");
+
+  // 排序 & 筛选状态
+  const [sortField, setSortField] = useState<SortField>("year");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [filterSource, setFilterSource] = useState<SourceFilter>("all");
+  const [filterYearFromInput, setFilterYearFromInput] = useState<string>("");
+  const [filterYearToInput, setFilterYearToInput] = useState<string>("");
+  const [filterTitleInitial, setFilterTitleInitial] = useState<string>("");
+  const [filterAuthorInitial, setFilterAuthorInitial] = useState<string>("");
+
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 1;
 
-  const fetchData = async (opts?: { resetPage?: boolean }) => {
+  // 本地排序 + 筛选后的结果
+  const filteredAndSortedItems = useMemo(() => {
+    let result = [...items];
+
+    // 来源筛选
+    if (filterSource !== "all") {
+      result = result.filter((p) => p.source === filterSource);
+    }
+
+    // 年份筛选（独立于上面的后端 year_from/year_to，再做细化）
+    const yf =
+      filterYearFromInput.trim() === ""
+        ? undefined
+        : Number(filterYearFromInput.trim());
+    const yt =
+      filterYearToInput.trim() === ""
+        ? undefined
+        : Number(filterYearToInput.trim());
+
+    if (Number.isFinite(yf)) {
+      result = result.filter((p) => (p.year ?? 0) >= (yf as number));
+    }
+    if (Number.isFinite(yt)) {
+      result = result.filter((p) => (p.year ?? 9999) <= (yt as number));
+    }
+
+    // 标题首字母筛选
+    if (filterTitleInitial.trim()) {
+      const ch = filterTitleInitial.trim().toLowerCase();
+      result = result.filter((p) =>
+        (p.title || "").trim().toLowerCase().startsWith(ch),
+      );
+    }
+
+    // 第一作者首字母筛选
+    if (filterAuthorInitial.trim()) {
+      const ch = filterAuthorInitial.trim().toLowerCase();
+      result = result.filter((p) => {
+        const firstAuthor =
+          p.authors && p.authors.length > 0 ? p.authors[0] : "";
+        return firstAuthor.trim().toLowerCase().startsWith(ch);
+      });
+    }
+
+    // 排序
+    const getKey = (p: PaperResponse): string | number => {
+      switch (sortField) {
+        case "year":
+          return p.year ?? 0;
+        case "title":
+          return (p.title || "").toLowerCase();
+        case "firstAuthor": {
+          const firstAuthor =
+            p.authors && p.authors.length > 0 ? p.authors[0] : "";
+          return firstAuthor.toLowerCase();
+        }
+        case "source":
+          return (p.source || "").toLowerCase();
+        case "createdAt":
+          return p.created_at || "";
+        default:
+          return 0;
+      }
+    };
+
+    result.sort((a, b) => {
+      const dir = sortOrder === "asc" ? 1 : -1;
+      const ka = getKey(a);
+      const kb = getKey(b);
+
+      if (ka < kb) return -1 * dir;
+      if (ka > kb) return 1 * dir;
+      return 0;
+    });
+
+    return result;
+  }, [
+    items,
+    sortField,
+    sortOrder,
+    filterSource,
+    filterYearFromInput,
+    filterYearToInput,
+    filterTitleInitial,
+    filterAuthorInitial,
+  ]);
+
+  const fetchData = async (opts?: { resetPage?: boolean; page?: number }) => {
     try {
       setLoading(true);
       setTaskStatus("running");
       setTaskMessage("正在从本地文献库检索...");
 
-      const effectivePage = opts?.resetPage ? 1 : page;
+      // 目标页优先由显式传入的 page 决定，其次是 resetPage，再其次是当前状态中的 page
+      const effectivePage =
+        typeof opts?.page === "number"
+          ? opts.page
+          : opts?.resetPage
+          ? 1
+          : page;
 
       const payload: SearchLocalRequest = {
         q: query.trim() || undefined,
@@ -100,10 +210,14 @@ export default function LibraryPage() {
           1,
         )} 页`,
       );
-    } catch (err: any) {
+    } catch (err) {
       console.error("search-local error", err);
       setTaskStatus("error");
-      setTaskMessage(`检索失败：${err?.message || "未知错误"}`);
+      setTaskMessage(
+        `检索失败：${
+          (err as { message?: string })?.message || "未知错误"
+        }`,
+      );
     } finally {
       setLoading(false);
     }
@@ -124,16 +238,20 @@ export default function LibraryPage() {
 
   const handlePrevPage = () => {
     if (page <= 1 || loading) return;
-    const nextPage = page - 1;
-    setPage(nextPage);
-    fetchData().catch((e) => console.error("prev page error", e));
+    const targetPage = page - 1;
+    // 直接把目标页传给 fetchData，避免依赖异步的 setPage
+    fetchData({ page: targetPage }).catch((e) =>
+      console.error("prev page error", e),
+    );
   };
 
   const handleNextPage = () => {
     if (page >= totalPages || loading) return;
-    const nextPage = page + 1;
-    setPage(nextPage);
-    fetchData().catch((e) => console.error("next page error", e));
+    const targetPage = page + 1;
+    // 同理：显式传入下一页页码
+    fetchData({ page: targetPage }).catch((e) =>
+      console.error("next page error", e),
+    );
   };
 
   const renderTaskBadge = () => {
@@ -217,20 +335,42 @@ export default function LibraryPage() {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label style={{ fontSize: 12, color: "#9ca3af" }}>关键词</label>
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="例如：urban design, generative, complexity..."
-            style={{
-              minWidth: 260,
-              padding: "6px 8px",
-              borderRadius: 6,
-              border: "1px solid #334155",
-              backgroundColor: "#020617",
-              color: "#e5e7eb",
-              fontSize: 13,
-            }}
-          />
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="例如：urban design, public space, generative..."
+              style={{
+                minWidth: 260,
+                padding: "6px 24px 6px 8px",
+                borderRadius: 6,
+                border: "1px solid #334155",
+                backgroundColor: "#020617",
+                color: "#e5e7eb",
+                fontSize: 13,
+              }}
+            />
+            {query.trim() !== "" && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                style={{
+                  position: "absolute",
+                  right: 6,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  border: "none",
+                  background: "transparent",
+                  color: "#9ca3af",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -291,6 +431,178 @@ export default function LibraryPage() {
         </button>
       </section>
 
+      <section
+        style={{
+          padding: 12,
+          borderRadius: 8,
+          backgroundColor: "#020617",
+          border: "1px solid #1f2937",
+          display: "flex",
+          alignItems: "flex-end",
+          gap: 12,
+          flexWrap: "wrap",
+          marginTop: 16,
+        }}
+      >
+        <h3
+          style={{
+            width: "100%",
+            fontSize: 14,
+            fontWeight: 600,
+            color: "#e5e7eb",
+            marginBottom: 4,
+          }}
+        >
+          本地筛选与排序 (基于当前页数据)
+        </h3>
+
+        {/* 排序字段 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 12, color: "#9ca3af" }}>排序字段</label>
+          <select
+            value={sortField}
+            onChange={(e) => setSortField(e.target.value as SortField)}
+            style={{
+              width: 120,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: "1px solid #334155",
+              backgroundColor: "#020617",
+              color: "#e5e7eb",
+              fontSize: 13,
+            }}
+          >
+            <option value="year">年份</option>
+            <option value="title">标题</option>
+            <option value="firstAuthor">第一作者</option>
+            <option value="source">来源</option>
+            <option value="createdAt">添加时间</option>
+          </select>
+        </div>
+
+        {/* 排序顺序 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 12, color: "#9ca3af" }}>排序顺序</label>
+          <select
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as SortOrder)}
+            style={{
+              width: 80,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: "1px solid #334155",
+              backgroundColor: "#020617",
+              color: "#e5e7eb",
+              fontSize: 13,
+            }}
+          >
+            <option value="desc">降序</option>
+            <option value="asc">升序</option>
+          </select>
+        </div>
+
+        {/* 来源筛选 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 12, color: "#9ca3af" }}>来源筛选</label>
+          <select
+            value={filterSource}
+            onChange={(e) => setFilterSource(e.target.value as SourceFilter)}
+            style={{
+              width: 100,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: "1px solid #334155",
+              backgroundColor: "#020617",
+              color: "#e5e7eb",
+              fontSize: 13,
+            }}
+          >
+            <option value="all">全部</option>
+            <option value="arxiv">arXiv</option>
+            <option value="crossref">CrossRef</option>
+          </select>
+        </div>
+
+        {/* 本地起始年份筛选 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 12, color: "#9ca3af" }}>本地起始年份</label>
+          <input
+            value={filterYearFromInput}
+            onChange={(e) => setFilterYearFromInput(e.target.value)}
+            placeholder="2015"
+            type="number"
+            style={{
+              width: 90,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: "1px solid #334155",
+              backgroundColor: "#020617",
+              color: "#e5e7eb",
+              fontSize: 13,
+            }}
+          />
+        </div>
+
+        {/* 本地结束年份筛选 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 12, color: "#9ca3af" }}>本地结束年份</label>
+          <input
+            value={filterYearToInput}
+            onChange={(e) => setFilterYearToInput(e.target.value)}
+            placeholder="2025"
+            type="number"
+            style={{
+              width: 90,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: "1px solid #334155",
+              backgroundColor: "#020617",
+              color: "#e5e7eb",
+              fontSize: 13,
+            }}
+          />
+        </div>
+
+        {/* 标题首字母筛选 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 12, color: "#9ca3af" }}>标题首字母</label>
+          <input
+            value={filterTitleInitial}
+            onChange={(e) => setFilterTitleInitial(e.target.value)}
+            placeholder="A, B, C..."
+            maxLength={1}
+            style={{
+              width: 80,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: "1px solid #334155",
+              backgroundColor: "#020617",
+              color: "#e5e7eb",
+              fontSize: 13,
+            }}
+          />
+        </div>
+
+        {/* 作者首字母筛选 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 12, color: "#9ca3af" }}>作者首字母</label>
+          <input
+            value={filterAuthorInitial}
+            onChange={(e) => setFilterAuthorInitial(e.target.value)}
+            placeholder="A, B, C..."
+            maxLength={1}
+            style={{
+              width: 80,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: "1px solid #334155",
+              backgroundColor: "#020617",
+              color: "#e5e7eb",
+              fontSize: 13,
+            }}
+          />
+        </div>
+      </section>
       <section
         style={{
           flex: 1,
@@ -400,13 +712,25 @@ export default function LibraryPage() {
                 >
                   链接
                 </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "8px 12px",
+                    borderBottom: "1px solid #1f2937",
+                    fontWeight: 500,
+                    color: "#9ca3af",
+                    width: 100,
+                  }}
+                >
+                  引用图
+                </th>
               </tr>
             </thead>
             <tbody>
-              {items.length === 0 && !loading && (
+              {filteredAndSortedItems.length === 0 && !loading && (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     style={{
                       padding: "16px 12px",
                       textAlign: "center",
@@ -417,7 +741,7 @@ export default function LibraryPage() {
                   </td>
                 </tr>
               )}
-              {items.map((p) => (
+              {filteredAndSortedItems.map((p) => (
                 <tr
                   key={p.id}
                   style={{
@@ -513,6 +837,15 @@ export default function LibraryPage() {
                       >
                         DOI
                       </a>
+                    ) : p.source === "arxiv" && p.arxiv_id ? (
+                      <a
+                        href={`https://arxiv.org/abs/${p.arxiv_id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: "#38bdf8" }}
+                      >
+                        arXiv
+                      </a>
                     ) : p.url ? (
                       <a
                         href={p.url}
@@ -525,6 +858,24 @@ export default function LibraryPage() {
                     ) : (
                       "-"
                     )}
+                  </td>
+                  <td
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: 12,
+                      color: "#9ca3af",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="link-button small"
+                      onClick={() => {
+                        setSelectedPaperId(p.id);
+                        setSelectedPaperTitle(p.title);
+                      }}
+                    >
+                      查看引用
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -542,10 +893,39 @@ export default function LibraryPage() {
             fontSize: 12,
           }}
         >
-          <span style={{ color: "#9ca3af" }}>
-            显示第 {(page - 1) * pageSize + 1} -{" "}
-            {Math.min(page * pageSize, total)} 条
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ color: "#9ca3af" }}>
+              显示第 {(page - 1) * pageSize + 1} -{" "}
+              {Math.min(page * pageSize, total)} 条
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ color: "#6b7280" }}>每页</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  const newSize = Number(e.target.value) || 20;
+                  setPage(1);
+                  setPageSize(newSize);
+                  fetchData({ resetPage: true }).catch((err) =>
+                    console.error("change page size error", err),
+                  );
+                }}
+                style={{
+                  padding: "4px 6px",
+                  borderRadius: 6,
+                  border: "1px solid #334155",
+                  backgroundColor: "#020617",
+                  color: "#e5e7eb",
+                  fontSize: 12,
+                }}
+              >
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+              </select>
+            </div>
+          </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button
               onClick={handlePrevPage}
@@ -583,6 +963,12 @@ export default function LibraryPage() {
             </button>
           </div>
         </div>
+        {selectedPaperId !== null && (
+          <CitationGraphPanel
+            paperId={selectedPaperId}
+            title={selectedPaperTitle}
+          />
+        )}
       </section>
     </div>
   );

@@ -223,7 +223,7 @@
     - `log: JSON`（错误、告警、统计）
   - 后端落地位置建议：`backend/app/models/crawl_job.py` + 对应 schema 和 CRUD。
 
-- [ ] 给每个数据源设计独立 crawler/service，并抽象 Orchestrator
+- [x] 给每个数据源设计独立 crawler/service，并抽象 Orchestrator
   - 已有：
     - `ArxivCrawler`（[`backend/app/services/crawler/arxiv_crawler.py`](backend/app/services/crawler/arxiv_crawler.py:15)）
   - 待实现：
@@ -410,6 +410,25 @@
       - 手动编辑章节文本；
       - 再调用 LLM 做 rewrite / polish；
       - 版本记录（至少在 DB 层记录 updated_at、status）。
+
+### 7. 引用图系统（三阶段：结构化源 + LLM 解析 + 订阅源）
+
+- [ ] Phase 1：Crossref + OpenAlex 引用图（核心结构化源）+ 基础可视化
+  - [x] 实现 Crossref 引用同步服务，基于 DOI 从 Crossref 抓取 reference 列表，匹配本地 Paper 并写入 PaperCitation，更新 citations_count。
+    - 2025-11-15 完成，已在 [`CitationIngestService.sync_citations_for_paper()`](backend/app/services/citation_ingest.py:190) 中实现 Crossref 引用同步管线。
+  - [x] 实现自中心引用图服务与 API，返回 `nodes` + `edges` + `stats` 结构。
+    - 2025-11-15 完成，已在 [`CitationGraphService.get_ego_graph()`](backend/app/services/citation_graph.py:30) 与 [`get_citation_ego_graph()`](backend/app/api/citations.py:24) 中提供 `GET /api/citations/ego-graph/{paper_id}`。
+  - [x] 在前端实现单论文引用图面板，并与本地文献库集成。
+    - 2025-11-15 完成，已在 [`CitationGraphPanel.tsx`](frontend/src/CitationGraphPanel.tsx:1) 和 [`LibraryPage.tsx`](frontend/src/LibraryPage.tsx:1) 中提供每篇文献的“查看引用”入口与引用图统计视图。
+  - [ ] 接入 OpenAlex 引用数据源：通过 DOI 获取 OpenAlex ID 和 referenced_works，映射回本地 Paper 并写入 PaperCitation（`source="openalex"`），与 Crossref 结果合并去重。
+
+- [ ] Phase 2：PDF/HTML + LLM 解析引用 + 源/置信度可视化
+  - 设计 `CitationLLMExtractService`（新服务模块），从本地 PDF/HTML 提取参考文献文本，调用现有 LLM 接口解析为结构化引用列表，匹配本地 Paper 并写入 PaperCitation（`source="llm_parsed_pdf"`，含 `confidence` 与部分原始引用字符串存入 `source_meta`）。
+  - 在 `GET /api/citations/ego-graph/{paper_id}` 中支持按 `source`、`min_confidence` 等参数过滤边，前端引用图面板增加来源/置信度过滤控件，并用线型/透明度区分 Crossref/OpenAlex 与 LLM 解析来源。
+
+- [ ] Phase 3：接入 Scopus 等订阅源 + 多源叠加可视化
+  - 在现有 [`scopus_crawler`](backend/app/services/crawler/scopus_crawler.py:1) 基础上增加引用同步能力，将 Scopus 引用写入 PaperCitation（`source="scopus"`），并在 `CitationIngestService` 中串联 Crossref / OpenAlex / Scopus 引用同步与去重。
+  - 在前端引用图面板中，用不同颜色/线型区分各来源边，并展示 `stats.by_source`（按 source 聚合的引用数量），形成多源叠加的引用视图。
 
 ---
 

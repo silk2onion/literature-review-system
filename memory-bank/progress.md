@@ -1,0 +1,30 @@
+# Progress - 城市设计文献综述系统
+
+## 1. 历史进展摘要
+
+- [2025-??] 项目初始化：创建 backend/frontend 基础结构，完成 FastAPI 主应用与 React 前端骨架。
+- [2025-??] 实现 Arxiv 爬虫与多源抓取 V2（Scholar SerpAPI / Scopus 占位）、去重入库与 CrawlJob 管线。
+- [2025-??] 建立 LLM 接入层并实现综述生成服务（框架 + 正文 + 结构化统计）。
+- [2025-??] 前端完成文献库、综述助手、抓取任务列表、数据源设置弹窗等核心页面。
+
+## 2. 当前阶段进度
+
+- [2025-11-15 04:35:16] 初始化 Memory Bank（productContext, activeContext）。
+- [2025-11-15 04:37:24] 补充 systemPatterns 与 decisionLog，记录 FastAPI 架构与 RAG 初始决策。
+- [2025-11-15 04:37:50] 进入“RAG + 语义检索 + 可视化”规划阶段，准备梳理实施 TODO 并回写到系统 todo 列表。
+
+## 3. 下一步里程碑（概览）
+
+- 完成 RAG 第一阶段：
+  - 为 Paper 批量生成 embedding；
+  - 实现 SemanticSearchService 并通过 HTTP API 暴露；
+  - 在综述生成流程中接入 RAG 开关与语义检索。
+- 完成 RAG 第二阶段：
+  - 设计并实现 WebSocket 语义检索流式接口；
+  - 在前端增加 RAG 可视化调试面板并接入检索流。
+- 在 RAG 稳定后，继续推进：文献分组、导出/下载、期刊信息增强等功能。
+
+## 4. 备注
+
+- 本文件用于记录阶段性进展，不替代正式需求 / 架构文档；
+- 与 todo 列表配合使用：todo 记录“将做什么”，progress 记录“已经完成了什么以及何时完成”。

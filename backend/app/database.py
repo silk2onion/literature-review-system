@@ -39,7 +39,7 @@ def init_db():
     创建所有表
     """
     # 导入所有模型以确保它们被注册
-    from app.models import paper, review
+    from app import models  # noqa: F401
     
     # 创建所有表
     Base.metadata.create_all(bind=engine)

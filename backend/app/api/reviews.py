@@ -18,6 +18,7 @@ from app.models import Review
 from app.database import SessionLocal, get_db
 from app.config import settings
 from app.utils.cache import review_cache
+from app.services.review import generate_review as core_generate_review
 
 router = APIRouter(
     prefix="/api/reviews",
@@ -54,104 +55,24 @@ async def generate_review(payload: ReviewGenerate, db: Session = Depends(get_db)
     """
     生成文献综述（前端“生成文献综述”按钮调用的接口）
 
-    开发策略：
-    1. 先按当前逻辑创建一条占位 Review，保证 DB 结构不变；
-    2. 调用 OpenAIService.generate_lit_review 接入 LLM；
-    3. 用 LLM 的 markdown 覆盖原来的占位 framework；
-    4. 捕获异常，返回 success=False，而不是抛出 500，从而避免 CORS 报错。
+    新版实现：
+    - 直接调用核心服务 app.services.review.generate_review
+    - 在核心服务内部：
+      * 调用 LLM 生成 markdown + timeline + topics
+      * 将 summary_stats 持久化到 Review.analysis_json
+      * 返回包含 summary_stats 的 ReviewGenerateResponse
+    - 此处只负责接入 FastAPI 依赖注入和异常处理
     """
-    from datetime import datetime
-    from app.models.paper import Paper
-    from app.services.llm.openai_service import OpenAIService
-    from app.schemas.review import LitReviewLLMResult
-
-    # 0. 构造缓存 key，先看是否已有完成的综述可直接复用
-    # 只要生成参数完全相同，就视为同一任务
-    cache_key = review_cache.make_key(
-        "review_generate",
-        tuple(sorted(payload.keywords or [])),
-        int(payload.paper_limit),
-        int(payload.year_from) if payload.year_from else None,
-        int(payload.year_to) if payload.year_to else None,
-        payload.custom_prompt or "",
-    )
-
-    cached = review_cache.get(cache_key)
-    if cached is not None:
-        # 直接复用缓存中的 ReviewGenerateResponse
-        return cached
-
-    # 1. 先按旧逻辑创建占位框架，避免破坏现有行为
-    framework_md = "```markdown\n"
-    framework_md += "# 自动生成的城市设计文献综述占位框架\n\n"
-    framework_md += f"- 关键词: {', '.join(payload.keywords)}\n"
-    framework_md += f"- 文献数量上限: {payload.paper_limit}\n"
-    framework_md += "```"
-
-    review = Review(
-        title=" / ".join(payload.keywords),
-        keywords="; ".join(payload.keywords),
-        framework=framework_md,  # type: ignore[arg-type]
-        content=None,
-        # 注意：这里直接写字符串状态，保持和当前 Review 模型一致
-        status="generating",
-        paper_count=0,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-    db.add(review)
-    db.commit()
-    db.refresh(review)
-
-    # 2. 接入 LLM：即便失败也要用 try/except 包住，避免 500
-    llm_service = OpenAIService(settings=settings)
-
-    # TODO：后续按 ToDo 把真正检索到的 Paper 列表接进来，目前先传空列表以保证流程可用
-    papers: list[Paper] = []
-
     try:
-        llm_result: LitReviewLLMResult = await llm_service.generate_lit_review(
-            keywords=payload.keywords,
-            papers=papers,
-            custom_prompt=payload.custom_prompt,
-            year_from=payload.year_from,
-            year_to=payload.year_to,
-        )
-
-        # 用 LLM 生成的 markdown 覆盖原来的占位框架
-        # 这里通过 getattr/setattr 避免 Pylance 把 ORM Column 类型误判为字段类型
-        setattr(review, "framework", llm_result.markdown)
-        setattr(review, "updated_at", datetime.utcnow())
-        db.commit()
-        db.refresh(review)
-
-        # 将部分关键信息直接返回给前端，便于即时预览
-        summary_stats: dict[str, Any] = {
-            "timeline": [t.model_dump() for t in llm_result.timeline],
-            "topics": [t.model_dump() for t in llm_result.topics],
-        }
-
-        resp = ReviewGenerateResponse(
-            success=True,
-            review_id=int(getattr(review, "id")),
-            # 这里直接返回字符串，避免依赖枚举具体成员名，类型检查用 ignore
-            status="generating",  # type: ignore[arg-type]
-            message="LLM 文献综述生成成功",
-            preview_markdown=llm_result.markdown,
-            summary_stats=summary_stats,
-        )
-
-        # 写入缓存，下次相同参数可以直接复用
-        review_cache.set(cache_key, resp)
-
+        resp = await core_generate_review(db=db, payload=payload)
         return resp
     except Exception as e:
-        # 这里不抛出异常，避免 500 + 没有 CORS 头，前端只需看 success 字段
+        # 兜底保护，避免直接抛出 500 导致前端 CORS 错误
         return ReviewGenerateResponse(
             success=False,
-            review_id=int(getattr(review, "id")),
+            review_id=0,
             status="error",  # type: ignore[arg-type]
-            message=f"LLM 生成失败: {e}",
+            message=f"综述生成接口失败: {e}",
         )
 
 

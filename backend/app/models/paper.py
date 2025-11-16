@@ -3,7 +3,7 @@
 """
 from sqlalchemy import Column, Integer, String, Text, Date, JSON, DateTime, Float
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, date
 
 from app.database import Base
 
@@ -25,6 +25,10 @@ class Paper(Base):
     year = Column(Integer, index=True)  # 发表年份
     journal = Column(String(200))  # 期刊/会议名称
     venue = Column(String(200))  # 发表场所
+    journal_issn = Column(String(50))  # 期刊 ISSN
+    journal_impact_factor = Column(Float)  # 期刊影响因子（来自外部期刊数据库）
+    journal_quartile = Column(String(20))  # 期刊分区（如 JCR Q1-Q4 等）
+    indexing = Column(JSON)  # 收录平台列表，例如 ["SCI", "SSCI", "Scopus"]
     
     # 标识信息
     doi = Column(String(100), unique=True, index=True)  # DOI
@@ -63,6 +67,10 @@ class Paper(Base):
             "year": self.year,
             "journal": self.journal,
             "venue": self.venue,
+            "journal_issn": self.journal_issn,
+            "journal_impact_factor": self.journal_impact_factor,
+            "journal_quartile": self.journal_quartile,
+            "indexing": self.indexing,
             "doi": self.doi,
             "arxiv_id": self.arxiv_id,
             "pmid": self.pmid,

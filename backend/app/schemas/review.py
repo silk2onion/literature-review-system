@@ -42,6 +42,11 @@ class ReviewResponse(ReviewBase):
     id: int
     status: ReviewStatus
     paper_count: int = Field(default=0, description="关联的文献数量")
+    # 与模型 Review.analysis_json 对应：结构化分析数据（timeline/topics等）
+    analysis_json: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="结构化分析数据，例如 timeline / topics，与 LLM 结构化输出对应"
+    )
     created_at: datetime
     updated_at: datetime
     
