@@ -1,193 +1,229 @@
-# 文献综述系统
+# 城市设计文献综述助手（爬虫 + LLM + RAG）
 
-LLM智能文献综述生成系统。
+本项目是一个面向城市设计 / 城市规划研究者的端到端系统，从多源爬虫抓取文献、构建本地文献库，到调用大模型自动生成中文或英文的文献综述，并提供可视化的 RAG 语义检索与调试能力。
 
-## 🎯 项目特点
+当前代码已经可以在本地端到端跑通：关键词检索 → 多源抓取 → 暂存库审核 → 正式文献库 → LLM 生成综述 → RAG 语义检索调试。本文档用于快速了解目前有哪些功能、如何使用，以及 RAG 子系统的设计与使用说明。
 
-- **多源文献检索**：支持 Google Scholar、Arxiv、PubMed 等多个学术数据库
-- **智能LLM集成**：兼容 OpenAI API 格式的各种大语言模型
-- **自动综述生成**：AI自动生成文献综述框架和详细内容
-- **现代化界面**：React + TypeScript + Ant Design 构建
-- **高性能后端**：FastAPI + SQLAlchemy + Redis 缓存
-- **灵活部署**：支持本地开发和Docker容器化部署
+## 1. 项目结构与角色
 
-## 📋 技术栈
+- 后端服务：基于 FastAPI + SQLite，负责
+  - 文献抓取与入库
+  - 本地文献检索与管理
+  - LLM 综述生成
+  - 向量 embedding 与语义检索（RAG）
+  - 各类调试 / 管理 API
+- 前端应用：基于 React + TypeScript + Vite，提供
+  - 综述助手页（关键词检索 + 一键生成综述）
+  - 文献库页面（筛选、分页浏览文献）
+  - 暂存库页面（审核抓取结果，提升到正式库）
+  - 抓取任务列表页（查看任务状态、重试、暂停等）
+  - RAG 可视化调试面板（实时查看语义检索结果与激活语义组）
+- 数据与模型层：
+  - Paper / StagingPaper：正式文献库与暂存库
+  - Review：每一篇综述的框架、正文与结构化分析数据
+  - CrawlJob：批量抓取任务
+  - Tag / TagGroup / PaperTag：标签与标签组
+  - PaperCitation：文献引用关系
+  - RecallLog：记录每次综述生成时的文献召回情况
 
-### 后端
-- **框架**：FastAPI 0.104+
-- **数据库**：SQLite (开发) / PostgreSQL (生产)
-- **缓存**：Redis
-- **爬虫**：BeautifulSoup, Selenium, Scholarly, Arxiv
-- **LLM**：OpenAI API (兼容格式)
+## 2. 功能总览
 
-### 前端
-- **框架**：React 18
-- **语言**：TypeScript
-- **UI库**：Ant Design
-- **状态管理**：Redux Toolkit
-- **HTTP客户端**：Axios
+### 2.1 文献抓取与本地库管理
 
-## 🚀 快速开始
+- 支持按关键词、年份范围、数据源组合（如 arxiv、scholar_serpapi、scopus）发起批量抓取任务。
+- 统一通过抓取任务（CrawlJob）执行多轮分页抓取，并在后台持续入库。
+- 所有抓取结果先写入暂存库（StagingPaper），经过人工审核后再提升到正式文献库（Paper）。
+- Paper 中包含标题、作者、摘要、年份、来源、DOI 等元数据，并预留 pdf_path、期刊分区、收录平台等字段。
+- 暂存库与正式库查询接口支持按关键词、批次、状态等条件分页筛选。
 
-### 前置要求
+### 2.2 LLM 文献综述生成
 
-- Python 3.9+
-- Node.js 16+
-- Redis (可选，用于缓存)
+- 支持通过“综述助手”页面输入主题关键词、年份范围、数据源与文献上限，系统会自动：
+  - 检索并召回一批候选文献；
+  - 调用 LLM 生成结构化的综述文本（默认一步式）；
+  - 将结果保存为 Review 记录，包含
+    - 综述正文（Markdown）
+    - 结构化分析数据（时间轴、主题聚类等）写入 analysis_json
+    - 与使用到的文献的关联关系（Review 与 Paper 的多对多关系）
+- 已预留 PhD 级多阶段综述管线的入口：
+  - 可以选择“启用 PhD 级多阶段管线”，先生成综述框架再生成正文；
+  - 可以选择“仅生成框架”，方便你先打磨章节结构与写作计划；
+- 后续会在此基础上接入“章节级 RAG + 引用管线”，提高引用的准确性与可追溯性。
 
-### 后端安装
+### 2.3 RAG 语义检索（当前能力）
 
-```bash
-# 进入后端目录
-cd backend
+- 对正式库中的每篇文献生成向量 embedding（基于标题与摘要），存入数据库。
+- 提供语义检索 API：输入自然语言查询与筛选条件，返回 top K 相似文献以及相似度分数。
+- 提供 RAG WebSocket 调试接口：以流式方式推送语义检索过程中的中间结果（partial_result、done、error）。
+- 前端提供“RAG 可视化调试”面板：
+  - 实时查看检索到的文献列表、相似度、激活的语义组标签等信息。
+  - 支持多次查询 / 会话，便于对比不同检索参数的效果。
 
-# 创建虚拟环境
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+## 3. 环境准备与启动方式
 
-# 安装依赖
-pip install -r requirements.txt
+### 3.1 依赖环境
 
-# 复制环境变量文件
-cp .env.example .env
+- 操作系统：macOS / Linux / Windows（开发环境已在 macOS 上验证）。
+- 必需组件：
+  - Python 3.10+（推荐使用虚拟环境）
+  - Node.js 18+ 与 npm 或 pnpm
+  - 一个兼容 OpenAI 的大模型服务（可为官方 OpenAI，也可为自建兼容服务），并配置好 API Key 与模型名称。
 
-# 编辑 .env 文件，配置你的 OpenAI API Key
-# OPENAI_API_KEY=your-api-key-here
-```
+### 3.2 启动后端服务
 
-### 启动后端
+1. 进入 [backend 目录](backend/)，安装依赖：
 
-```bash
-# 在 backend 目录下
-cd backend
-source venv/bin/activate
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   ```
 
-# 方式1: 使用 uvicorn
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+2. 配置环境变量：
+   - 在 [backend 目录](backend/)下创建 [.env](backend/.env) 文件，配置：
+     - 数据库路径（若不配置则使用默认 SQLite 文件）
+     - LLM 服务的 API 地址与 Key
+     - 默认使用的 LLM 模型与 embedding 模型名称
 
-# 方式2: 直接运行 main.py
-python -m app.main
-```
+3. 启动 FastAPI 应用（开发模式）：
 
-后端将在 http://localhost:8000 启动
-- API文档：http://localhost:8000/api/docs
-- 健康检查：http://localhost:8000/api/health
+   ```bash
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 5444
+   ```
 
-### 前端安装（稍后）
+启动成功后，后端 API 默认监听在 http://localhost:5444 。
 
-```bash
-# 进入前端目录
-cd frontend
+### 3.3 启动前端应用
 
-# 安装依赖
-npm install
+1. 进入 [frontend 目录](frontend/)并安装依赖：
 
-# 启动开发服务器
-npm start
-```
+   ```bash
+   cd frontend
+   npm install
+   ```
 
-前端将在 http://localhost:3000 启动
+2. 启动开发服务器：
 
-## 📚 项目结构
+   ```bash
+   npm run dev
+   ```
 
-```
-literature-review-system/
-├── backend/                    # 后端代码
-│   ├── app/
-│   │   ├── api/               # API路由
-│   │   ├── models/            # 数据库模型
-│   │   ├── services/          # 业务逻辑
-│   │   │   ├── crawler/      # 爬虫服务
-│   │   │   ├── llm/          # LLM服务
-│   │   │   └── review/       # 综述生成
-│   │   ├── schemas/          # Pydantic模型
-│   │   ├── utils/            # 工具函数
-│   │   ├── config.py         # 配置管理
-│   │   ├── database.py       # 数据库连接
-│   │   └── main.py           # 主应用
-│   ├── tests/                # 测试代码
-│   ├── requirements.txt      # Python依赖
-│   └── .env.example         # 环境变量示例
-├── frontend/                  # 前端代码
-│   ├── src/
-│   │   ├── components/      # React组件
-│   │   ├── pages/           # 页面
-│   │   ├── services/        # API服务
-│   │   └── store/           # Redux状态
-│   └── package.json
-├── data/                     # 数据存储
-│   ├── papers/              # 文献PDF
-│   └── exports/             # 导出文件
-├── docs/                     # 文档
-├── docker/                   # Docker配置
-└── README.md
-```
+3. 在浏览器中访问 Vite 输出的本地地址（通常是 http://localhost:5173），即可看到前端界面。
 
-## 🔧 配置说明
+## 4. 使用指南
 
-### 环境变量配置
+### 4.1 从关键词到第一篇综述
 
-在 `backend/.env` 文件中配置：
+1. 打开前端首页，进入“综述助手”视图。
+2. 在顶部输入栏中填写：
+   - 主题关键词（例如：transit oriented development，或中文城市设计主题）
+   - 起止年份与文献上限
+   - 勾选需要使用的数据源（如 arxiv、scholar_serpapi、scopus）。
+3. 点击检索按钮，系统会拉取并展示候选文献列表。
+4. 确认文献列表大致符合预期后，点击“基于以上文献生成综述”按钮：
+   - 默认模式：一步式生成完整综述。
+   - 启用 PhD 管线：先生成大纲，再生成完整正文。
+   - 仅框架模式：只生成大纲，用于设计章节结构与写作计划。
+5. 生成完成后，左侧对话流中会出现一条包含综述内容的消息，并在预览区域显示 Markdown 格式文本与结构化分析结果。
 
-```env
-# OpenAI API配置
-OPENAI_API_KEY=your-api-key-here
-OPENAI_BASE_URL=https://api.openai.com/v1
+### 4.2 文献库与暂存库管理
 
-# 使用其他兼容API（如Azure OpenAI、本地模型）
-# OPENAI_BASE_URL=https://your-api-endpoint/v1
+- “暂存库”页面：
+  - 查看最近各个抓取任务的原始结果；
+  - 根据关键词、批次、状态筛选文献；
+  - 将确认无误的文献一键提升为正式库文献（StagingPaper → Paper）。
+- “文献库”页面：
+  - 按关键词、年份、来源、是否同行评议等条件组合查询；
+  - 支持分页浏览与后续扩展的批量操作（如加入分组、归档等）。
 
-# 数据库配置
-DATABASE_URL=sqlite:///./literature.db
+在提升到正式库时，系统会自动为新文献生成或更新 embedding，保持向量检索与元数据同步。
 
-# Redis配置（可选）
-REDIS_HOST=localhost
-REDIS_PORT=6379
-```
+### 4.3 抓取任务管理
 
-## 📖 API文档
+- “抓取任务”页面展示已有 CrawlJob 列表：
+  - 每个任务的关键词、数据源、时间范围、抓取数量、失败数量与当前状态；
+  - 支持查看任务日志、失败原因，后续可支持暂停与重试；
+- 顶部全局状态条会轮询最新任务进度，并在任务完成或失败时给出提示。
 
-启动后端后，访问 http://localhost:8000/api/docs 查看完整的API文档。
+### 4.4 RAG 可视化调试面板
 
-### 主要接口
+当前 RAG 调试面板主要用于研究与调参，典型使用方式：
 
-- `POST /api/papers/search` - 搜索文献
-- `GET /api/papers/{id}` - 获取文献详情
-- `POST /api/reviews/generate` - 生成综述
-- `GET /api/reviews/{id}` - 获取综述
-- `POST /api/reviews/{id}/export` - 导出综述
+1. 在前端打开“RAG 调试”视图。
+2. 输入一个自然语言检索语句（如“紧凑城市形态对步行性和公共空间活力的影响”），并选择是否启用语义组扩展。
+3. 发送查询后，面板会通过 WebSocket 接收流式结果：
+   - 分批展示检索到的文献条目及其相似度；
+   - 显示哪些语义组被激活；
+4. 用于观察当前 embedding 模型与语义组配置下的召回质量，为后续改进提供依据。
 
-## 🧪 开发进度
+## 5. RAG 系统手册
 
-- [x] 项目结构搭建
-- [x] 后端基础框架
-- [x] 数据库模型设计
-- [ ] 文献爬虫实现
-- [ ] LLM服务集成
-- [ ] API接口开发
-- [ ] 前端页面开发
-- [ ] 综述生成功能
-- [ ] 导出功能
-- [ ] 测试和优化
+### 5.1 设计目标
 
-## 📝 待办事项
+- 将“关键词检索 + 传统过滤”升级为“语义检索 + 标签 / 引用增强”的混合召回方案。
+- 在综述生成前，为每个章节或问题召回一组高相关文献，作为 LLM 的“证据上下文”。
+- 为后续的“引用可靠性控制”打基础：每一个引用都能追溯到一组具体文献或文本片段。
 
-查看 [architecture.md](architecture.md) 了解详细的系统架构设计
+### 5.2 当前实现能力
 
-查看 [implementation-guide.md](implementation-guide.md) 了解具体实现细节
+1. 向量生成与存储：
+   - 为正式库中的每篇文献生成 embedding，并存入数据库。
+   - 统一封装向量生成服务，确保新文献入库时自动补齐 embedding。
+2. 语义检索 API：
+   - 提供 HTTP 接口，接受查询文本与筛选条件，返回 top K 相似文献与相关调试信息。
+3. RAG WebSocket 调试接口：
+   - 按会话 ID 分批推送检索结果，支持多轮查询与调试。
+4. 前端 RAG 调试面板：
+   - 显示每次查询的检索结果、相似度与激活语义组；
+   - 未来可扩展为与综述助手联动，在生成综述前先直观看到“证据文献池”。
 
-查看 [tech-stack-options.md](tech-stack-options.md) 了解技术选型对比
+### 5.3 未来扩展：章节级 RAG + 引用管线（设计阶段）
 
-## 🤝 贡献指南
+目前已经完成方案设计，尚未进入实现阶段，核心思路如下：
 
-欢迎提交 Issue 和 Pull Request！
+1. 按章节 / 问题粒度构造查询：
+   - 对每个章节标题与问题描述生成 RAG 查询；
+   - 在向量空间中检索一批最相关的文献卡片（标题、作者、摘要、年份等）。
+2. LLM 在“文献卡片集合”内生成章节文本并嵌入引用：
+   - 严格要求只引用这批卡片对应的文献；
+   - 使用统一的数字编号格式，例如 [1]、[2,5]，避免编造新文献。
+3. 系统负责编号映射与参考文献列表：
+   - 将编号映射回数据库中的 paper_id；
+   - 由系统根据元数据渲染参考文献条目，而不是由 LLM 自己写参考文献列表。
+4. 进一步扩展为“文本片段级 RAG”：
+   - 在接入 PDF 解析后，将论文分段做 embedding；
+   - 对于需要“直接引用”的结论或数据，先 RAG 找到对应文本片段，再让 LLM 生成带页码的引文句子。
 
-## 📄 许可证
+该设计将作为后续 PhD 级多阶段综述管线的重要组成部分，用于提升引用的准确性与可追溯性。
 
- CC BY-NC License
+## 6. 已完成功能概览（简要）
 
----
+- 后端基础：
+  - FastAPI 服务与基础路由（健康检查、版本信息）。
+  - SQLite 数据库与核心数据模型（Paper、Review、CrawlJob、StagingPaper、Tag 等）。
+- 多源爬虫与抓取任务：
+  - Arxiv / ScholarSerpAPI / Scopus 等多源抓取封装。
+  - CrawlJob 批量抓取任务与任务列表页面。
+- 文献库：
+  - 暂存库 + 正式库的两阶段入库与审核流程。
+  - 本地文献检索与分页展示。
+- LLM 综述：
+  - 一步式结构化综述生成（含 timeline / topics）。
+  - PhD 级多阶段管线入口（框架优先 + 框架 + 正文）。
+- 向量检索与 RAG：
+  - 文献 embedding 生成与存储。
+  - 向量检索服务、HTTP API 与 WebSocket 调试接口。
+  - 前端 RAG 可视化调试面板。
 
-**当前版本**: v1.0.0 (开发中)
+## 7. 后续开发方向（与本 README 相关的部分）
 
-**最后更新**: 2025-11-14
+- 在综述生成流程中接入章节级 RAG：
+  - 每个章节生成前先用 RAG 召回若干文献卡片；
+  - LLM 只在这些文献范围内写作并嵌入引用编号。
+- 建立“论点–证据”结构：
+  - Review 的 analysis_json 中保存每个论点与 supporting_papers 列表；
+  - 前端支持从结论反查支撑它的文献。
+- 引用校验工具：
+  - 自动解析综述中的引用编号；
+  - 校验是否都能映射到真实文献，标记潜在异常。
+
+这些工作完成后，本系统将从“自动写综述”进一步升级为“证据可追溯、引用可审计”的学术辅助工具，更适合博士论文与高质量综述写作场景。

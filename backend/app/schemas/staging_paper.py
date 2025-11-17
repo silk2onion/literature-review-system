@@ -80,3 +80,19 @@ class StagingPaperSearchResponse(BaseModel):
     total: int
     items: List[StagingPaperResponse]
     message: Optional[str] = None
+
+
+class StagingPaperPromoteRequest(BaseModel):
+    """暂存文献提升请求模型"""
+    ids: List[int] = Field(
+        ...,
+        min_length=1,
+        description="待提升为正式库的 StagingPaper ID 列表",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "ids": [1, 2, 3],
+            }
+        }

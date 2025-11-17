@@ -74,20 +74,6 @@ def run_job_once(
     )
 
 
-@router.get("/jobs/{job_id}", response_model=CrawlJobResponse)
-def get_job(
-    job_id: int,
-    db: Session = Depends(get_db),
-) -> CrawlJobResponse:
-    """
-    查询指定任务进度：抓取篇数、失败条数、当前状态、参与的数据源。
-    """
-    job = db.query(CrawlJob).filter(CrawlJob.id == job_id).first()
-    if job is None:
-        raise HTTPException(status_code=404, detail="抓取任务不存在")
-    return CrawlJobResponse.model_validate(job)
-
-
 @router.get("/jobs", response_model=CrawlJobListResponse)
 def list_jobs(
     status: Optional[JobStatus] = None,
@@ -105,7 +91,7 @@ def list_jobs(
     )
 
 
-@router.get("/jobs/latest_status", response_model=LatestJobStatusResponse)
+@router.get("/jobs/latest_status", response_model=Optional[LatestJobStatusResponse])
 def get_latest_job_status(
     db: Session = Depends(get_db),
 ) -> Optional[LatestJobStatusResponse]:
@@ -118,6 +104,20 @@ def get_latest_job_status(
     """
     status = get_latest_crawl_job_status(db)
     return status
+
+
+@router.get("/jobs/{job_id}", response_model=CrawlJobResponse)
+def get_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+) -> CrawlJobResponse:
+    """
+    查询指定任务进度：抓取篇数、失败条数、当前状态、参与的数据源。
+    """
+    job = db.query(CrawlJob).filter(CrawlJob.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="抓取任务不存在")
+    return CrawlJobResponse.model_validate(job)
 
 
 @router.post("/jobs/{job_id}/pause", response_model=CrawlJobResponse)

@@ -141,6 +141,72 @@ class CitationIngestService:
 
         return None
 
+    def _create_placeholder_paper_for_reference(
+        self,
+        db: Session,
+        ref_norm: Dict[str, Optional[object]],
+    ) -> Optional[int]:
+        """
+        当引用在本地未匹配到任何 Paper 且包含 DOI 时，基于引用信息创建一个占位 Paper。
+
+        只填充最小必要字段：
+        - title: 尽量使用引用中的标题；若缺失则回退到 DOI
+        - year: 引用中解析出的年份（可为空）
+        - doi: 引用 DOI
+        - source: 标记为 crossref_citation_only，便于后续区分
+        """
+        doi = ref_norm.get("doi")
+        if not isinstance(doi, str) or not doi.strip():
+            return None
+
+        doi_norm = doi.strip().lower()
+
+        # 双重保障：再次确认不存在同 DOI 的 Paper（避免并发下重复插入）
+        existing = (
+            db.query(Paper)
+            .filter(Paper.doi.isnot(None))
+            .filter(Paper.doi.ilike(doi_norm))
+            .first()
+        )
+        if existing is not None:
+            pid = getattr(existing, "id", None)
+            return pid if isinstance(pid, int) else None
+
+        raw_title = ref_norm.get("title")
+        title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else doi_norm
+        year = ref_norm.get("year") if isinstance(ref_norm.get("year"), int) else None
+
+        paper = Paper(
+            title=title,
+            authors=[],
+            abstract=None,
+            publication_date=None,
+            year=year,
+            journal=None,
+            venue=None,
+            journal_issn=None,
+            journal_impact_factor=None,
+            journal_quartile=None,
+            indexing=None,
+            doi=doi_norm,
+            arxiv_id=None,
+            pmid=None,
+            url=None,
+            pdf_url=None,
+            pdf_path=None,
+            source="crossref_citation_only",
+            categories=None,
+            keywords=None,
+            citations_count=0,
+            embedding=None,
+        )
+        db.add(paper)
+        # 只 flush 不 commit，由上层 sync_citations_for_paper 统一提交
+        db.flush()
+
+        pid = getattr(paper, "id", None)
+        return pid if isinstance(pid, int) else None
+
     def _ensure_citation_edge(
         self,
         db: Session,
@@ -226,8 +292,15 @@ class CitationIngestService:
         for ref in raw_refs:
             ref_norm = self._normalize_crossref_reference(ref)
             target_id = self._resolve_reference_to_paper_id(db, paper, ref_norm)
+
+            # 如果在本地未找到匹配 Paper，但引用中包含 DOI，则尝试基于引用信息创建占位 Paper
             if target_id is None:
+                target_id = self._create_placeholder_paper_for_reference(db, ref_norm)
+
+            if target_id is None:
+                # 仍未获得有效的目标论文 ID，跳过该引用
                 continue
+
             matched += 1
             if self._ensure_citation_edge(
                 db,

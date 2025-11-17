@@ -4,6 +4,7 @@ import CrawlJobsPage from './CrawlJobsPage'
 import LibraryPage from './LibraryPage'
 import SemanticSearchDebugPanel from './SemanticSearchDebugPanel'
 import SettingsModal from './SettingsModal'
+import StagingPapersPage from './StagingPapersPage'
 
 const API_BASE_URL = 'http://localhost:5444'
 
@@ -81,7 +82,9 @@ interface JobStatus {
 
 
 function App() {
-  const [activeView, setActiveView] = useState<'review' | 'library' | 'jobs' | 'rag'>('review')
+  const [activeView, setActiveView] = useState<'review' | 'library' | 'staging' | 'jobs' | 'rag'>(
+    'review',
+  )
   const [showSettings, setShowSettings] = useState(false)
 
   // 综述助手主搜索区：默认不预填内容
@@ -90,6 +93,8 @@ function App() {
   const [yearTo, setYearTo] = useState('')
   const [limit, setLimit] = useState('20')
   const [selectedSources, setSelectedSources] = useState<DataSourceId[]>(['arxiv'])
+  const [phdPipelineEnabled, setPhdPipelineEnabled] = useState(false)
+  const [frameworkOnlyEnabled, setFrameworkOnlyEnabled] = useState(false)
 
   const toggleSource = (id: DataSourceId) => {
     setSelectedSources(prev => {
@@ -256,6 +261,7 @@ function App() {
     year_from?: number
     year_to?: number
     framework_only: boolean
+    phd_pipeline: boolean
     custom_prompt: string | null
   }
 
@@ -304,7 +310,8 @@ function App() {
         sources: sourcesToUse,
         year_from: yearFromNum,
         year_to: yearToNum,
-        framework_only: false,
+        framework_only: frameworkOnlyEnabled,
+        phd_pipeline: phdPipelineEnabled,
         custom_prompt: null,
       }
 
@@ -414,6 +421,17 @@ function App() {
               onClick={() => setActiveView('library')}
             >
               文献库
+            </button>
+            <button
+              type="button"
+              className={
+                activeView === 'staging'
+                  ? 'view-switch-btn active'
+                  : 'view-switch-btn'
+              }
+              onClick={() => setActiveView('staging')}
+            >
+              暂存文献库
             </button>
             <button
               type="button"
@@ -537,6 +555,43 @@ function App() {
                       onChange={() => toggleSource('crossref')}
                     />
                     <span style={{ marginLeft: 4 }}>Crossref</span>
+                  </label>
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      marginLeft: 8,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={phdPipelineEnabled}
+                      onChange={() =>
+                        setPhdPipelineEnabled(prev => {
+                          const next = !prev
+                          if (!next) {
+                            setFrameworkOnlyEnabled(false)
+                          }
+                          return next
+                        })
+                      }
+                    />
+                    <span style={{ marginLeft: 4 }}>启用 PhD 级多阶段管线</span>
+                  </label>
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      marginLeft: 8,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={frameworkOnlyEnabled}
+                      disabled={!phdPipelineEnabled}
+                      onChange={() => setFrameworkOnlyEnabled(prev => !prev)}
+                    />
+                    <span style={{ marginLeft: 4 }}>仅生成框架</span>
                   </label>
                   <button
                     type="button"
@@ -725,6 +780,8 @@ function App() {
               )
             })}
           </section>
+        ) : activeView === 'staging' ? (
+          <StagingPapersPage />
         ) : activeView === 'rag' ? (
           <SemanticSearchDebugPanel />
         ) : (

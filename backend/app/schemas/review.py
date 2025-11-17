@@ -117,6 +117,10 @@ class ReviewGenerate(BaseModel):
     year_from: Optional[int] = Field(default=None, description="起始年份")
     year_to: Optional[int] = Field(default=None, description="结束年份")
     framework_only: bool = Field(default=False, description="是否只生成框架")
+    phd_pipeline: bool = Field(
+        default=False,
+        description="是否启用 PhD 级多阶段综述管线（多阶段框架 + 章节级综述）",
+    )
     custom_prompt: Optional[str] = Field(
         default=None,
         description="自定义提示词；如不提供则使用后端默认 PromptConfig"
@@ -130,6 +134,7 @@ class ReviewGenerate(BaseModel):
                 "sources": ["arxiv"],
                 "year_from": 2020,
                 "framework_only": False,
+                "phd_pipeline": True,
                 "custom_prompt": "请重点关注城市公共空间与步行友好性研究"
             }
         }
@@ -169,3 +174,97 @@ class ReviewExport(BaseModel):
                 "include_references": True
             }
         }
+
+
+# ========== 章节级 PhD 管线：论点–证据 + RAG + 渲染 ==========
+class ClaimEvidence(BaseModel):
+    """
+    单条论点及其检索与证据信息
+    - claim_id: 在本章节内的局部编号
+    - text: 论点内容（自然语言）
+    - rag_query: 用于 RAG 的检索查询语句
+    - support_papers: 通过 RAG 命中的 Paper.id 列表
+    - support_snippets: 来自这些文献的简短片段/说明（可选）
+    """
+    claim_id: int = Field(..., description="本章节内的论点编号，从 1 开始")
+    text: str = Field(..., description="论点的自然语言描述")
+    rag_query: str = Field(..., description="用于向量检索 / RAG 的查询语句")
+    support_papers: List[int] = Field(default_factory=list, description="通过 RAG 命中的 Paper ID 列表")
+    support_snippets: List[str] = Field(default_factory=list, description="来自文献的简短片段或说明")
+
+
+class SectionClaimTable(BaseModel):
+    """
+    某一章节下的“论点–证据表”
+    - section_id: 章节的标识（可用综述内部的章节索引）
+    - section_title: 章节标题
+    - claims: 本章节内的所有论点行
+    """
+    section_id: str = Field(..., description="章节标识，例如 '1.2' 或 'methodology'")
+    section_title: str = Field(..., description="章节标题")
+    claims: List[ClaimEvidence] = Field(default_factory=list, description="本章节的论点–证据行")
+
+
+class GenerateSectionClaimsRequest(BaseModel):
+    """
+    阶段 1：根据章节提纲生成 SectionClaimTable 的请求
+    - review_id: 关联的综述 ID
+    - section_outline: 本章节的提纲/说明
+    - language: 输出语言（'zh-CN' 或 'en'）
+    """
+    review_id: int = Field(..., description="关联的综述 ID")
+    section_outline: str = Field(..., description="章节提纲或草稿内容")
+    language: str = Field(default="zh-CN", description="输出语言，例如 zh-CN 或 en")
+
+
+class GenerateSectionClaimsResponse(BaseModel):
+    """阶段 1 响应：返回生成的 SectionClaimTable"""
+    section_claim_table: SectionClaimTable
+
+
+class AttachEvidenceRequest(BaseModel):
+    """
+    阶段 2：为每条 claim 附加 RAG 证据的请求
+    - section_claim_table: 阶段 1 的输出
+    - top_k: 每条论点希望检索的文献数量
+    """
+    section_claim_table: SectionClaimTable
+    top_k: int = Field(default=5, ge=1, le=50, description="每条论点 RAG 检索的 top_k 文献数量")
+
+
+class AttachEvidenceResponse(BaseModel):
+    """阶段 2 响应：返回带 support_papers / support_snippets 的 SectionClaimTable"""
+    section_claim_table: SectionClaimTable
+
+
+class RenderedSection(BaseModel):
+    """
+    阶段 3：渲染后的章节结果
+    - text: 带引用编号的章节 Markdown/正文
+    - citation_map: 引用编号到 Paper.id 的映射，例如 {1: 12, 2: 35}
+    """
+    text: str = Field(..., description="渲染后的章节正文（Markdown 或纯文本），包含 [1][2,3] 等引用编号")
+    citation_map: Dict[int, int] = Field(
+        default_factory=dict,
+        description="引用编号到 Paper.id 的映射，例如 {1: 12, 2: 35}"
+    )
+
+
+class RenderSectionFromClaimsRequest(BaseModel):
+    """
+    阶段 3 请求：从带证据的 SectionClaimTable 渲染章节正文
+    - review_id: 关联综述 ID
+    - section_claim_table: 阶段 2 输出（已附加 support_papers）
+    - language: 输出语言
+    - citation_start_index: 本章节引用编号起始值（跨章节时可累加）
+    """
+    review_id: int = Field(..., description="关联的综述 ID")
+    section_claim_table: SectionClaimTable
+    language: str = Field(default="zh-CN", description="输出语言，例如 zh-CN 或 en")
+    citation_start_index: int = Field(default=1, ge=1, description="引用编号起始值")
+
+
+class RenderSectionFromClaimsResponse(BaseModel):
+    """阶段 3 响应：渲染后的章节与引用映射"""
+    section_id: str = Field(..., description="与 SectionClaimTable 一致的章节标识")
+    rendered_section: RenderedSection
