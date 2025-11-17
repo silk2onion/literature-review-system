@@ -13,7 +13,10 @@ from app.schemas.staging_paper import (
     StagingPaperResponse,
     StagingPaperSearch,
     StagingPaperSearchResponse,
+    StagingPaperPromoteRequest,
 )
+from app.schemas.paper import PaperResponse
+from app.services.paper_service import promote_staging_papers as promote_staging_papers_service
 
 router = APIRouter(prefix="/api/staging-papers", tags=["staging_papers"])
 
@@ -107,3 +110,27 @@ def get_staging_paper(
         raise HTTPException(status_code=404, detail="暂存文献不存在")
 
     return StagingPaperResponse.model_validate(paper)
+
+
+@router.post("/promote", response_model=List[PaperResponse])
+async def promote_staging_papers_endpoint(
+    payload: StagingPaperPromoteRequest,
+    db: Session = Depends(get_db),
+) -> List[PaperResponse]:
+    """
+    将一批暂存文献提升为正式文献。
+
+    - 根据传入的 StagingPaper ID 列表查询暂存库
+    - 调用服务层进行去重合并与 embedding 生成
+    - 返回对应的正式库 Paper 列表
+    """
+    records: List[StagingPaper] = (
+        db.query(StagingPaper)
+        .filter(StagingPaper.id.in_(payload.ids))
+        .all()
+    )
+    if not records:
+        raise HTTPException(status_code=404, detail="未找到要提升的暂存文献")
+
+    papers = await promote_staging_papers_service(db, records)
+    return [PaperResponse.model_validate(p) for p in papers]

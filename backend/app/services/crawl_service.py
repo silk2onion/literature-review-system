@@ -230,6 +230,18 @@ def get_latest_crawl_job_status(db: Session) -> Optional[LatestJobStatusResponse
     if not job:
         return None
 
+    # 对于已经结束很久的任务（completed / failed），不再返回状态，避免前端反复弹出提示
+    now = datetime.utcnow()
+    if job.updated_at is not None and job.status in ("completed", "failed"):
+        try:
+            # 使用 10 秒作为“最近完成”的阈值
+            delta = now - job.updated_at
+            if delta.total_seconds() > 10:
+                return None
+        except TypeError:
+            # 极端情况下 updated_at 不是 datetime，忽略时间判断
+            pass
+
     # 显式获取属性值并处理类型以避免 Pylance 错误
     max_results = job.max_results or 0
     fetched_count = job.fetched_count or 0

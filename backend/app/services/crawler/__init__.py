@@ -76,7 +76,9 @@ def search_across_sources(
             )
             raw_results.extend(part)
         except Exception as e:
+            # 调试阶段：如果某个数据源失败，直接抛出异常，方便在 API 层看到具体错误信息
             logger.error("Crawler %s 调用失败: %s", type(crawler).__name__, e)
+            raise
 
     # 轻量去重 + 主版本选择：
     # - 先按 "作品 identity" 聚合（优先使用 DOI；若无 DOI，则用 (title.lower(), year)）

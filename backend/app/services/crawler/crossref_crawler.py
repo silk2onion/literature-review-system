@@ -173,7 +173,7 @@ class CrossRefCrawler:
             doi=doi,
             journal=journal,
             pdf_url=None,  # CrossRef 不直接给 PDF 链接，这里留空
-            abs_url=url,
+            url=url,
             source="crossref",
         )
 
