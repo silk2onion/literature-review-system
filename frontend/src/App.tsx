@@ -76,7 +76,7 @@ function App() {
     'review-search' | 'review-generate' | 'library' | 'staging' | 'jobs' | 'rag' | 'phd-pipeline'
   >('review-search')
   const [showSettings, setShowSettings] = useState(false)
-  const [phdPipelineProps] = useState<Omit<PhdPipelinePageProps, 'onExit'> | null>(null)
+  const [phdPipelineProps, setPhdPipelineProps] = useState<Omit<PhdPipelinePageProps, 'onExit'> | null>(null)
 
   // 综述助手主搜索区：默认不预填内容
   const [keywordInput, setKeywordInput] = useState('')
@@ -494,7 +494,12 @@ function App() {
         {activeView === 'review-generate' ? (
           <ReviewGenerateFromLibraryPage />
         ) : activeView === 'library' ? (
-          <LibraryPage />
+          <LibraryPage
+            onGenerateReview={(groupId) => {
+              setPhdPipelineProps({ initialGroupId: groupId });
+              setActiveView('phd-pipeline');
+            }}
+          />
         ) : activeView === 'staging' ? (
           <StagingPapersPage />
         ) : activeView === 'rag' ? (

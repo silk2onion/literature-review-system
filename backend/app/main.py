@@ -114,6 +114,7 @@ app.include_router(citations_router)
 app.include_router(citation_analysis_router)
 app.include_router(journal_info_router)
 app.include_router(recall_logs_router)
+app.include_router(groups_router)
 app.include_router(settings_api.router)
 
 

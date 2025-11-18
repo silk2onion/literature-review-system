@@ -36,6 +36,7 @@ export interface PhdPipelinePageProps {
   initialPaperLimit?: number;
   initialSources?: string[];
   initialPaperIds?: number[];
+  initialGroupId?: number;
   onExit?: () => void;
   embedded?: boolean;
 }
@@ -50,6 +51,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   initialPaperLimit = 20,
   initialSources = ['arxiv', 'scholar_serpapi', 'scopus'],
   initialPaperIds = [],
+  initialGroupId,
   onExit,
   embedded = false,
 }) => {
@@ -62,9 +64,11 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   const [yearFrom, setYearFrom] = useState<string>(initialYearFrom?.toString() || '');
   const [yearTo, setYearTo] = useState<string>(initialYearTo?.toString() || '');
   const [paperLimit, setPaperLimit] = useState<string>(initialPaperLimit.toString());
+  const [sortBy, setSortBy] = useState<string>('year_desc');
   const [sources, setSources] = useState<string[]>(initialSources);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [paperIds, setPaperIds] = useState<number[]>(initialPaperIds);
+  const [groupId, setGroupId] = useState<number | undefined>(initialGroupId);
 
   // 各阶段的产出
   const [claims, setClaims] = useState<Claim[]>([]);
@@ -89,11 +93,15 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
         paper_limit: parseInt(paperLimit) || 20,
         year_start: yearFrom ? parseInt(yearFrom) : undefined,
         year_end: yearTo ? parseInt(yearTo) : undefined,
+        sort_by: sortBy,
       };
 
       if (paperIds.length > 0) {
         body.paper_ids = paperIds;
         // 当指定了 paper_ids 时，通常不需要再进行搜索，但保留 keywords 作为元数据
+      } else if (groupId) {
+        body.group_id = groupId;
+        // 当指定了 group_id 时，后端会优先使用该组下的文献
       }
 
       // 使用新的初始化接口，它会负责创建 Review -> 生成 Framework -> 生成 Claims
@@ -263,8 +271,26 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
         border: '1px solid #1f2937'
       }}>
         <h3 style={{ marginTop: 0, marginBottom: '16px', fontSize: '16px' }}>管线配置</h3>
+        
+        {groupId ? (
+          <div style={{
+            padding: '12px',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            border: '1px solid rgba(59, 130, 246, 0.3)',
+            borderRadius: '6px',
+            marginBottom: '16px',
+            color: '#93c5fd',
+            fontSize: '14px'
+          }}>
+            <strong>已选择文献分组 (ID: {groupId})</strong>
+            <p style={{ margin: '4px 0 0 0', fontSize: '13px', opacity: 0.9 }}>
+              将直接使用该分组下的文献生成综述。您可以调整下方的“文献数量上限”和“排序策略”来控制上下文长度。
+            </p>
+          </div>
+        ) : null}
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div>
+          <div style={{ opacity: groupId ? 0.5 : 1, pointerEvents: groupId ? 'none' : 'auto' }}>
             <label style={{ display: 'block', fontSize: '13px', color: '#9ca3af', marginBottom: '4px' }}>
               关键词 (逗号分隔)
             </label>
@@ -282,7 +308,8 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
               }}
             />
           </div>
-          <div style={{ marginBottom: '16px' }}>
+          
+          <div style={{ marginBottom: '16px', opacity: groupId ? 0.5 : 1, pointerEvents: groupId ? 'none' : 'auto' }}>
             <label style={{ display: 'block', fontSize: '13px', color: '#9ca3af', marginBottom: '4px' }}>
               数据源
             </label>
@@ -306,8 +333,8 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '16px' }}>
-            <div>
+          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+            <div style={{ opacity: groupId ? 0.5 : 1, pointerEvents: groupId ? 'none' : 'auto' }}>
               <label style={{ display: 'block', fontSize: '13px', color: '#9ca3af', marginBottom: '4px' }}>
                 起始年份
               </label>
@@ -326,7 +353,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
                 }}
               />
             </div>
-            <div>
+            <div style={{ opacity: groupId ? 0.5 : 1, pointerEvents: groupId ? 'none' : 'auto' }}>
               <label style={{ display: 'block', fontSize: '13px', color: '#9ca3af', marginBottom: '4px' }}>
                 结束年份
               </label>
@@ -362,6 +389,28 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
                   color: '#fff'
                 }}
               />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#9ca3af', marginBottom: '4px' }}>
+                排序策略
+              </label>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                style={{
+                  width: '140px',
+                  padding: '8px',
+                  borderRadius: '4px',
+                  border: '1px solid #334155',
+                  backgroundColor: '#1e293b',
+                  color: '#fff'
+                }}
+              >
+                <option value="year_desc">年份 (降序)</option>
+                <option value="year_asc">年份 (升序)</option>
+                <option value="citations_desc">引用数 (降序)</option>
+                <option value="random">随机</option>
+              </select>
             </div>
           </div>
         </div>

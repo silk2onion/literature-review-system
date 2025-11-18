@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import CitationGraphPanel from "./CitationGraphPanel";
 import GroupManager from "./GroupManager";
 import SemanticSearchDebugPanel from "./SemanticSearchDebugPanel";
-import { groupsApi, type LiteratureGroup } from "./api/groups";
+import { groupsApi } from "./api/groups";
+import type { LiteratureGroup } from "./types";
 
 type PaperResponse = {
   id: number;
@@ -60,7 +61,11 @@ type SourceFilter = "all" | "arxiv" | "crossref";
 
 const API_BASE_URL = "http://localhost:5444";
 
-export default function LibraryPage() {
+interface LibraryPageProps {
+  onGenerateReview?: (groupId: number) => void;
+}
+
+export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
   const [query, setQuery] = useState<string>("");
   const [yearFrom, setYearFrom] = useState<string>("");
   const [yearTo, setYearTo] = useState<string>("");
@@ -83,6 +88,7 @@ export default function LibraryPage() {
   const [restoring, setRestoring] = useState<boolean>(false);
   const [syncing, setSyncing] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
+  const [removingFromGroup, setRemovingFromGroup] = useState<boolean>(false);
   const [showRagDebug, setShowRagDebug] = useState(false);
   const [showGroupManager, setShowGroupManager] = useState(false);
   const [showAddToGroupModal, setShowAddToGroupModal] = useState(false);
@@ -92,7 +98,7 @@ export default function LibraryPage() {
   const [searchContext, setSearchContext] = useState<SearchLocalResponse["search_context"]>(undefined);
 
   useEffect(() => {
-    groupsApi.getGroups().then(setGroups).catch(console.error);
+    groupsApi.getGroups().then(data => setGroups(data.groups)).catch(console.error);
   }, [showGroupManager]); // Refresh groups when manager closes/updates
 
   const logInteraction = async (paperId: number, action: string) => {
@@ -287,9 +293,31 @@ export default function LibraryPage() {
       alert(`已将 ${selectedIds.size} 篇文献加入分组 "${group.name}"`);
       setShowAddToGroupModal(false);
       setSelectedIds(new Set()); // Optional: clear selection after adding
+      // If we are currently viewing the target group, refresh to show new papers
+      if (selectedGroupId === group.id) {
+        fetchData({ resetPage: false });
+      }
     } catch (err) {
       console.error(err);
       alert("加入分组失败");
+    }
+  };
+
+  const handleRemoveFromGroup = async () => {
+    if (selectedIds.size === 0 || !selectedGroupId) return;
+    if (!confirm(`确定要从当前分组移除选中的 ${selectedIds.size} 篇文献吗？`)) return;
+
+    setRemovingFromGroup(true);
+    try {
+      await groupsApi.removePapersFromGroup(selectedGroupId, Array.from(selectedIds));
+      alert(`已从分组移除 ${selectedIds.size} 篇文献`);
+      setSelectedIds(new Set());
+      fetchData({ resetPage: false });
+    } catch (err) {
+      console.error(err);
+      alert("移除失败");
+    } finally {
+      setRemovingFromGroup(false);
     }
   };
 
@@ -651,6 +679,39 @@ export default function LibraryPage() {
               >
                 加入分组
               </button>
+              {selectedGroupId && (
+                <button
+                  onClick={handleRemoveFromGroup}
+                  disabled={removingFromGroup}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #f59e0b",
+                    backgroundColor: "rgba(245, 158, 11, 0.1)",
+                    color: "#f59e0b",
+                    fontSize: 12,
+                    cursor: removingFromGroup ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {removingFromGroup ? "移除中..." : "从分组移除"}
+                </button>
+              )}
+              {selectedGroupId && onGenerateReview && (
+                <button
+                  onClick={() => onGenerateReview(selectedGroupId)}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #8b5cf6",
+                    backgroundColor: "rgba(139, 92, 246, 0.1)",
+                    color: "#8b5cf6",
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  ✨ 基于此分组生成综述
+                </button>
+              )}
               <button
                 onClick={handleSyncCitationsSelected}
                 disabled={syncing}

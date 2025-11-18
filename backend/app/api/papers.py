@@ -20,7 +20,7 @@ from app.schemas.paper import (
 from pydantic import BaseModel
 from app.models.paper import Paper
 from app.models.recall_log import RecallLog
-from app.models.group import LiteratureGroupPaper
+from app.models.group import PaperGroupAssociation
 from app.services.crawler import ArxivCrawler, search_across_sources
 from app.config import get_settings
 from app.utils.cache import search_cache
@@ -28,6 +28,7 @@ from app.services.paper_service import (
     create_paper_with_embedding,
     update_paper_with_embedding,
     delete_paper_and_cleanup,
+    delete_papers,
     archive_papers,
     restore_papers,
 )
@@ -221,8 +222,8 @@ async def search_papers_local(
 
         # 分组过滤
         if payload.group_id is not None:
-            query = query.join(LiteratureGroupPaper).filter(
-                LiteratureGroupPaper.group_id == payload.group_id
+            query = query.join(PaperGroupAssociation).filter(
+                PaperGroupAssociation.group_id == payload.group_id
             )
 
         # 归档过滤
@@ -348,6 +349,15 @@ async def delete_paper(paper_id: int, db: Session = Depends(get_db)):
 
     await delete_paper_and_cleanup(db, paper)
     return {"message": "文献已删除"}
+
+
+@router.post("/batch-delete")
+async def batch_delete_papers(
+    payload: PaperBatchDelete, db: Session = Depends(get_db)
+):
+    """批量删除文献 (硬删除)"""
+    count = delete_papers(db, payload.paper_ids)
+    return {"message": f"已删除 {count} 篇文献", "deleted_count": count}
 
 
 @router.post("/archive")

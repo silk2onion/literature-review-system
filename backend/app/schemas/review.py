@@ -128,6 +128,10 @@ class ReviewGenerate(BaseModel):
         description="指定使用的文献分组 ID。如果提供，将使用该分组下的所有文献（受 paper_limit 限制）。"
     )
     paper_limit: int = Field(default=20, ge=5, le=100, description="使用的文献数量限制")
+    sort_by: str = Field(
+        default="year_desc",
+        description="文献排序策略 (仅当使用 group_id 时有效): 'year_desc' (最新), 'year_asc' (最旧), 'citations_desc' (引用最高), 'random' (随机)"
+    )
     sources: List[str] = Field(
         default=["arxiv"],
         description="文献数据源。支持 'arxiv', 'scholar_serpapi', 'scopus', 'crossref'。新增支持 'local_rag' (基于本地库的语义+标签增强检索)。"

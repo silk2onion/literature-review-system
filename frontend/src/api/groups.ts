@@ -1,82 +1,104 @@
-import type { Paper, LiteratureGroup, GroupPaper } from '../types';
+import type { Paper, LiteratureGroup } from '../types';
 
-export type { LiteratureGroup, GroupPaper };
+const API_BASE_URL = '/api';
 
-export interface GroupCreate {
+export type PaperGroup = LiteratureGroup;
+
+export interface PaperGroupListResponse {
+  groups: PaperGroup[];
+  total: number;
+}
+
+export interface CreateGroupRequest {
   name: string;
   description?: string;
 }
 
-export interface GroupUpdate {
+export interface UpdateGroupRequest {
   name?: string;
   description?: string;
 }
 
-const API_BASE = 'http://127.0.0.1:5444/api/groups';
-
 export const groupsApi = {
-  // 获取分组列表
-  getGroups: async (skip = 0, limit = 100): Promise<LiteratureGroup[]> => {
-    const response = await fetch(`${API_BASE}/?skip=${skip}&limit=${limit}`);
-    if (!response.ok) throw new Error('Failed to fetch groups');
+  async getGroups(skip: number = 0, limit: number = 100): Promise<PaperGroupListResponse> {
+    const response = await fetch(`${API_BASE_URL}/groups/?skip=${skip}&limit=${limit}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch groups');
+    }
     return response.json();
   },
 
-  // 创建分组
-  createGroup: async (data: GroupCreate): Promise<LiteratureGroup> => {
-    const response = await fetch(`${API_BASE}/`, {
+  async createGroup(data: CreateGroupRequest): Promise<PaperGroup> {
+    const response = await fetch(`${API_BASE_URL}/groups/`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to create group');
+    if (!response.ok) {
+      throw new Error('Failed to create group');
+    }
     return response.json();
   },
 
-  // 更新分组
-  updateGroup: async (id: number, data: GroupUpdate): Promise<LiteratureGroup> => {
-    const response = await fetch(`${API_BASE}/${id}`, {
+  async updateGroup(id: number, data: UpdateGroupRequest): Promise<PaperGroup> {
+    const response = await fetch(`${API_BASE_URL}/groups/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify(data),
     });
-    if (!response.ok) throw new Error('Failed to update group');
+    if (!response.ok) {
+      throw new Error('Failed to update group');
+    }
     return response.json();
   },
 
-  // 删除分组
-  deleteGroup: async (id: number): Promise<void> => {
-    const response = await fetch(`${API_BASE}/${id}`, {
+  async deleteGroup(id: number): Promise<boolean> {
+    const response = await fetch(`${API_BASE_URL}/groups/${id}`, {
       method: 'DELETE',
     });
-    if (!response.ok) throw new Error('Failed to delete group');
+    if (!response.ok) {
+      throw new Error('Failed to delete group');
+    }
+    return response.json();
   },
 
-  // 向分组添加文献
-  addPapersToGroup: async (groupId: number, paperIds: number[]): Promise<GroupPaper[]> => {
-    const response = await fetch(`${API_BASE}/${groupId}/papers`, {
+  async addPapersToGroup(groupId: number, paperIds: number[]): Promise<number> {
+    const response = await fetch(`${API_BASE_URL}/groups/${groupId}/papers`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(paperIds),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ paper_ids: paperIds }),
     });
-    if (!response.ok) throw new Error('Failed to add papers to group');
+    if (!response.ok) {
+      throw new Error('Failed to add papers to group');
+    }
     return response.json();
   },
 
-  // 从分组移除文献
-  removePapersFromGroup: async (groupId: number, paperIds: number[]): Promise<void> => {
-    const response = await fetch(`${API_BASE}/${groupId}/papers`, {
+  async removePapersFromGroup(groupId: number, paperIds: number[]): Promise<number> {
+    const response = await fetch(`${API_BASE_URL}/groups/${groupId}/papers`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(paperIds),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ paper_ids: paperIds }),
     });
-    if (!response.ok) throw new Error('Failed to remove papers from group');
-  },
-
-  // 获取分组内的文献
-  getGroupPapers: async (groupId: number, skip = 0, limit = 100): Promise<Paper[]> => {
-    const response = await fetch(`${API_BASE}/${groupId}/papers?skip=${skip}&limit=${limit}`);
-    if (!response.ok) throw new Error('Failed to fetch group papers');
+    if (!response.ok) {
+      throw new Error('Failed to remove papers from group');
+    }
     return response.json();
   },
+
+  async getGroupPapers(groupId: number, skip: number = 0, limit: number = 100): Promise<Paper[]> {
+    const response = await fetch(`${API_BASE_URL}/groups/${groupId}/papers?skip=${skip}&limit=${limit}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch group papers');
+    }
+    return response.json();
+  }
 };
