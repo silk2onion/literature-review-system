@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import CrawlJobsPage from './CrawlJobsPage'
 import LibraryPage from './LibraryPage'
+import PhdPipelinePage, { type PhdPipelinePageProps } from './PhdPipelinePage'
+import ReviewGenerateFromLibraryPage from './ReviewGenerateFromLibraryPage'
 import SemanticSearchDebugPanel from './SemanticSearchDebugPanel'
 import SettingsModal from './SettingsModal'
 import StagingPapersPage from './StagingPapersPage'
 
-const API_BASE_URL = 'http://localhost:5444'
+const API_BASE_URL = 'http://127.0.0.1:5444'
 
 // 简单的前端 debug 日志工具
 function debugLog(context: string, payload?: unknown) {
@@ -37,18 +39,6 @@ interface TopicStat {
 
 type DataSourceId = 'arxiv' | 'crossref'
 
-interface ReviewGenerateResponse {
-  success: boolean
-  review_id: number
-  status: string
-  message: string
-  preview_markdown?: string
-  used_prompt?: string | null
-  summary_stats?: {
-    timeline?: TimelinePoint[]
-    topics?: TopicStat[]
-  }
-}
 
 type Role = 'user' | 'assistant'
 
@@ -82,10 +72,11 @@ interface JobStatus {
 
 
 function App() {
-  const [activeView, setActiveView] = useState<'review' | 'library' | 'staging' | 'jobs' | 'rag'>(
-    'review',
-  )
+  const [activeView, setActiveView] = useState<
+    'review-search' | 'review-generate' | 'library' | 'staging' | 'jobs' | 'rag' | 'phd-pipeline'
+  >('review-search')
   const [showSettings, setShowSettings] = useState(false)
+  const [phdPipelineProps] = useState<Omit<PhdPipelinePageProps, 'onExit'> | null>(null)
 
   // 综述助手主搜索区：默认不预填内容
   const [keywordInput, setKeywordInput] = useState('')
@@ -93,8 +84,6 @@ function App() {
   const [yearTo, setYearTo] = useState('')
   const [limit, setLimit] = useState('20')
   const [selectedSources, setSelectedSources] = useState<DataSourceId[]>(['arxiv'])
-  const [phdPipelineEnabled, setPhdPipelineEnabled] = useState(false)
-  const [frameworkOnlyEnabled, setFrameworkOnlyEnabled] = useState(false)
 
   const toggleSource = (id: DataSourceId) => {
     setSelectedSources(prev => {
@@ -113,11 +102,8 @@ function App() {
   const [papersLoading, setPapersLoading] = useState(false)
   const [papersError, setPapersError] = useState<string | null>(null)
 
-  const [reviewLoading, setReviewLoading] = useState(false)
-  const [reviewError, setReviewError] = useState<string | null>(null)
-
-  // ChatGPT 风格对话消息流
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  // ChatGPT 风格对话消息流（当前搜索视图仅展示已有消息，不再新增）
+  const [messages] = useState<ChatMessage[]>([])
 
   const [backendOk, setBackendOk] = useState<boolean | null>(null)
 
@@ -254,135 +240,13 @@ function App() {
     }
   }
 
-  interface ReviewGenerateRequest {
-    keywords: string[]
-    paper_limit: number
-    sources: string[]
-    year_from?: number
-    year_to?: number
-    framework_only: boolean
-    phd_pipeline: boolean
-    custom_prompt: string | null
-  }
 
-  async function handleGenerateReview() {
-    setReviewLoading(true)
-    setReviewError(null)
-
-    try {
-      const keywords = keywordInput
-        .split(',')
-        .map(k => k.trim())
-        .filter(Boolean)
-        .filter(k => k.length > 0)
-
-      if (keywords.length === 0) {
-        throw new Error('请先输入至少一个关键词')
-      }
-
-      const paperLimit = Number(limit) || 20
-      const yearFromNum = yearFrom ? Number(yearFrom) : undefined
-      const yearToNum = yearTo ? Number(yearTo) : undefined
-
-      // 1) 先在对话区追加一条用户消息
-      const createdAt = new Date().toISOString()
-      const userMsg: ChatMessage = {
-        id: createdAt,
-        role: 'user',
-        createdAt,
-        text: `基于关键词「${keywords.join(', ')}」，时间范围 ${yearFromNum ?? '任意'}–${
-          yearToNum ?? '任意'
-        }，文献数上限 ${paperLimit}，生成一篇城市设计文献综述。`,
-        payload: {
-          keywords,
-          year_from: yearFromNum,
-          year_to: yearToNum,
-          paper_limit: paperLimit,
-        },
-      }
-      setMessages(prev => [...prev, userMsg])
-
-      const sourcesToUse = selectedSources.length > 0 ? selectedSources : ['arxiv']
-
-      const body: ReviewGenerateRequest = {
-        keywords,
-        paper_limit: paperLimit,
-        sources: sourcesToUse,
-        year_from: yearFromNum,
-        year_to: yearToNum,
-        framework_only: frameworkOnlyEnabled,
-        phd_pipeline: phdPipelineEnabled,
-        custom_prompt: null,
-      }
-
-      debugLog('review_generate:request', {
-        url: `${API_BASE_URL}/api/reviews/generate`,
-        body,
-      })
-
-      const res = await fetch(`${API_BASE_URL}/api/reviews/generate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      })
-
-      debugLog('review_generate:response_meta', {
-        ok: res.ok,
-        status: res.status,
-      })
-
-      if (!res.ok) {
-        const text = await res.text()
-        debugLog('review_generate:response_error_body', text)
-        throw new Error(text || `生成综述失败，状态码 ${res.status}`)
-      }
-
-      const data = (await res.json()) as ReviewGenerateResponse
-      debugLog('review_generate:response_body', data)
-
-      if (!data.success) {
-        throw new Error(data.message || 'LLM 生成综述失败')
-      }
-
-      // 2) 在对话区追加一条助手消息，带上 LLM 生成结果
-      const assistantCreated = new Date().toISOString()
-      const assistantMsg: ChatMessage = {
-        id: assistantCreated,
-        role: 'assistant',
-        createdAt: assistantCreated,
-        text: data.message || '已生成一篇城市设计文献综述。',
-        payload: {
-          keywords,
-          year_from: yearFromNum,
-          year_to: yearToNum,
-          paper_limit: paperLimit,
-          review_id: data.review_id,
-          preview_markdown: data.preview_markdown,
-          summary_timeline: data.summary_stats?.timeline ?? [],
-          summary_topics: data.summary_stats?.topics ?? [],
-          status: data.status,
-        },
-      }
-      setMessages(prev => [...prev, assistantMsg])
-    } catch (e) {
-      const err = e as Error
-      setReviewError(err.message || '生成综述时出现错误')
-
-      // 同时在对话区记录错误信息
-      const ts = new Date().toISOString()
-      const errorMsg: ChatMessage = {
-        id: ts,
-        role: 'assistant',
-        createdAt: ts,
-        text: `生成综述时出错：${err.message || '未知错误'}`,
-      }
-      setMessages(prev => [...prev, errorMsg])
-    } finally {
-      setReviewLoading(false)
-    }
-  }
+  /**
+   * 旧的“直接基于当前检索结果生成综述”逻辑已在架构上废弃：
+   * - 正确流程：检索 → 暂存库/本地库筛选 → 基于库内 paper_ids 生成综述
+   * - 为避免误用，这里保留空实现，仅用于占位和记录错误提示
+   */
+  // 旧的综述生成入口已拆分到“综述·基于库内生成”页面，这里不再需要该函数
 
   return (
     <div className="chat-app-root">
@@ -398,18 +262,29 @@ function App() {
             </div>
           </div>
 
-          {/* 顶部视图切换：综述助手 / 文献库 / RAG 调试 */}
+          {/* 顶部视图切换：综述检索 / 综述生成 / 文献库 / 暂存库 / RAG 调试 / 抓取任务 */}
           <div className="view-switch">
             <button
               type="button"
               className={
-                activeView === 'review'
+                activeView === 'review-search'
                   ? 'view-switch-btn active'
                   : 'view-switch-btn'
               }
-              onClick={() => setActiveView('review')}
+              onClick={() => setActiveView('review-search')}
             >
-              综述助手
+              综述·检索与筛选
+            </button>
+            <button
+              type="button"
+              className={
+                activeView === 'review-generate'
+                  ? 'view-switch-btn active'
+                  : 'view-switch-btn'
+              }
+              onClick={() => setActiveView('review-generate')}
+            >
+              综述·基于库内生成
             </button>
             <button
               type="button"
@@ -457,8 +332,8 @@ function App() {
             </button>
           </div>
 
-          {/* 顶部大号搜索框（仅在综述助手视图下展示） */}
-          {activeView === 'review' && (
+          {/* 顶部大号搜索框（仅在“综述·检索与筛选”视图下展示） */}
+          {activeView === 'review-search' && (
             <div className="hero-search">
               <div className="hero-search-main">
                 <div style={{ position: 'relative', flex: 1 }}>
@@ -556,43 +431,6 @@ function App() {
                     />
                     <span style={{ marginLeft: 4 }}>Crossref</span>
                   </label>
-                  <label
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      marginLeft: 8,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={phdPipelineEnabled}
-                      onChange={() =>
-                        setPhdPipelineEnabled(prev => {
-                          const next = !prev
-                          if (!next) {
-                            setFrameworkOnlyEnabled(false)
-                          }
-                          return next
-                        })
-                      }
-                    />
-                    <span style={{ marginLeft: 4 }}>启用 PhD 级多阶段管线</span>
-                  </label>
-                  <label
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      marginLeft: 8,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={frameworkOnlyEnabled}
-                      disabled={!phdPipelineEnabled}
-                      onChange={() => setFrameworkOnlyEnabled(prev => !prev)}
-                    />
-                    <span style={{ marginLeft: 4 }}>仅生成框架</span>
-                  </label>
                   <button
                     type="button"
                     className="link-button subtle"
@@ -653,21 +491,31 @@ function App() {
       )}
 
       <main className="chat-main">
-        {activeView === 'library' ? (
-          // 文献库二级页面：基于本地 SQLite 文献库的检索与浏览
+        {activeView === 'review-generate' ? (
+          <ReviewGenerateFromLibraryPage />
+        ) : activeView === 'library' ? (
           <LibraryPage />
-        ) : activeView === 'review' ? (
+        ) : activeView === 'staging' ? (
+          <StagingPapersPage />
+        ) : activeView === 'rag' ? (
+          <SemanticSearchDebugPanel />
+        ) : activeView === 'jobs' ? (
+          <CrawlJobsPage />
+        ) : activeView === 'phd-pipeline' && phdPipelineProps ? (
+          <PhdPipelinePage {...phdPipelineProps} onExit={() => setActiveView('review-search')} />
+        ) : activeView === 'review-search' ? (
           <section className="chat-window">
-            {/* 顶部提示卡片 */}
+            {/* 顶部提示卡片：只说明这是“检索与筛选”视图 */}
             {messages.length === 0 && (
               <div className="chat-welcome compact">
                 <p className="chat-welcome-text">
-                  在上方输入城市设计相关关键词并检索，将在这里看到检索结果和基于文献的综述。
+                  在上方输入城市设计相关关键词并检索；检索出的候选文献请在“暂存文献库 / 本地文献库”
+                  中进一步筛选和入库，然后在“综述·基于库内生成”视图中生成综述。
                 </p>
               </div>
             )}
 
-            {/* 检索结果气泡：完整展示文献列表，气泡右下角有“生成综述”按钮 */}
+            {/* 检索结果气泡：仅展示结果，不再直接触发综述生成 */}
             {papers.length > 0 && (
               <div className="search-bubble-row">
                 <div className="search-bubble">
@@ -695,20 +543,17 @@ function App() {
                       </ul>
                     </div>
                     <div className="search-bubble-footer">
-                      <button
-                        className="primary-button hero-search-button"
-                        onClick={handleGenerateReview}
-                        disabled={reviewLoading}
-                      >
-                        {reviewLoading ? '正在生成综述…' : '基于以上文献生成综述'}
-                      </button>
+                      <span className="hint-text">
+                        提示：检索结果仅供参考筛选，请通过“抓取任务 → 暂存文献库 → 本地文献库”完成入库，
+                        然后在“综述·基于库内生成”中基于库内文献生成正式综述。
+                      </span>
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* 对话消息流 */}
+            {/* 对话消息流：保留历史交互记录 */}
             {messages.map(msg => {
               const isUser = msg.role === 'user'
               const p = msg.payload
@@ -780,19 +625,12 @@ function App() {
               )
             })}
           </section>
-        ) : activeView === 'staging' ? (
-          <StagingPapersPage />
-        ) : activeView === 'rag' ? (
-          <SemanticSearchDebugPanel />
-        ) : (
-          <CrawlJobsPage />
-        )}
+        ) : null}
       </main>
 
       {/* 底部区域变为轻量信息栏，而不是主输入框 */}
       <footer className="chat-footer">
         {papersError && <div className="error-text">{papersError}</div>}
-        {reviewError && <div className="error-text">{reviewError}</div>}
       </footer>
 
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} />

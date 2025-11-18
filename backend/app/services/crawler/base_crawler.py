@@ -4,6 +4,11 @@ from typing import List
 from app.services.crawler.source_models import SourcePaper
 
 
+class CrawlerError(Exception):
+    """爬虫基础异常"""
+    pass
+
+
 class BaseCrawler(ABC):
     """
     统一的爬虫抽象基类

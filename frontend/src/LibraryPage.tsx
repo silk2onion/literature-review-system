@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import CitationGraphPanel from "./CitationGraphPanel";
+import GroupManager from "./GroupManager";
+import SemanticSearchDebugPanel from "./SemanticSearchDebugPanel";
+import { groupsApi, type LiteratureGroup } from "./api/groups";
 
 type PaperResponse = {
   id: number;
@@ -10,6 +13,9 @@ type PaperResponse = {
   year?: number;
   journal?: string | null;
   venue?: string | null;
+  journal_impact_factor?: number | null;
+  journal_quartile?: string | null;
+  indexing?: string[] | null;
   doi?: string | null;
   arxiv_id?: string | null;
   pmid?: string | null;
@@ -30,6 +36,8 @@ type SearchLocalRequest = {
   year_to?: number | null;
   page: number;
   page_size: number;
+  group_id?: number;
+  include_archived?: boolean;
 };
 
 type SearchLocalResponse = {
@@ -37,6 +45,11 @@ type SearchLocalResponse = {
   total: number;
   items: PaperResponse[];
   message?: string | null;
+  search_context?: {
+    query_keywords: string[];
+    expanded_keywords: string[];
+    group_keys: string[];
+  };
 };
 
 type TaskStatus = "idle" | "running" | "done" | "error";
@@ -62,6 +75,247 @@ export default function LibraryPage() {
 
   const [selectedPaperId, setSelectedPaperId] = useState<number | null>(null);
   const [selectedPaperTitle, setSelectedPaperTitle] = useState<string>("");
+  const [downloadingIds, setDownloadingIds] = useState<Set<number>>(new Set());
+
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [deleting, setDeleting] = useState<boolean>(false);
+  const [archiving, setArchiving] = useState<boolean>(false);
+  const [restoring, setRestoring] = useState<boolean>(false);
+  const [syncing, setSyncing] = useState<boolean>(false);
+  const [analyzing, setAnalyzing] = useState<boolean>(false);
+  const [showRagDebug, setShowRagDebug] = useState(false);
+  const [showGroupManager, setShowGroupManager] = useState(false);
+  const [showAddToGroupModal, setShowAddToGroupModal] = useState(false);
+
+  const [groups, setGroups] = useState<LiteratureGroup[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
+  const [searchContext, setSearchContext] = useState<SearchLocalResponse["search_context"]>(undefined);
+
+  useEffect(() => {
+    groupsApi.getGroups().then(setGroups).catch(console.error);
+  }, [showGroupManager]); // Refresh groups when manager closes/updates
+
+  const logInteraction = async (paperId: number, action: string) => {
+    try {
+      await fetch(`${API_BASE_URL}/api/recall-logs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event_type: "click",
+          source: "library_page",
+          paper_id: paperId,
+          group_keys: searchContext?.group_keys,
+          query_keywords: searchContext?.query_keywords,
+          extra: {
+            action,
+            expanded_keywords: searchContext?.expanded_keywords
+          },
+        }),
+      });
+    } catch (e) {
+      console.error("Failed to log interaction", e);
+    }
+  };
+
+  const handleToggleSelect = (id: number) => {
+    const newSet = new Set(selectedIds);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    setSelectedIds(newSet);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === items.length && items.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(items.map((p) => p.id)));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`确定要删除选中的 ${selectedIds.size} 篇文献吗？此操作不可恢复。`)) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/papers/batch-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paper_ids: Array.from(selectedIds) }),
+      });
+
+      if (!resp.ok) {
+        throw new Error("删除失败");
+      }
+
+      const data = await resp.json();
+      alert(`成功删除 ${data.deleted_count} 篇文献`);
+      setSelectedIds(new Set());
+      fetchData({ resetPage: false }); // Refresh current page
+    } catch (err) {
+      console.error(err);
+      alert("删除出错");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleArchiveSelected = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`确定要归档选中的 ${selectedIds.size} 篇文献吗？`)) {
+      return;
+    }
+
+    setArchiving(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/papers/archive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paper_ids: Array.from(selectedIds) }),
+      });
+
+      if (!resp.ok) {
+        throw new Error("归档失败");
+      }
+
+      const data = await resp.json();
+      alert(`成功归档 ${data.count} 篇文献`);
+      setSelectedIds(new Set());
+      fetchData({ resetPage: false });
+    } catch (err) {
+      console.error(err);
+      alert("归档出错");
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const handleRestoreSelected = async () => {
+    if (selectedIds.size === 0) return;
+    
+    setRestoring(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/papers/restore`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paper_ids: Array.from(selectedIds) }),
+      });
+
+      if (!resp.ok) {
+        throw new Error("恢复失败");
+      }
+
+      const data = await resp.json();
+      alert(`成功恢复 ${data.count} 篇文献`);
+      setSelectedIds(new Set());
+      fetchData({ resetPage: false });
+    } catch (err) {
+      console.error(err);
+      alert("恢复出错");
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const handleSyncCitationsSelected = async () => {
+    if (selectedIds.size === 0) return;
+    
+    setSyncing(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/citations/sync-batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paper_ids: Array.from(selectedIds) }),
+      });
+
+      if (!resp.ok) {
+        throw new Error("同步请求失败");
+      }
+
+      const data = await resp.json();
+      alert(
+        `同步完成\n` +
+        `处理文献: ${data.processed_count}\n` +
+        `匹配引用: ${data.matched_references}\n` +
+        `新增关系: ${data.created_edges}`
+      );
+      // Refresh to show updated citation counts if any
+      fetchData({ resetPage: false });
+    } catch (err) {
+      console.error(err);
+      alert("同步引用出错");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleAnalyzeCitations = async () => {
+    if (!confirm("确定要对全库文献执行引用网络分析吗？这将生成新的标签（世代、影响力、聚类）。")) {
+      return;
+    }
+    setAnalyzing(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/citations/analysis/analyze`, {
+        method: "POST",
+      });
+      if (!resp.ok) throw new Error("Analysis failed");
+      const data = await resp.json();
+      alert(
+        `分析完成\n` +
+        `生成标签: ${data.tags_created}\n` +
+        `打标文献: ${data.papers_tagged}`
+      );
+      // Refresh to show new tags if we display them
+      fetchData({ resetPage: false });
+    } catch (err) {
+      console.error(err);
+      alert("分析失败");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleAddToGroup = async (group: LiteratureGroup) => {
+    if (selectedIds.size === 0) return;
+    try {
+      await groupsApi.addPapersToGroup(group.id, Array.from(selectedIds));
+      alert(`已将 ${selectedIds.size} 篇文献加入分组 "${group.name}"`);
+      setShowAddToGroupModal(false);
+      setSelectedIds(new Set()); // Optional: clear selection after adding
+    } catch (err) {
+      console.error(err);
+      alert("加入分组失败");
+    }
+  };
+
+  const handleDownloadPdf = async (paperId: number) => {
+    setDownloadingIds(prev => new Set(prev).add(paperId));
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/papers/${paperId}/download-pdf`, {
+        method: "POST",
+      });
+      if (!resp.ok) throw new Error("Download failed");
+      
+      // Refresh data to update PDF status
+      // We don't reset page, just refresh current view
+      await fetchData({ resetPage: false });
+      alert("PDF 下载任务已启动，请稍后刷新查看");
+    } catch (err) {
+      console.error(err);
+      alert("下载请求失败");
+    } finally {
+      setDownloadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(paperId);
+        return next;
+      });
+    }
+  };
 
   // 排序 & 筛选状态
   const [sortField, setSortField] = useState<SortField>("year");
@@ -71,6 +325,7 @@ export default function LibraryPage() {
   const [filterYearToInput, setFilterYearToInput] = useState<string>("");
   const [filterTitleInitial, setFilterTitleInitial] = useState<string>("");
   const [filterAuthorInitial, setFilterAuthorInitial] = useState<string>("");
+  const [showArchived, setShowArchived] = useState<boolean>(false);
 
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 1;
 
@@ -159,6 +414,7 @@ export default function LibraryPage() {
     filterYearToInput,
     filterTitleInitial,
     filterAuthorInitial,
+    // showArchived is handled in fetchData payload, not client-side filtering
   ]);
 
   const fetchData = async (opts?: { resetPage?: boolean; page?: number }) => {
@@ -181,6 +437,8 @@ export default function LibraryPage() {
         year_to: yearTo ? Number(yearTo) : undefined,
         page: effectivePage,
         page_size: pageSize,
+        group_id: selectedGroupId || undefined,
+        include_archived: showArchived,
       };
 
       const resp = await fetch(`${API_BASE_URL}/api/papers/search-local`, {
@@ -202,6 +460,7 @@ export default function LibraryPage() {
       const data: SearchLocalResponse = await resp.json();
       setItems(data.items || []);
       setTotal(data.total ?? 0);
+      setSearchContext(data.search_context);
       setPage(effectivePage);
       setTaskStatus("done");
       setTaskMessage(
@@ -229,6 +488,14 @@ export default function LibraryPage() {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-fetch when group selection or showArchived changes
+  useEffect(() => {
+    fetchData({ resetPage: true }).catch((e) =>
+      console.error("group/archive change load error", e),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroupId, showArchived]);
 
   const handleSearchClick = () => {
     fetchData({ resetPage: true }).catch((e) =>
@@ -318,7 +585,140 @@ export default function LibraryPage() {
             基于 SQLite 中已有的 Paper 记录进行检索和浏览
           </p>
         </div>
-        {renderTaskBadge()}
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button
+            onClick={() => setShowGroupManager(!showGroupManager)}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid #8b5cf6",
+              backgroundColor: showGroupManager
+                ? "rgba(139, 92, 246, 0.2)"
+                : "transparent",
+              color: "#8b5cf6",
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            {showGroupManager ? "关闭分组管理" : "分组管理"}
+          </button>
+          <button
+            onClick={() => setShowRagDebug(!showRagDebug)}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid #3b82f6",
+              backgroundColor: showRagDebug
+                ? "rgba(59, 130, 246, 0.2)"
+                : "transparent",
+              color: "#3b82f6",
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            {showRagDebug ? "关闭 RAG 调试" : "RAG 调试"}
+          </button>
+          <button
+            onClick={handleAnalyzeCitations}
+            disabled={analyzing}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid #8b5cf6",
+              backgroundColor: analyzing
+                ? "rgba(139, 92, 246, 0.2)"
+                : "transparent",
+              color: "#8b5cf6",
+              cursor: analyzing ? "not-allowed" : "pointer",
+              fontSize: 12,
+            }}
+          >
+            {analyzing ? "分析中..." : "引用网络分析"}
+          </button>
+          {selectedIds.size > 0 && (
+            <>
+              <button
+                onClick={() => setShowAddToGroupModal(true)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #10b981",
+                  backgroundColor: "rgba(16, 185, 129, 0.1)",
+                  color: "#10b981",
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                加入分组
+              </button>
+              <button
+                onClick={handleSyncCitationsSelected}
+                disabled={syncing}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #3b82f6",
+                  backgroundColor: "rgba(59, 130, 246, 0.1)",
+                  color: "#3b82f6",
+                  fontSize: 12,
+                  cursor: syncing ? "not-allowed" : "pointer",
+                }}
+              >
+                {syncing ? "同步中..." : `同步引用 (${selectedIds.size})`}
+              </button>
+              <button
+                onClick={handleDeleteSelected}
+                disabled={deleting}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #ef4444",
+                  backgroundColor: "rgba(239, 68, 68, 0.1)",
+                  color: "#ef4444",
+                  fontSize: 12,
+                  cursor: deleting ? "not-allowed" : "pointer",
+                }}
+              >
+                {deleting ? "删除中..." : `删除选中 (${selectedIds.size})`}
+              </button>
+              
+              {!showArchived ? (
+                <button
+                  onClick={handleArchiveSelected}
+                  disabled={archiving}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #f59e0b",
+                    backgroundColor: "rgba(245, 158, 11, 0.1)",
+                    color: "#f59e0b",
+                    fontSize: 12,
+                    cursor: archiving ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {archiving ? "归档中..." : `归档选中 (${selectedIds.size})`}
+                </button>
+              ) : (
+                <button
+                  onClick={handleRestoreSelected}
+                  disabled={restoring}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #10b981",
+                    backgroundColor: "rgba(16, 185, 129, 0.1)",
+                    color: "#10b981",
+                    fontSize: 12,
+                    cursor: restoring ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {restoring ? "恢复中..." : `恢复选中 (${selectedIds.size})`}
+                </button>
+              )}
+            </>
+          )}
+          {renderTaskBadge()}
+        </div>
       </header>
 
       <section
@@ -333,6 +733,33 @@ export default function LibraryPage() {
           flexWrap: "wrap",
         }}
       >
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 12, color: "#9ca3af" }}>分组筛选</label>
+          <select
+            value={selectedGroupId || ""}
+            onChange={(e) => {
+              const val = e.target.value ? Number(e.target.value) : null;
+              setSelectedGroupId(val);
+            }}
+            style={{
+              minWidth: 140,
+              padding: "6px 8px",
+              borderRadius: 6,
+              border: "1px solid #334155",
+              backgroundColor: "#020617",
+              color: "#e5e7eb",
+              fontSize: 13,
+            }}
+          >
+            <option value="">所有文献</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name} ({g.paper_count})
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label style={{ fontSize: 12, color: "#9ca3af" }}>关键词</label>
           <div style={{ position: "relative", display: "inline-block" }}>
@@ -563,6 +990,19 @@ export default function LibraryPage() {
           />
         </div>
 
+        {/* 归档筛选 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 12, color: "#9ca3af" }}>显示归档</label>
+          <div style={{ display: "flex", alignItems: "center", height: 34 }}>
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              style={{ cursor: "pointer", width: 16, height: 16 }}
+            />
+          </div>
+        </div>
+
         {/* 标题首字母筛选 */}
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label style={{ fontSize: 12, color: "#9ca3af" }}>标题首字母</label>
@@ -655,6 +1095,23 @@ export default function LibraryPage() {
               >
                 <th
                   style={{
+                    textAlign: "center",
+                    padding: "8px 12px",
+                    borderBottom: "1px solid #1f2937",
+                    fontWeight: 500,
+                    color: "#9ca3af",
+                    width: 40,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={items.length > 0 && selectedIds.size === items.length}
+                    onChange={handleSelectAll}
+                    style={{ cursor: "pointer" }}
+                  />
+                </th>
+                <th
+                  style={{
                     textAlign: "left",
                     padding: "8px 12px",
                     borderBottom: "1px solid #1f2937",
@@ -707,6 +1164,18 @@ export default function LibraryPage() {
                     borderBottom: "1px solid #1f2937",
                     fontWeight: 500,
                     color: "#9ca3af",
+                    width: 100,
+                  }}
+                >
+                  期刊信息
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "8px 12px",
+                    borderBottom: "1px solid #1f2937",
+                    fontWeight: 500,
+                    color: "#9ca3af",
                     width: 120,
                   }}
                 >
@@ -751,6 +1220,19 @@ export default function LibraryPage() {
                   <td
                     style={{
                       padding: "8px 12px",
+                      textAlign: "center",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(p.id)}
+                      onChange={() => handleToggleSelect(p.id)}
+                      style={{ cursor: "pointer" }}
+                    />
+                  </td>
+                  <td
+                    style={{
+                      padding: "8px 12px",
                       maxWidth: 520,
                     }}
                   >
@@ -765,6 +1247,7 @@ export default function LibraryPage() {
                         href={p.pdf_url || p.url || "#"}
                         target="_blank"
                         rel="noreferrer"
+                        onClick={() => logInteraction(p.id, "click_title")}
                         style={{
                           color: p.pdf_url || p.url ? "#38bdf8" : "#e5e7eb",
                           textDecoration:
@@ -828,36 +1311,137 @@ export default function LibraryPage() {
                       color: "#9ca3af",
                     }}
                   >
-                    {p.doi ? (
-                      <a
-                        href={`https://doi.org/${p.doi}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ color: "#38bdf8" }}
-                      >
-                        DOI
-                      </a>
-                    ) : p.source === "arxiv" && p.arxiv_id ? (
-                      <a
-                        href={`https://arxiv.org/abs/${p.arxiv_id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ color: "#38bdf8" }}
-                      >
-                        arXiv
-                      </a>
-                    ) : p.url ? (
-                      <a
-                        href={p.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ color: "#38bdf8" }}
-                      >
-                        链接
-                      </a>
-                    ) : (
-                      "-"
-                    )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      {p.journal_quartile && (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                            backgroundColor:
+                              p.journal_quartile === "Q1"
+                                ? "rgba(34, 197, 94, 0.2)"
+                                : p.journal_quartile === "Q2"
+                                ? "rgba(56, 189, 248, 0.2)"
+                                : "rgba(148, 163, 184, 0.2)",
+                            color:
+                              p.journal_quartile === "Q1"
+                                ? "#4ade80"
+                                : p.journal_quartile === "Q2"
+                                ? "#38bdf8"
+                                : "#94a3b8",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            width: "fit-content",
+                          }}
+                        >
+                          {p.journal_quartile}
+                        </span>
+                      )}
+                      {p.journal_impact_factor && (
+                        <span style={{ fontSize: 11, color: "#cbd5e1" }}>
+                          IF: {p.journal_impact_factor.toFixed(1)}
+                        </span>
+                      )}
+                      {p.indexing && p.indexing.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 2, marginTop: 2 }}>
+                          {p.indexing.map((idx) => (
+                            <span
+                              key={idx}
+                              style={{
+                                fontSize: 10,
+                                padding: "1px 4px",
+                                borderRadius: 3,
+                                backgroundColor: "rgba(139, 92, 246, 0.15)",
+                                color: "#a78bfa",
+                                border: "1px solid rgba(139, 92, 246, 0.3)",
+                              }}
+                            >
+                              {idx}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {!p.journal_quartile && !p.journal_impact_factor && (!p.indexing || p.indexing.length === 0) && "-"}
+                    </div>
+                  </td>
+                  <td
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: 12,
+                      color: "#9ca3af",
+                    }}
+                  >
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {p.doi ? (
+                        <a
+                          href={`https://doi.org/${p.doi}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "#38bdf8" }}
+                        >
+                          DOI
+                        </a>
+                      ) : p.source === "arxiv" && p.arxiv_id ? (
+                        <a
+                          href={`https://arxiv.org/abs/${p.arxiv_id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "#38bdf8" }}
+                        >
+                          arXiv
+                        </a>
+                      ) : p.url ? (
+                        <a
+                          href={p.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "#38bdf8" }}
+                        >
+                          链接
+                        </a>
+                      ) : (
+                        "-"
+                      )}
+                      
+                      {p.pdf_path ? (
+                        <a
+                          href={`${API_BASE_URL}/api/papers/${p.id}/pdf`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={() => logInteraction(p.id, "view_local_pdf")}
+                          style={{
+                            fontSize: 11,
+                            color: "#4ade80",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 2
+                          }}
+                        >
+                          <span>📄 查看 PDF</span>
+                        </a>
+                      ) : p.pdf_url ? (
+                        <button
+                          onClick={() => {
+                            handleDownloadPdf(p.id);
+                            logInteraction(p.id, "download_pdf");
+                          }}
+                          disabled={downloadingIds.has(p.id)}
+                          style={{
+                            background: "transparent",
+                            border: "1px solid #334155",
+                            borderRadius: 4,
+                            color: downloadingIds.has(p.id) ? "#9ca3af" : "#94a3b8",
+                            fontSize: 10,
+                            padding: "2px 6px",
+                            cursor: downloadingIds.has(p.id) ? "not-allowed" : "pointer",
+                            width: "fit-content"
+                          }}
+                        >
+                          {downloadingIds.has(p.id) ? "下载中..." : "⬇️ 下载 PDF"}
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                   <td
                     style={{
@@ -872,6 +1456,7 @@ export default function LibraryPage() {
                       onClick={() => {
                         setSelectedPaperId(p.id);
                         setSelectedPaperTitle(p.title);
+                        logInteraction(p.id, "view_citations");
                       }}
                     >
                       查看引用
@@ -970,6 +1555,147 @@ export default function LibraryPage() {
           />
         )}
       </section>
+
+      {/* Group Manager Drawer */}
+      {showGroupManager && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            width: "400px",
+            height: "100vh",
+            backgroundColor: "#0f172a",
+            borderLeft: "1px solid #334155",
+            zIndex: 1000,
+            overflowY: "auto",
+            boxShadow: "-4px 0 15px rgba(0,0,0,0.5)",
+            padding: "20px",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              marginBottom: "10px",
+            }}
+          >
+            <button
+              onClick={() => setShowGroupManager(false)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#9ca3af",
+                cursor: "pointer",
+                fontSize: "20px",
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <GroupManager />
+        </div>
+      )}
+
+      {/* Add to Group Modal */}
+      {showAddToGroupModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            backgroundColor: "rgba(0, 0, 0, 0.7)",
+            zIndex: 2000,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+          onClick={() => setShowAddToGroupModal(false)}
+        >
+          <div
+            style={{
+              width: "400px",
+              backgroundColor: "#0f172a",
+              borderRadius: "8px",
+              border: "1px solid #334155",
+              padding: "20px",
+              boxSizing: "border-box",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "16px",
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: "16px", color: "#e2e8f0" }}>
+                选择要加入的分组
+              </h3>
+              <button
+                onClick={() => setShowAddToGroupModal(false)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#9ca3af",
+                  cursor: "pointer",
+                  fontSize: "20px",
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <GroupManager onSelectGroup={handleAddToGroup} />
+          </div>
+        </div>
+      )}
+
+      {/* RAG Debug Drawer */}
+      {showRagDebug && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            width: "600px",
+            height: "100vh",
+            backgroundColor: "#0f172a",
+            borderLeft: "1px solid #334155",
+            zIndex: 1000,
+            overflowY: "auto",
+            boxShadow: "-4px 0 15px rgba(0,0,0,0.5)",
+            padding: "20px",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              marginBottom: "10px",
+            }}
+          >
+            <button
+              onClick={() => setShowRagDebug(false)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#9ca3af",
+                cursor: "pointer",
+                fontSize: "20px",
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <SemanticSearchDebugPanel />
+        </div>
+      )}
     </div>
   );
 }

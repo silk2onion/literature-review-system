@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.paper import Paper
 from app.models.staging_paper import StagingPaper
 from app.services.crawler.source_models import SourcePaper
+from app.services.embedding_service import get_embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,10 @@ def _source_paper_to_dict(sp: SourcePaper) -> Dict:
         "year": sp.year,
         "journal": sp.journal or sp.conference,
         "venue": sp.conference or sp.journal,
+        "journal_issn": _normalize_str(sp.issn),
+        "journal_impact_factor": sp.journal_impact_factor,
+        "journal_quartile": _normalize_str(sp.journal_quartile),
+        "indexing": sp.indexing or [],
         "doi": _normalize_str(sp.doi),
         "arxiv_id": _normalize_str(sp.arxiv_id),
         "pmid": None,
@@ -78,6 +83,9 @@ def _source_paper_to_staging_dict(sp: SourcePaper) -> Dict:
         "year": sp.year,
         "journal": sp.journal or sp.conference,
         "venue": sp.conference or sp.journal,
+        "journal_impact_factor": sp.journal_impact_factor,
+        "journal_quartile": _normalize_str(sp.journal_quartile),
+        "indexing": sp.indexing or [],
         "doi": _normalize_str(sp.doi),
         "arxiv_id": _normalize_str(sp.arxiv_id),
         "pmid": None,
@@ -114,6 +122,14 @@ def paper_to_source_paper(paper: Paper) -> SourcePaper:
     source = getattr(paper, "source", None) or "unknown"
     journal = getattr(paper, "journal", None)
     conference = getattr(paper, "venue", None)
+    
+    # 期刊评价指标
+    journal_impact_factor = getattr(paper, "journal_impact_factor", None)
+    journal_quartile = getattr(paper, "journal_quartile", None)
+    indexing = getattr(paper, "indexing", None)
+    if indexing and not isinstance(indexing, list):
+        indexing = [] # Ensure list
+
     published_date = _normalize_date(getattr(paper, "publication_date", None))
     url = getattr(paper, "url", None)
     pdf_url = getattr(paper, "pdf_url", None)
@@ -163,6 +179,9 @@ def paper_to_source_paper(paper: Paper) -> SourcePaper:
         journal=journal,
         conference=conference,
         publisher=None,
+        journal_impact_factor=journal_impact_factor,
+        journal_quartile=journal_quartile,
+        indexing=indexing,
         published_date=published_date,
         url=url,
         pdf_url=pdf_url,

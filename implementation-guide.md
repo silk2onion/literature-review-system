@@ -56,8 +56,30 @@ class Paper(db.Model):
     embedding = db.Column(db.JSON)  # 存储文本嵌入向量
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
+    # 期刊信息增强
+    journal_name = db.Column(db.String(500))
+    journal_quartile = db.Column(db.String(50))  # Q1-Q4
+    impact_factor = db.Column(db.Float)
+    
+    # 归档管理
+    is_archived = db.Column(db.Boolean, default=False)
+    archived_reason = db.Column(db.String(500))
+    archived_at = db.Column(db.DateTime)
+    
     # 关系
     reviews = db.relationship('ReviewPaper', back_populates='paper')
+
+class Review(db.Model):
+    __tablename__ = 'reviews'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(500))
+    content = db.Column(db.Text)
+    framework = db.Column(db.JSON)
+    analysis_json = db.Column(db.JSON)  # 存储统计分析、Markdown等结构化数据
+    status = db.Column(db.String(50), default='pending')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 ```
 
 ### 2. 文献爬虫模块实现
@@ -606,5 +628,12 @@ def test_search_api(client):
    - 实现多源下载策略
    - 使用Sci-Hub作为备选
    - 支持用户手动上传
+
+4. **数据库迁移与数据一致性**
+   - 如果遇到 `sqlite3.OperationalError: no such column: reviews.analysis_json`，请手动添加列：
+     ```sql
+     ALTER TABLE reviews ADD COLUMN analysis_json JSON;
+     ```
+   - 如果遇到 Pydantic 校验错误（如 `keywords` 字段），请确保数据库中存储的是 JSON 列表格式（`["k1", "k2"]`）而非字符串。
 
 这个实现指南提供了完整的技术细节和代码示例，可以直接用于开发。

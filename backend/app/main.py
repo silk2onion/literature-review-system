@@ -18,8 +18,10 @@ from app.api import (
     semantic_search_router,
     staging_papers_router,
     citations_router,
+    citation_analysis_router,
     journal_info_router,
     recall_logs_router,
+    groups_router,
 )
 from app.api import settings as settings_api
 
@@ -109,6 +111,7 @@ app.include_router(crawl_router)
 app.include_router(semantic_search_router)
 app.include_router(staging_papers_router)
 app.include_router(citations_router)
+app.include_router(citation_analysis_router)
 app.include_router(journal_info_router)
 app.include_router(recall_logs_router)
 app.include_router(settings_api.router)

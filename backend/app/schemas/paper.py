@@ -28,6 +28,11 @@ class PaperBase(BaseModel):
     categories: Optional[List[str]] = Field(default=None, description="分类")
     keywords: Optional[List[str]] = Field(default=None, description="关键词")
     citations_count: Optional[int] = Field(default=0, description="引用数")
+    
+    # 归档/删除状态
+    is_archived: Optional[bool] = Field(default=False, description="是否归档/软删除")
+    archived_reason: Optional[str] = Field(default=None, description="归档原因")
+    archived_at: Optional[datetime] = Field(default=None, description="归档时间")
 
 
 class PaperCreate(PaperBase):
@@ -58,6 +63,9 @@ class PaperUpdate(BaseModel):
     categories: Optional[List[str]] = None
     keywords: Optional[List[str]] = None
     citations_count: Optional[int] = None
+    is_archived: Optional[bool] = None
+    archived_reason: Optional[str] = None
+    archived_at: Optional[datetime] = None
 
 
 class PaperResponse(PaperBase):
@@ -126,6 +134,14 @@ class PaperSearchLocal(BaseModel):
         le=200,
         description="每页数量，建议不超过 200"
     )
+    group_id: Optional[int] = Field(
+        default=None,
+        description="分组ID，若提供则仅返回该分组下的文献"
+    )
+    include_archived: bool = Field(
+        default=False,
+        description="是否包含已归档文献"
+    )
 
     class Config:
         json_schema_extra = {
@@ -135,6 +151,7 @@ class PaperSearchLocal(BaseModel):
                 "year_to": 2024,
                 "page": 1,
                 "page_size": 20,
+                "group_id": 1
             }
         }
 
@@ -145,3 +162,11 @@ class PaperSearchLocalResponse(BaseModel):
     total: int
     items: List[PaperResponse]
     message: Optional[str] = None
+    search_context: Optional[dict] = Field(
+        default=None,
+        description="搜索上下文，包含扩展关键词和激活语义组，用于前端交互日志"
+    )
+
+
+class PaperBatchDelete(BaseModel):
+    paper_ids: List[int]

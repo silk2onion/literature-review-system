@@ -30,6 +30,7 @@ class SourcePaper:
     journal: Optional[str]
     conference: Optional[str]
     publisher: Optional[str]
+    issn: Optional[str]
     published_date: Optional[date]
 
     # 访问链接
@@ -39,3 +40,8 @@ class SourcePaper:
     # 主题/分类信息
     keywords: List[str]
     categories: List[str]
+
+    # 期刊评价指标 (新增)
+    journal_impact_factor: Optional[float] = None
+    journal_quartile: Optional[str] = None  # e.g. "Q1", "Q2"
+    indexing: Optional[List[str]] = None    # e.g. ["SCI", "SSCI"]

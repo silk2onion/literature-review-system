@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models.citation import PaperCitation
 from app.models.paper import Paper
+from app.services.embedding_service import get_embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,7 @@ class CitationIngestService:
 
         return None
 
-    def _create_placeholder_paper_for_reference(
+    async def _create_placeholder_paper_for_reference(
         self,
         db: Session,
         ref_norm: Dict[str, Optional[object]],
@@ -253,6 +254,32 @@ class CitationIngestService:
         return int(count)
 
     # -------- 对外主入口 --------
+    async def sync_citations_batch(self, db: Session, paper_ids: List[int]) -> Dict[str, int]:
+        """
+        批量同步引用关系。
+        """
+        total_refs = 0
+        matched_refs = 0
+        created_edges = 0
+        processed_count = 0
+
+        for pid in paper_ids:
+            try:
+                stats = self.sync_citations_for_paper(db, pid)
+                total_refs += stats["total_references"]
+                matched_refs += stats["matched_references"]
+                created_edges += stats["created_edges"]
+                processed_count += 1
+            except Exception as e:
+                logger.error(f"[citation_ingest] Batch sync failed for paper {pid}: {e}")
+        
+        return {
+            "processed_count": processed_count,
+            "total_references": total_refs,
+            "matched_references": matched_refs,
+            "created_edges": created_edges,
+        }
+
     def sync_citations_for_paper(self, db: Session, paper_id: int) -> Dict[str, int]:
         """
         为指定 Paper 同步引用关系（目前仅使用 Crossref 数据）。

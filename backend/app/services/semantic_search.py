@@ -7,9 +7,11 @@ from sqlalchemy.orm import Session
 
 from app.models.paper import Paper
 from app.models.recall_log import RecallLog
-from app.models.tag import PaperTag
+from app.models.tag import PaperTag, TagGroupTag
+from app.models.citation import PaperCitation
 from app.services.embedding_service import get_embedding_service
 from app.services.semantic_groups import ActivatedGroup, get_semantic_group_service
+from app.services.recall_enhancement import RecallEnhancementService
 
 logger = logging.getLogger(__name__)
 
@@ -63,18 +65,21 @@ class SemanticSearchService:
         hits: List[SemanticSearchHit],
         max_seed: int = 50,
         alpha: float = 0.3,
+        use_graph_propagation: bool = True,
     ) -> Tuple[List[SemanticSearchHit], Dict[str, Any]]:
         """
-        基于标签共现的简单召回增强：
-        - 取前 max_seed 条命中作为“种子集合”
-        - 统计这些文献上出现的标签（使用 paper_tags 表）
-        - 计算每个标签的权重（按出现次数与关联权重归一化）
-        - 对所有命中文献，根据其携带的标签权重对原始相似度做加性重排
+        基于标签共现与图传播的召回增强：
+        1. 种子选择：取前 max_seed 条 embedding 检索命中作为“种子集合”。
+        2. 标签共现：统计种子文献上的标签，计算基础标签权重。
+        3. 图传播 (Graph Propagation)：
+           - 标签组传播：若标签属于某标签组，将权重传播给组内其他标签。
+           - 引用传播：(可选) 若种子文献引用了其他文献，给予被引文献额外加权。
+        4. 重排：对所有候选文献，计算其携带标签的综合权重，叠加到原始相似度上。
         """
         if not hits:
             return hits, {"enabled": False, "reason": "no_hits"}
 
-        # 仅对有 ID 的文献进行处理
+        # 1. 确定种子文献 ID
         seed_hits = hits[:max_seed]
         seed_paper_ids: List[int] = []
         for h in seed_hits:
@@ -87,40 +92,93 @@ class SemanticSearchService:
         if not seed_paper_ids:
             return hits, {"enabled": False, "reason": "no_seed_ids"}
 
-        # 读取种子文献上的标签
+        # 2. 读取种子文献上的标签 (PaperTag)
         rows: List[PaperTag] = (
             db.query(PaperTag)
             .filter(PaperTag.paper_id.in_(seed_paper_ids))
             .all()
         )
-        if not rows:
-            return hits, {"enabled": False, "reason": "no_seed_tags"}
-
+        
         tag_counts: Dict[int, float] = {}
+        # 记录每篇文献有哪些标签，供后续计算得分使用
         paper_tags_map: Dict[int, List[PaperTag]] = {}
+        
         for pt in rows:
-            # ORM 实例上的 tag_id / paper_id / weight 在类型检查器中仍表现为 Column，需要显式转换
             try:
                 tag_id = int(getattr(pt, "tag_id"))
                 paper_id = int(getattr(pt, "paper_id"))
             except Exception:
-                # 若存在异常数据则直接跳过
                 continue
             weight_obj = getattr(pt, "weight", None)
             w = float(weight_obj) if weight_obj is not None else 1.0
+            
+            # 基础计数：标签在种子文献中出现的次数 * 关联权重
             tag_counts[tag_id] = tag_counts.get(tag_id, 0.0) + w
             paper_tags_map.setdefault(paper_id, []).append(pt)
 
+        if not tag_counts:
+             # 如果种子文献没有标签，尝试回退到仅引用增强或直接返回
+             pass
+
+        # 3. 图传播 (Graph Propagation)
+        propagation_debug = {}
+        if use_graph_propagation and tag_counts:
+            # 3.1 标签组传播：Tag -> TagGroup -> Other Tags
+            # 找出涉及的标签 ID
+            seed_tag_ids = list(tag_counts.keys())
+            
+            # 查找这些标签所属的组
+            group_relations = (
+                db.query(TagGroupTag)
+                .filter(TagGroupTag.tag_id.in_(seed_tag_ids))
+                .all()
+            )
+            
+            involved_group_ids = set()
+            for rel in group_relations:
+                try:
+                    involved_group_ids.add(int(getattr(rel, "group_id")))
+                except Exception:
+                    continue
+            
+            if involved_group_ids:
+                # 查找这些组包含的所有标签（同组扩散）
+                # 限制扩散范围，避免大组导致噪音
+                group_siblings = (
+                    db.query(TagGroupTag)
+                    .filter(TagGroupTag.group_id.in_(list(involved_group_ids)))
+                    .limit(500)
+                    .all()
+                )
+                
+                propagated_count = 0
+                for rel in group_siblings:
+                    try:
+                        g_tag_id = int(getattr(rel, "tag_id"))
+                        g_id = int(getattr(rel, "group_id"))
+                    except Exception:
+                        continue
+                    
+                    # 如果该标签不在种子标签中，给予一定的传播权重
+                    # 传播权重 = 组内平均权重 * 衰减因子 (0.2)
+                    if g_tag_id not in tag_counts:
+                        tag_counts[g_tag_id] = 0.5  # 赋予一个基础传播分
+                        propagated_count += 1
+                
+                propagation_debug["tag_group_expansion"] = {
+                    "groups": len(involved_group_ids),
+                    "new_tags": propagated_count
+                }
+
+        # 4. 归一化标签权重
         max_count = max(tag_counts.values()) if tag_counts else 0.0
-        if max_count <= 0.0:
-            return hits, {"enabled": False, "reason": "zero_tag_counts"}
+        tag_boost: Dict[int, float] = {}
+        if max_count > 0.0:
+            tag_boost = {
+                tag_id: c / max_count for tag_id, c in tag_counts.items()
+            }
 
-        # 标签权重归一化到 [0,1]
-        tag_boost: Dict[int, float] = {
-            tag_id: c / max_count for tag_id, c in tag_counts.items()
-        }
-
-        # 为所有命中文献补齐 tags 映射
+        # 5. 为所有候选文献（不仅仅是种子）补齐标签信息
         all_paper_ids: List[int] = []
         for h in hits:
             pid = getattr(h.paper, "id", None)
@@ -131,8 +189,11 @@ class SemanticSearchService:
             except Exception:
                 continue
             all_paper_ids.append(pid_int)
+            
         remaining_ids = [pid for pid in all_paper_ids if pid not in paper_tags_map]
         if remaining_ids:
+            # 批量查询剩余文献的标签
+            # 注意：如果 remaining_ids 很大，可能需要分批，这里假设 limit 限制了总数
             more_rows: List[PaperTag] = (
                 db.query(PaperTag)
                 .filter(PaperTag.paper_id.in_(remaining_ids))
@@ -142,11 +203,13 @@ class SemanticSearchService:
                 try:
                     paper_id = int(getattr(pt, "paper_id"))
                 except Exception:
-                    # 数据异常则跳过
                     continue
                 paper_tags_map.setdefault(paper_id, []).append(pt)
 
-        # 计算每篇文献的标签信号得分
+        # 6. 计算每篇文献的最终得分
+        # Score = EmbeddingScore + alpha * (TagScore + CitationScore)
+        
+        # 6.1 标签得分
         paper_tag_score: Dict[int, float] = {}
         for pid, pts in paper_tags_map.items():
             score_sum = 0.0
@@ -162,28 +225,80 @@ class SemanticSearchService:
                 w = float(weight_obj) if weight_obj is not None else 1.0
                 score_sum += boost * w
             paper_tag_score[pid] = score_sum
+            
+        max_tag_score = max(paper_tag_score.values()) if paper_tag_score else 1.0
+        if max_tag_score == 0: max_tag_score = 1.0
 
-        max_tag_score = max(paper_tag_score.values()) if paper_tag_score else 0.0
-        if max_tag_score <= 0.0:
-            return hits, {
-                "enabled": False,
-                "reason": "zero_paper_tag_scores",
-                "tag_count": len(tag_boost),
-            }
+        # 6.2 引用得分 & 候选扩展 (使用 RecallEnhancementService)
+        paper_citation_score: Dict[int, float] = {}
+        expanded_hits: List[SemanticSearchHit] = []
+        
+        if use_graph_propagation:
+            try:
+                recall_service = RecallEnhancementService(db)
+                # 获取扩展候选 (包含 outgoing 和 incoming)
+                # 限制扩展数量，避免过多
+                citation_candidates = recall_service.expand_candidates_using_citation_graph(
+                    seed_paper_ids, limit=50
+                )
+                
+                paper_citation_score = citation_candidates
+                propagation_debug["citation_expansion_count"] = len(citation_candidates)
+                
+                # 检查是否有新发现的文献 (不在原始 hits 中)
+                existing_ids = set(all_paper_ids)
+                new_ids = [pid for pid in citation_candidates.keys() if pid not in existing_ids]
+                
+                if new_ids:
+                    # 批量获取新文献
+                    new_papers = db.query(Paper).filter(Paper.id.in_(new_ids)).all()
+                    for p in new_papers:
+                        # 新文献的基础相似度设为 0 (或者设为一个较小的默认值)
+                        # 它的得分将完全来自图信号
+                        expanded_hits.append(SemanticSearchHit(paper=p, score=0.0))
+                        
+                    propagation_debug["new_candidates_from_citation"] = len(new_papers)
+                    
+            except Exception as e:
+                logger.warning(f"引用图扩展失败: {e}")
 
-        # 基于标签信号对相似度做加性增强：new_score = emb_score + alpha * norm_tag_score
+        # 7. 综合重排 (合并原始 hits 和扩展 hits)
+        all_hits = hits + expanded_hits
         enhanced_hits: List[SemanticSearchHit] = []
-        for h in hits:
+        
+        # 计算引用分的最大值用于归一化
+        max_citation_score = max(paper_citation_score.values()) if paper_citation_score else 1.0
+        if max_citation_score == 0: max_citation_score = 1.0
+
+        for h in all_hits:
             pid = getattr(h.paper, "id", None)
             tag_signal = 0.0
+            citation_signal = 0.0
+            
             if pid is not None:
                 try:
                     pid_int = int(pid)
                 except Exception:
                     pid_int = None
-                if pid_int is not None and pid_int in paper_tag_score:
-                    tag_signal = paper_tag_score[pid_int] / max_tag_score
-            new_score = float(h.score) + alpha * float(tag_signal)
+                
+                if pid_int is not None:
+                    # 归一化标签分
+                    if pid_int in paper_tag_score:
+                        tag_signal = paper_tag_score[pid_int] / max_tag_score
+                    
+                    # 归一化引用分
+                    if pid_int in paper_citation_score:
+                        citation_signal = paper_citation_score[pid_int] / max_citation_score
+
+            # 混合公式
+            # alpha 控制标签/图信号的整体权重
+            # 0.6 * tag + 0.4 * citation (稍微提高引用权重)
+            graph_score = 0.6 * tag_signal + 0.4 * citation_signal
+            
+            # 原始分数 + alpha * 图分数
+            # 注意：对于扩展出来的文献，原始分数是 0，所以它们完全靠图分数排序
+            new_score = float(h.score) + alpha * float(graph_score)
+            
             enhanced_hits.append(SemanticSearchHit(paper=h.paper, score=new_score))
 
         enhanced_hits.sort(key=lambda x: x.score, reverse=True)
@@ -193,6 +308,7 @@ class SemanticSearchService:
             "alpha": alpha,
             "seed_size": len(seed_paper_ids),
             "tag_count": len(tag_boost),
+            "propagation": propagation_debug
         }
         return enhanced_hits, debug
 
@@ -222,6 +338,29 @@ class SemanticSearchService:
         )
         expanded_keywords = cast(List[str], expand_res.get("keywords", []))
         activated_groups = cast(Dict[str, ActivatedGroup], expand_res.get("activated_groups", {}))
+
+        # 1.1) 使用图增强扩展关键词 (Dynamic Graph Expansion)
+        try:
+            from app.services.recall_enhancement import RecallEnhancementService
+            recall_service = RecallEnhancementService(db)
+            graph_expanded = recall_service.expand_keywords_using_graph(keywords)
+            
+            if graph_expanded:
+                # 将图扩展的关键词合并到 expanded_keywords
+                # 避免重复
+                existing_lower = set(k.lower() for k in expanded_keywords)
+                added_count = 0
+                for k, score in graph_expanded.items():
+                    if k.lower() not in existing_lower:
+                        expanded_keywords.append(k)
+                        existing_lower.add(k.lower())
+                        added_count += 1
+                
+                if added_count > 0:
+                    logger.info(f"图增强扩展了 {added_count} 个关键词: {list(graph_expanded.keys())}")
+                    
+        except Exception as e:
+            logger.warning(f"图增强扩展失败: {e}")
 
         # 2) 为查询生成向量
         query_text = ", ".join(expanded_keywords)
