@@ -76,3 +76,16 @@
 - 影响：
   - 前端 `App.tsx` 结构调整，引入 `ReviewGenerateFromLibraryPage`。
   - 后端 `generate_review` 接口支持直接接收 `paper_ids`，不再强制依赖实时搜索结果。
+
+[2025-11-18 22:40:00] - [Architecture Decision: Citation Anchoring / Post-generation Injection]
+*   **Context:** To address "hallucinated citations" in LLM-generated reviews and enable interactive/verifiable citations.
+*   **Decision:** Adopt a "Citation Anchoring" strategy.
+    1.  **Pre-processing:** Generate a prompt context where selected papers are assigned unique, semantic placeholders (e.g., `[[REF_1]]`, `[[Smith_2023_ID123]]`).
+    2.  **Generation:** Instruct the LLM to use these placeholders strictly instead of generating text citations (e.g., "(Smith et al., 2023)").
+    3.  **Post-processing:** The backend/frontend parses these placeholders and replaces them with the desired citation format (APA, MLA, etc.) or interactive footnotes/tooltips.
+*   **Rationale:**
+    *   **Accuracy:** Eliminates hallucinated dates/authors.
+    *   **Flexibility:** Decouples content generation from citation formatting.
+    *   **Interactivity:** Enables "click-to-view-abstract" or "click-to-download" features in the frontend.
+    *   **Traceability:** Allows precise tracking of which papers were actually used in the review.
+*   **Implementation Plan:** To be implemented in Task 21 (PhD Pipeline Refinement) or Task 42 (Group-based Review).

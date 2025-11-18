@@ -169,6 +169,23 @@ async def delete_paper_and_cleanup(db: Session, paper: Paper) -> None:
     db.commit()
 
 
+def delete_papers(db: Session, paper_ids: List[int]) -> int:
+    """
+    批量删除 Paper (硬删除)。
+    """
+    if not paper_ids:
+        return 0
+
+    # 使用 synchronize_session=False 提高性能，但要注意 session 状态
+    stmt = (
+        db.query(Paper)
+        .filter(Paper.id.in_(paper_ids))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return stmt
+
+
 def archive_papers(
     db: Session, paper_ids: List[int], reason: Optional[str] = None
 ) -> int:

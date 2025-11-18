@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import { groupsApi, type LiteratureGroup } from './api/groups';
+import { useEffect, useState } from 'react';
+import { groupsApi } from './api/groups';
 import './GroupManager.css';
+import type { LiteratureGroup } from './types';
 
 interface GroupManagerProps {
   onSelectGroup?: (group: LiteratureGroup) => void;
@@ -20,7 +21,7 @@ export default function GroupManager({ onSelectGroup, selectedGroupId }: GroupMa
     setError(null);
     try {
       const data = await groupsApi.getGroups();
-      setGroups(data);
+      setGroups(data.groups);
     } catch (err) {
       setError('加载分组失败');
       console.error(err);

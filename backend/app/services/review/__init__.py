@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Review, RecallLog
-from app.models.group import LiteratureGroupPaper
+from app.models.group import PaperGroupAssociation
 from app.models.citation import PaperCitation
 from app.schemas.review import (
     LitReviewLLMResult,
@@ -261,11 +261,13 @@ def enrich_papers_with_citation_context(db: Session, papers: List[Any]) -> None:
         cited = cit.cited_paper_id
         
         # Ensure we are working with int values, not Columns
-        if hasattr(citing, 'value'): citing = citing.value
-        if hasattr(cited, 'value'): cited = cited.value
+        # In SQLAlchemy models, accessing the attribute on an instance returns the value.
+        # However, if type checking is confused, we can cast or ensure it's int.
+        citing_val = int(citing) if citing is not None else 0
+        cited_val = int(cited) if cited is not None else 0
         
-        if cited not in cited_by_map: cited_by_map[cited] = []
-        cited_by_map[cited].append(citing)
+        if cited_val not in cited_by_map: cited_by_map[cited_val] = []
+        cited_by_map[cited_val].append(citing_val)
 
     # 3. 补充信息到 paper 对象/字典
     for pid, p in paper_map.items():
@@ -351,13 +353,25 @@ async def generate_review(
         target_paper_ids = payload.paper_ids
     elif payload.group_id:
         # 模式 A2: 基于分组指定文献
-        # 优化：直接在数据库层面进行排序和截断，优先选择年份较新的文献
+        # 优化：直接在数据库层面进行排序和截断
         query = (
             db.query(Paper.id)
-            .join(LiteratureGroupPaper, LiteratureGroupPaper.paper_id == Paper.id)
-            .filter(LiteratureGroupPaper.group_id == payload.group_id)
-            .order_by(Paper.year.desc().nullslast(), Paper.id.desc())
+            .join(PaperGroupAssociation, PaperGroupAssociation.paper_id == Paper.id)
+            .filter(PaperGroupAssociation.group_id == payload.group_id)
         )
+
+        # 根据 sort_by 策略排序
+        sort_strategy = getattr(payload, "sort_by", "year_desc")
+        if sort_strategy == "year_asc":
+            query = query.order_by(Paper.year.asc().nullslast(), Paper.id.asc())
+        elif sort_strategy == "citations_desc":
+            query = query.order_by(Paper.citations_count.desc().nullslast(), Paper.year.desc().nullslast())
+        elif sort_strategy == "random":
+            from sqlalchemy.sql.expression import func
+            query = query.order_by(func.random())
+        else:
+            # 默认 year_desc
+            query = query.order_by(Paper.year.desc().nullslast(), Paper.id.desc())
         
         if payload.paper_limit:
             query = query.limit(payload.paper_limit)
@@ -376,7 +390,7 @@ async def generate_review(
                 "year": p.year,
                 "authors": p.authors,
                 "journal": p.journal,
-                "url": p.pdf_url or p.abs_url,
+                "url": p.pdf_url or p.url,
                 "source": "local_library",
                 "id": p.id  # 保留 ID 以便后续关联
             })
@@ -403,7 +417,7 @@ async def generate_review(
                 "year": p.year,
                 "authors": p.authors,
                 "journal": p.journal,
-                "url": p.pdf_url or p.abs_url,
+                "url": p.pdf_url or p.url,
                 "source": "local_rag",
                 "id": p.id,
                 "score": hit.score

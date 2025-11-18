@@ -112,6 +112,20 @@
 
 3. 在浏览器中访问 Vite 输出的本地地址（通常是 http://localhost:5173），即可看到前端界面。
 
+### 3.4 Docker 容器化部署（推荐）
+
+本项目提供了完整的 Docker 支持，可一键启动后端与前端服务。
+
+1. 确保已安装 Docker 与 Docker Compose。
+2. 在项目根目录下运行：
+
+   ```bash
+   docker-compose up -d
+   ```
+
+3. 访问 http://localhost 即可使用系统（前端 Nginx 会自动代理 API 请求到后端）。
+   - 后端 API 文档位于：http://localhost/api/docs
+
 ## 4. 使用指南
 
 ### 4.1 从关键词到第一篇综述
