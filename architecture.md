@@ -107,6 +107,16 @@ graph TB
   5. 填充详细内容
   6. 格式化输出
 
+### 4.5 可视化 RAG 系统
+- **功能**：
+  - 提供基于 WebSocket 的流式语义检索调试接口
+  - 可视化展示语义组扩展过程、激活的语义组及其权重
+  - 实时展示向量检索的相似度排序与候选文献
+  - 支持在综述生成与文献库管理界面中开启调试模式，透明化 AI 决策过程
+- **核心组件**：
+  - **SemanticSearchService**: 负责关键词扩展、向量生成、相似度计算及标签/引用图重排
+  - **SemanticSearchDebugPanel**: 前端可视化组件，通过 WebSocket 接收并展示检索中间状态
+
 ## 五、数据模型
 
 ### 文献表 (papers)
@@ -123,6 +133,12 @@ graph TB
 - citations_count: 引用数
 - keywords: 关键词
 - created_at: 创建时间
+- journal_name: 期刊名称
+- journal_quartile: 期刊分区 (Q1-Q4)
+- impact_factor: 影响因子
+- is_archived: 是否归档 (Boolean)
+- archived_reason: 归档原因
+- archived_at: 归档时间
 
 ### 综述表 (reviews)
 - id: 主键
@@ -172,6 +188,33 @@ POST /api/papers/download
     "paper_id": 123,
     "format": "pdf"
 }
+```
+
+### 综述导出接口
+```
+POST /api/reviews/{id}/export
+{
+    "format": "markdown",
+    "include_references": true
+}
+```
+
+### 语义检索接口 (RAG)
+```
+POST /api/semantic-search/search
+{
+    "keywords": ["urban vitality"],
+    "limit": 20
+}
+```
+
+### 语义检索 WebSocket
+```
+WS /api/semantic-search/ws
+Client -> { "type": "search", "payload": { "keywords": [...] } }
+Server -> { "type": "debug", "debug": { ... } }
+Server -> { "type": "partial_result", "items": [...] }
+Server -> { "type": "done", "total": 20 }
 ```
 
 ## 七、项目目录结构

@@ -3,7 +3,7 @@ Papers API路由
 """
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, cast, Any, Dict
 import logging
 from sqlalchemy import or_
 
@@ -17,7 +17,10 @@ from app.schemas.paper import (
     PaperSearchLocal,
     PaperSearchLocalResponse,
 )
+from pydantic import BaseModel
 from app.models.paper import Paper
+from app.models.recall_log import RecallLog
+from app.models.group import LiteratureGroupPaper
 from app.services.crawler import ArxivCrawler, search_across_sources
 from app.config import get_settings
 from app.utils.cache import search_cache
@@ -25,11 +28,18 @@ from app.services.paper_service import (
     create_paper_with_embedding,
     update_paper_with_embedding,
     delete_paper_and_cleanup,
+    archive_papers,
+    restore_papers,
 )
+from app.schemas.paper import PaperBatchDelete
 from app.services.paper_ingest import (
     insert_or_update_staging_from_sources,
     paper_to_source_paper,
 )
+from app.services.pdf_service import PDFDownloadService
+from app.services.semantic_groups import get_semantic_group_service
+from fastapi.responses import FileResponse
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/papers", tags=["papers"])
@@ -49,7 +59,39 @@ async def search_papers(
     - 对相同参数的请求做内存缓存，默认 30 分钟
     """
     try:
+        # 0. 语义组关键词扩展
+        original_keywords = list(search_request.keywords) if search_request.keywords else []
+        semantic_service = get_semantic_group_service()
+        expanded_result = semantic_service.expand_keywords(search_request.keywords)
+        expanded_keywords = cast(List[str], expanded_result["keywords"])
+        activated_groups = cast(Dict[str, Any], expanded_result.get("activated_groups", {}))
+        
+        if len(expanded_keywords) > len(search_request.keywords):
+            logger.info(f"语义组扩展关键词: {search_request.keywords} -> {expanded_keywords}")
+            # 更新搜索请求中的关键词
+            search_request.keywords = expanded_keywords
+
         logger.info(f"搜索文献: {search_request.keywords}")
+
+        # 0.1 记录搜索日志
+        try:
+            log = RecallLog(
+                event_type="query",
+                source="online_search",
+                query_keywords=original_keywords,
+                group_keys=list(activated_groups.keys()) if activated_groups else None,
+                extra={
+                    "expanded_keywords": expanded_keywords,
+                    "sources": search_request.sources,
+                    "year_from": search_request.year_from,
+                    "year_to": search_request.year_to,
+                    "limit": search_request.limit
+                }
+            )
+            db.add(log)
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to log online search query: {e}")
 
         # 1. 构造缓存 key（只和搜索条件相关）
         cache_key = search_cache.make_key(
@@ -133,17 +175,79 @@ async def search_papers_local(
       - 分页：page / page_size
     """
     try:
+        # 0. 语义组关键词扩展 (本地搜索也支持)
+        activated_groups = {}
+        expanded_keywords = []
+        original_keywords = []
+
+        if payload.q:
+            semantic_service = get_semantic_group_service()
+            # 简单处理：将查询词视为关键词列表
+            original_keywords = [k.strip() for k in payload.q.split() if k.strip()]
+            expanded_result = semantic_service.expand_keywords(original_keywords)
+            expanded_keywords = cast(List[str], expanded_result["keywords"])
+            activated_groups = cast(Dict[str, Any], expanded_result.get("activated_groups", {}))
+            
+            if len(expanded_keywords) > len(original_keywords):
+                logger.info(f"本地搜索语义扩展: {original_keywords} -> {expanded_keywords}")
+                # 重新组合为查询字符串，用 OR 连接或保留原样
+                # 这里简单策略：如果扩展了，就用扩展后的词进行匹配
+                # 但本地搜索是模糊匹配，多个词通常意味着 AND 或 OR。
+                # 这里的实现保持简单：如果用户输入了明确的词，我们尝试用扩展词增强匹配
+                # 但 SQL LIKE 不支持直接的列表匹配，需要构造 OR 条件
+                pass
+        
+        # 0.1 记录搜索日志
+        try:
+            log = RecallLog(
+                event_type="query",
+                source="local_search",
+                query_keywords=original_keywords,
+                group_keys=list(activated_groups.keys()) if activated_groups else None,
+                extra={
+                    "expanded_keywords": expanded_keywords,
+                    "year_from": payload.year_from,
+                    "year_to": payload.year_to,
+                    "group_id": payload.group_id,
+                    "raw_query": payload.q
+                }
+            )
+            db.add(log)
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to log local search query: {e}")
+
         query = db.query(Paper)
+
+        # 分组过滤
+        if payload.group_id is not None:
+            query = query.join(LiteratureGroupPaper).filter(
+                LiteratureGroupPaper.group_id == payload.group_id
+            )
+
+        # 归档过滤
+        if not payload.include_archived:
+            query = query.filter(
+                or_(Paper.is_archived == False, Paper.is_archived == None)
+            )
 
         # 关键词模糊匹配
         if payload.q:
-            like_pattern = f"%{payload.q.strip()}%"
-            query = query.filter(
-                or_(
-                    Paper.title.ilike(like_pattern),
-                    Paper.abstract.ilike(like_pattern),
-                )
-            )
+            # 支持多关键词 OR 匹配 (包括语义扩展词)
+            keywords = [k.strip() for k in payload.q.split() if k.strip()]
+            semantic_service = get_semantic_group_service()
+            expanded_result = semantic_service.expand_keywords(keywords)
+            all_keywords = cast(List[str], expanded_result["keywords"])
+            
+            # 构造 OR 条件
+            conditions = []
+            for kw in all_keywords:
+                pattern = f"%{kw}%"
+                conditions.append(Paper.title.ilike(pattern))
+                conditions.append(Paper.abstract.ilike(pattern))
+            
+            if conditions:
+                query = query.filter(or_(*conditions))
 
         # 年份过滤
         if payload.year_from is not None:
@@ -173,6 +277,11 @@ async def search_papers_local(
             total=total,
             items=items,
             message=f"本地文献库检索成功，当前页 {page}，共 {total} 条记录",
+            search_context={
+                "query_keywords": original_keywords,
+                "expanded_keywords": expanded_keywords,
+                "group_keys": list(activated_groups.keys()) if activated_groups else []
+            }
         )
     except Exception as e:
         logger.error(f"本地文献库检索失败: {e}")
@@ -183,10 +292,16 @@ async def search_papers_local(
 async def list_papers(
     skip: int = 0,
     limit: int = 20,
-    db: Session = Depends(get_db)
+    include_archived: bool = False,
+    db: Session = Depends(get_db),
 ):
     """获取文献列表"""
-    papers = db.query(Paper).offset(skip).limit(limit).all()
+    query = db.query(Paper)
+    if not include_archived:
+        query = query.filter(
+            or_(Paper.is_archived == False, Paper.is_archived == None)
+        )
+    papers = query.offset(skip).limit(limit).all()
     return [PaperResponse.model_validate(paper) for paper in papers]
 
 
@@ -235,45 +350,83 @@ async def delete_paper(paper_id: int, db: Session = Depends(get_db)):
     return {"message": "文献已删除"}
 
 
-@router.post("/{paper_id}/download")
+@router.post("/archive")
+async def archive_papers_endpoint(
+    payload: PaperBatchDelete, db: Session = Depends(get_db)
+):
+    """批量归档文献"""
+    count = archive_papers(db, payload.paper_ids, reason="User archived")
+    return {"message": f"已归档 {count} 篇文献", "count": count}
+
+
+@router.post("/restore")
+async def restore_papers_endpoint(
+    payload: PaperBatchDelete, db: Session = Depends(get_db)
+):
+    """批量恢复文献"""
+    count = restore_papers(db, payload.paper_ids)
+    return {"message": f"已恢复 {count} 篇文献", "count": count}
+
+
+@router.post("/{paper_id}/download-pdf")
 async def download_paper_pdf(
     paper_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """
-    下载文献PDF
-
-    后台任务异步下载
+    下载文献PDF (异步后台任务)
     """
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
     if not paper:
         raise HTTPException(status_code=404, detail="文献不存在")
 
-    # 先读取实际的 pdf_url 值，避免对 Column 对象做布尔判断
+    # Check if PDF URL exists
     pdf_url = getattr(paper, "pdf_url", None)
     if not pdf_url:
         raise HTTPException(status_code=400, detail="该文献没有PDF链接")
 
-    # 添加后台下载任务
-    def download_task():
+    # Define background task
+    async def download_task():
         try:
-            arxiv_crawler = ArxivCrawler(settings)
-            pdf_path = arxiv_crawler.download_pdf(
-                paper,
-                download_dir=settings.PAPERS_PATH,
-            )
-            if pdf_path:
-                # 使用 setattr 避免类型检查器将 pdf_path 视为 Column 对象
-                setattr(paper, "pdf_path", pdf_path)
-                db.commit()
-                logger.info(f"PDF下载成功: {pdf_path}")
+            # Re-create session for background task if needed,
+            # but here we use the service which uses the passed db session.
+            # Note: In FastAPI background tasks, it's safer to create a new session
+            # or ensure the session isn't closed before the task runs.
+            # For simplicity here, we'll assume the service handles it or we catch errors.
+            # BETTER APPROACH: Create a new session scope inside the task.
+            from app.database import SessionLocal
+            with SessionLocal() as session:
+                service = PDFDownloadService(session)
+                await service.download_paper_pdf(paper_id)
+                logger.info(f"PDF downloaded successfully for paper {paper_id}")
         except Exception as e:
-            logger.error(f"PDF下载失败: {e}")
+            logger.error(f"Failed to download PDF for paper {paper_id}: {e}")
 
     background_tasks.add_task(download_task)
 
-    return {
-        "message": "PDF下载任务已启动",
-        "paper_id": paper_id,
-    }
+    return {"message": "PDF下载任务已启动", "paper_id": paper_id}
+
+
+@router.get("/{paper_id}/pdf")
+async def get_paper_pdf(
+    paper_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    获取/预览文献PDF
+    """
+    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="文献不存在")
+        
+    pdf_path = paper.pdf_path
+    
+    if not pdf_path or not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail="PDF文件未找到或尚未下载")
+        
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=os.path.basename(pdf_path)
+    )

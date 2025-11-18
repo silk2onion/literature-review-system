@@ -617,3 +617,176 @@ body {
   opacity: 0.6;
   cursor: default;
 }
+
+/* PhD Pipeline Page Styles */
+.phd-pipeline-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  height: 100%;
+  padding: 20px;
+  background: radial-gradient(circle at top left, #10152c 0, #050713 55%, #020308 100%);
+  color: #f5f5f7;
+  border-radius: 18px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.88), 0 0 0 1px rgba(77, 89, 144, 0.7);
+  overflow-y: auto;
+}
+
+.pipeline-steps-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.pipeline-step {
+  padding: 16px;
+  border-radius: 16px;
+  background: radial-gradient(
+    circle at top left,
+    rgba(16, 21, 44, 0.8) 0,
+    rgba(5, 7, 19, 0.85) 60%,
+    rgba(2, 3, 8, 0.9) 100%
+  );
+  border: 1px solid rgba(77, 89, 144, 0.7);
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.8);
+}
+
+.pipeline-step h3 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 16px;
+  color: #c5ceff;
+}
+
+.pipeline-step button {
+  /* Using existing button styles, but can be customized */
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  background: linear-gradient(135deg, #4ae0c2, #5f8fff);
+  border: none;
+  color: #050713;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(4, 10, 26, 1);
+  cursor: pointer;
+  white-space: nowrap;
+  margin-bottom: 16px;
+}
+
+.pipeline-step button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #2a2f45;
+  color: #6a739a;
+  box-shadow: none;
+}
+
+.step-result h4 {
+  font-size: 14px;
+  color: #a3b0d8;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(77, 89, 144, 0.5);
+  padding-bottom: 6px;
+}
+
+.claims-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.claim-card {
+  background: rgba(5, 8, 22, 0.9);
+  border: 1px solid rgba(82, 96, 188, 0.6);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 13px;
+}
+
+.claim-card p {
+  margin: 0 0 10px;
+}
+
+.claim-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: #8a96c8;
+}
+
+.claim-meta span {
+  background: rgba(30, 40, 80, 0.7);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.claims-with-evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.claim-with-evidence-card {
+  background: rgba(5, 8, 22, 0.9);
+  border: 1px solid rgba(82, 96, 188, 0.6);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.claim-with-evidence-card h5 {
+  margin: 12px 0 8px;
+  font-size: 12px;
+  color: #a3b0d8;
+}
+
+.evidence-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.evidence-item {
+  background: rgba(15, 20, 45, 0.8);
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  border-left: 3px solid #4ae0c2;
+}
+
+.evidence-title {
+  display: block;
+  font-weight: 500;
+  color: #d4ddff;
+  margin-bottom: 4px;
+}
+
+.evidence-authors {
+  font-size: 11px;
+  color: #8a96c8;
+}
+
+.final-render-container {
+  background: rgba(5, 8, 22, 0.9);
+  border: 1px solid rgba(82, 96, 188, 0.6);
+  border-radius: 12px;
+  padding: 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #e3e6ff;
+}
+
+.final-render-container h1,
+.final-render-container h2,
+.final-render-container h3 {
+  color: #c5ceff;
+  border-bottom: 1px solid rgba(77, 89, 144, 0.5);
+  padding-bottom: 4px;
+}
+
+.final-render-container p {
+  margin: 0 0 1em;
+}

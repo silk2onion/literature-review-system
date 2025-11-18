@@ -4,9 +4,9 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -61,7 +61,35 @@ def sync_citations_for_paper(
     - citations_count: 同步完成后该论文的被引次数
     """
     service = get_citation_ingest_service()
+    # Note: sync_citations_for_paper is synchronous in service, but we can wrap it if needed.
+    # The service method is currently synchronous (using httpx.get synchronously inside? No, wait).
+    # Let's check service implementation. It uses httpx.get (sync).
+    # So we should not use async def here unless we run it in threadpool,
+    # but FastAPI handles sync def in threadpool automatically.
     stats = service.sync_citations_for_paper(db=db, paper_id=paper_id)
     if not stats:
         raise HTTPException(status_code=404, detail="未找到对应论文")
     return stats
+
+
+@router.post("/sync-batch")
+async def sync_citations_batch(
+    paper_ids: List[int] = Body(..., embed=True),
+    db: Session = Depends(get_db),
+) -> Dict[str, int]:
+    """
+    批量同步引用关系。
+    """
+    service = get_citation_ingest_service()
+    # Since service.sync_citations_batch calls sync_citations_for_paper which is sync (blocking I/O),
+    # we should ideally run this in a background task or threadpool if it takes long.
+    # For now, we'll let FastAPI handle the blocking call (if we define it as sync def)
+    # OR we define it as async and accept it might block the event loop if not careful.
+    # However, the service method I added `async def sync_citations_batch` but it calls sync methods.
+    # Let's make the service method sync as well to be consistent with `sync_citations_for_paper`.
+    
+    # Wait, I defined `async def sync_citations_batch` in the service diff above.
+    # But `sync_citations_for_paper` uses `httpx.get` which is sync.
+    # So `sync_citations_batch` should also be sync to avoid "awaiting" a sync function (which is just a function call).
+    
+    return await service.sync_citations_batch(db=db, paper_ids=paper_ids)

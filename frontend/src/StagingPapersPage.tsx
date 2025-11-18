@@ -73,6 +73,7 @@ export default function StagingPapersPage() {
 
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [promoting, setPromoting] = useState<boolean>(false);
+  const [deleting, setDeleting] = useState<boolean>(false);
 
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 1;
 

@@ -48,6 +48,11 @@ class Paper(Base):
     
     # 向量嵌入（用于语义搜索）
     embedding = Column(JSON)  # 文本嵌入向量
+
+    # 归档/删除状态
+    is_archived = Column(Integer, default=0)  # 是否归档/软删除 (0: 否, 1: 是) - SQLite Boolean is Integer
+    archived_reason = Column(String(500))  # 归档原因
+    archived_at = Column(DateTime)  # 归档时间
     
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -81,6 +86,9 @@ class Paper(Base):
             "categories": self.categories,
             "keywords": self.keywords,
             "citations_count": self.citations_count,
+            "is_archived": bool(self.is_archived),
+            "archived_reason": self.archived_reason,
+            "archived_at": self.archived_at.isoformat() if self.archived_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

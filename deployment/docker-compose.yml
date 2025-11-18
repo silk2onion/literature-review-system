@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+    container_name: literature-review-backend
+    volumes:
+      - ../backend/app:/app/app
+      - ../data:/app/data
+      - ../backend/.env:/app/.env
+    environment:
+      - DATABASE_URL=sqlite:///./data/papers.db
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.frontend
+    container_name: literature-review-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+#  # Optional: Redis for caching/queues if needed later
+#  redis:
+#    image: redis:alpine
+#    container_name: literature-review-redis
+#    ports:
+#      - "6379:6379"
+#    restart: unless-stopped
+
+#  # Optional: Postgres if migrating from SQLite
+#  db:
+#    image: postgres:15-alpine
+#    container_name: literature-review-db
+#    environment:
+#      POSTGRES_USER: user
+#      POSTGRES_PASSWORD: password
+#      POSTGRES_DB: literature_review
+#    volumes:
+#      - postgres_data:/var/lib/postgresql/data
+#    ports:
+#      - "5432:5432"
+#    restart: unless-stopped
+
+# volumes:
+#   postgres_data:

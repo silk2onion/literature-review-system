@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from typing import List, Optional, Sequence
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -168,6 +169,60 @@ async def delete_paper_and_cleanup(db: Session, paper: Paper) -> None:
     db.commit()
 
 
+def archive_papers(
+    db: Session, paper_ids: List[int], reason: Optional[str] = None
+) -> int:
+    """
+    批量归档 Paper。
+    """
+    if not paper_ids:
+        return 0
+
+    now = datetime.now(timezone.utc)
+    
+    # SQLite 不支持直接 update(Paper).where(...).values(...) 的部分语法，
+    # 但 SQLAlchemy ORM update 是支持的。
+    # 注意：SQLite 中 Boolean 存储为 0/1，SQLAlchemy 会自动处理。
+    
+    stmt = (
+        db.query(Paper)
+        .filter(Paper.id.in_(paper_ids))
+        .update(
+            {
+                Paper.is_archived: True,
+                Paper.archived_at: now,
+                Paper.archived_reason: reason,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    return stmt
+
+
+def restore_papers(db: Session, paper_ids: List[int]) -> int:
+    """
+    批量恢复（取消归档） Paper。
+    """
+    if not paper_ids:
+        return 0
+
+    stmt = (
+        db.query(Paper)
+        .filter(Paper.id.in_(paper_ids))
+        .update(
+            {
+                Paper.is_archived: False,
+                Paper.archived_at: None,
+                Paper.archived_reason: None,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    return stmt
+
+
 async def promote_staging_papers(
     db: Session,
     staging_records: Sequence[StagingPaper],
@@ -246,16 +301,12 @@ async def promote_staging_papers(
                 getattr(staging, "id", None),
             )
 
-        # 回写暂存记录的状态与映射关系
+        # 提升成功后，删除暂存记录
         try:
-            staging.final_paper_id = paper.id  # type: ignore[assignment]
-            # 使用 getattr 避免静态类型检查将 ORM 字段视为 Column 对象
-            current_status = getattr(staging, "status", None)
-            if not current_status or current_status == "pending":
-                setattr(staging, "status", "accepted")
+            db.delete(staging)
         except Exception:
             logger.exception(
-                "更新 StagingPaper(id=%s) 状态/映射关系失败", getattr(staging, "id", None)
+                "删除 StagingPaper(id=%s) 失败", getattr(staging, "id", None)
             )
 
         promoted.append(paper)

@@ -11,6 +11,8 @@
 - 依据仓库中的文档 [`architecture.md`](architecture.md:1) / [`implementation-guide.md`](implementation-guide.md:1) / [`quick-start.md`](quick-start.md:1) / [`workflow-diagrams.md`](workflow-diagrams.md:1) 结合实际代码结构，确认项目已从 Flask 方案演进为 FastAPI 应用。
 - 在 backend 中已实现多源文献抓取、去重入库、本地文献库检索和基于 LLM 的综述生成。
 - 新建 Memory Bank 文件 [`productContext.md`](memory-bank/productContext.md:1)，用来记录“真实实现”的产品视图，而不是文档中早期的 Flask 示例。
+- [2025-11-18] 完成综述导出功能（后端 API + 前端下载）与“基于本地库生成综述”的新工作流拆分。
+- [2025-11-18] 修复综述导出内容为空的问题（确保 Render 阶段将内容写入数据库）。
 
 ## 3. 打算近期推进的工作块
 

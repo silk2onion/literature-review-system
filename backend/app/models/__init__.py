@@ -8,6 +8,7 @@ from .staging_paper import StagingPaper
 from .tag import Tag, TagGroup, PaperTag, TagGroupTag
 from .citation import PaperCitation
 from .recall_log import RecallLog
+from .group import PaperGroup, PaperGroupAssociation
 
 __all__ = [
     "Paper",
@@ -21,4 +22,6 @@ __all__ = [
     "TagGroupTag",
     "PaperCitation",
     "RecallLog",
+    "PaperGroup",
+    "PaperGroupAssociation",
 ]

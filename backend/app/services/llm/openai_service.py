@@ -60,6 +60,9 @@ class OpenAIService:
             prompt = self._build_framework_prompt(keywords, papers)
             
             # 调用LLM
+            logger.info(f"Generating framework with model: {self.model}, prompt length: {len(prompt)}")
+            logger.debug(f"Framework prompt snippet: {prompt[:200]}...")
+
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -76,7 +79,19 @@ class OpenAIService:
                 max_tokens=2000
             )
             
+            finish_reason = response.choices[0].finish_reason
+            logger.info(f"LLM response finish_reason: {finish_reason}")
             framework = response.choices[0].message.content or ""
+            
+            if not framework:
+                logger.error(f"Empty framework response. Full response object: {response}")
+                if finish_reason == "length":
+                    raise ValueError(f"LLM response truncated due to length limit. Model: {self.model}")
+                elif finish_reason == "content_filter":
+                    raise ValueError(f"LLM response filtered due to content policy. Model: {self.model}")
+                else:
+                    raise ValueError(f"LLM returned empty response for framework generation. Finish reason: {finish_reason}. Model: {self.model}")
+                
             logger.info(f"综述框架生成成功，长度: {len(framework)}")
             return framework
             
@@ -128,10 +143,84 @@ class OpenAIService:
             logger.error(f"生成综述内容失败: {e}")
             raise
     
+    async def complete(
+        self,
+        prompt: str,
+        system_prompt: str = "You are a helpful assistant.",
+        temperature: float = 0.7,
+        max_tokens: int = 4000,
+    ) -> str:
+        """
+        通用文本补全
+
+        Args:
+            prompt (str): 用户输入
+            system_prompt (str): 系统提示词
+            temperature (float): 温度
+            max_tokens (int): 最大 token 数
+
+        Returns:
+            str: LLM 返回的文本
+        """
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            content = response.choices[0].message.content or ""
+            logger.info(f"文本补全成功，长度: {len(content)}")
+            return content
+        except Exception as e:
+            logger.error(f"文本补全失败: {e}")
+            raise
+
+    async def complete_json(
+        self,
+        prompt: str,
+        system_prompt: str = "You are a helpful assistant designed to output JSON.",
+        temperature: float = 0.2,
+        max_tokens: int = 4000,
+    ) -> Dict[str, Any]:
+        """
+        通用 JSON 格式补全
+
+        Args:
+            prompt (str): 用户输入
+            system_prompt (str): 系统提示词
+            temperature (float): 温度
+            max_tokens (int): 最大 token 数
+
+        Returns:
+            Dict[str, Any]: LLM 返回的 JSON 对象
+        """
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            content = response.choices[0].message.content or "{}"
+            logger.info("JSON 补全成功，内容: %s...", content[:100])
+            import json
+            return json.loads(content)
+        except Exception as e:
+            logger.error(f"JSON 补全失败: {e}")
+            raise
+
     async def generate_lit_review(
         self,
         keywords: List[str],
-        papers: List[Paper],
+        papers: List[Any],
         prompt_config: Optional[PromptConfig] = None,
         custom_prompt: Optional[str] = None,
         year_from: Optional[int] = None,
@@ -165,24 +254,62 @@ class OpenAIService:
         # 2. 构造 paper_summaries 文本（简化版）
         paper_summaries_parts: List[str] = []
         for idx, p in enumerate(papers, start=1):
-            title = p.title or "Untitled"
+            # 兼容 dict 和 object
+            if isinstance(p, dict):
+                title = p.get("title", "Untitled")
+                authors_value = p.get("authors")
+                year = p.get("year")
+            else:
+                title = getattr(p, "title", "Untitled")
+                authors_value = getattr(p, "authors", None)
+                year = getattr(p, "year", None)
+
             authors = ""
-            authors_value: Any = getattr(p, "authors", None)
             if authors_value:
                 # authors 在模型里是 JSON，统一转成字符串
                 if isinstance(authors_value, list):
                     authors = ", ".join(str(a) for a in authors_value[:3])
                 else:
                     authors = str(authors_value)
-            year = getattr(p, "year", None)
+            
             line = f"{idx}. {title}"
             meta: List[str] = []
             if authors:
                 meta.append(f"作者: {authors}")
             if year:
                 meta.append(f"年份: {year}")
+            
+            # 增加期刊信息
+            journal = getattr(p, "journal", None) if not isinstance(p, dict) else p.get("journal")
+            quartile = getattr(p, "journal_quartile", None) if not isinstance(p, dict) else p.get("journal_quartile")
+            impact_factor = getattr(p, "journal_impact_factor", None) if not isinstance(p, dict) else p.get("journal_impact_factor")
+            indexing = getattr(p, "indexing", None) if not isinstance(p, dict) else p.get("indexing")
+
+            journal_info = []
+            if journal:
+                journal_info.append(journal)
+            if quartile:
+                journal_info.append(f"{quartile}")
+            if impact_factor:
+                journal_info.append(f"IF: {impact_factor}")
+            if indexing:
+                # indexing 可能是 list 或 str
+                if isinstance(indexing, list):
+                    journal_info.append(",".join(indexing))
+                else:
+                    journal_info.append(str(indexing))
+            
+            if journal_info:
+                meta.append(" | ".join(journal_info))
+
             if meta:
                 line += " （" + "；".join(meta) + "）"
+            
+            # 增加引用上下文
+            citation_context = p.get("citation_context") if isinstance(p, dict) else getattr(p, "citation_context", None)
+            if citation_context:
+                line += f"\n   [引用关系: {citation_context}]"
+
             paper_summaries_parts.append(line)
         paper_summaries = "\n".join(paper_summaries_parts) if paper_summaries_parts else "暂无可用文献信息"
 
@@ -275,7 +402,7 @@ class OpenAIService:
     def _build_framework_prompt(
         self,
         keywords: List[str],
-        papers: List[Paper]
+        papers: List[Any]
     ) -> str:
         """构建生成框架的prompt"""
         keywords_str = "、".join(keywords)
@@ -283,19 +410,35 @@ class OpenAIService:
         # 提取文献摘要
         paper_summaries: List[str] = []
         for i, paper in enumerate(papers[:20], 1):  # 最多使用20篇文献
-            summary = f"{i}. {paper.title}\n"
-            authors_value: Any = getattr(paper, "authors", None)
+            # 兼容 dict 和 object
+            if isinstance(paper, dict):
+                title = paper.get("title", "Untitled")
+                authors_value = paper.get("authors")
+                abstract_value = paper.get("abstract")
+            else:
+                title = getattr(paper, "title", "Untitled")
+                authors_value = getattr(paper, "authors", None)
+                abstract_value = getattr(paper, "abstract", None)
+
+            summary = f"{i}. {title}\n"
+            
             if authors_value:
                 if isinstance(authors_value, list):
                     authors_str = ", ".join(str(a) for a in authors_value[:3])
                 else:
                     authors_str = str(authors_value)
                 summary += f"   作者: {authors_str}\n"
-            abstract_value: Any = getattr(paper, "abstract", None)
+            
             if abstract_value:
                 abstract_text = str(abstract_value)
                 abstract = abstract_text[:300] + "..." if len(abstract_text) > 300 else abstract_text
                 summary += f"   摘要: {abstract}\n"
+            
+            # 增加引用上下文
+            citation_context = paper.get("citation_context") if isinstance(paper, dict) else getattr(paper, "citation_context", None)
+            if citation_context:
+                summary += f"   引用关系: {citation_context}\n"
+
             paper_summaries.append(summary)
         
         papers_text = "\n".join(paper_summaries)
@@ -328,29 +471,49 @@ class OpenAIService:
     def _build_content_prompt(
         self,
         framework: str,
-        papers: List[Paper]
+        papers: List[Any]
     ) -> str:
         """构建生成详细内容的prompt"""
         # 提取文献详细信息
         paper_details: List[str] = []
         for i, paper in enumerate(papers[:20], 1):
-            detail = f"{i}. **{paper.title}**\n"
-            authors_value: Any = getattr(paper, "authors", None)
+            # 兼容 dict 和 object
+            if isinstance(paper, dict):
+                title = paper.get("title", "Untitled")
+                authors_value = paper.get("authors")
+                year_value = paper.get("year")
+                journal_value = paper.get("journal")
+                abstract_value = paper.get("abstract")
+            else:
+                title = getattr(paper, "title", "Untitled")
+                authors_value = getattr(paper, "authors", None)
+                year_value = getattr(paper, "year", None)
+                journal_value = getattr(paper, "journal", None)
+                abstract_value = getattr(paper, "abstract", None)
+
+            detail = f"{i}. **{title}**\n"
+            
             if authors_value:
                 if isinstance(authors_value, list):
                     authors_str = ", ".join(str(a) for a in authors_value)
                 else:
                     authors_str = str(authors_value)
                 detail += f"   - 作者: {authors_str}\n"
-            year_value: Any = getattr(paper, "year", None)
+            
             if year_value is not None:
                 detail += f"   - 年份: {year_value}\n"
-            journal_value: Any = getattr(paper, "journal", None)
+            
             if journal_value:
                 detail += f"   - 期刊: {journal_value}\n"
-            abstract_value: Any = getattr(paper, "abstract", None)
+            
             if abstract_value:
                 detail += f"   - 摘要: {abstract_value}\n"
+            
+            # 增加引用上下文
+            citation_context = paper.get("citation_context") if isinstance(paper, dict) else getattr(paper, "citation_context", None)
+            if citation_context:
+                detail += f"   - 引用关系: {citation_context}\n"
+
             paper_details.append(detail)
         
         papers_text = "\n".join(paper_details)

@@ -15,6 +15,7 @@ from app.schemas.staging_paper import (
     StagingPaperSearchResponse,
     StagingPaperPromoteRequest,
 )
+from pydantic import BaseModel
 from app.schemas.paper import PaperResponse
 from app.services.paper_service import promote_staging_papers as promote_staging_papers_service
 

@@ -16,17 +16,27 @@ class ReviewStatus(str, Enum):
 
 
 class ReviewBase(BaseModel):
-    """综述基础模型"""
+    """综述基础模型（通用字段）"""
     title: str = Field(..., description="综述标题")
     keywords: List[str] = Field(..., description="关键词列表", min_length=1)
-    framework: Optional[str] = Field(default=None, description="综述框架/大纲")
-    content: Optional[str] = Field(default=None, description="综述内容")
+    framework: Optional[str] = Field(default=None, description="综述框架/大纲（整体大纲，Markdown 或结构化文本）")
+    content: Optional[str] = Field(default=None, description="完整综述内容（可为 Markdown）")
 
 
 class ReviewCreate(ReviewBase):
-    """创建综述的请求模型"""
-    paper_ids: Optional[List[int]] = Field(default=None, description="关联的文献ID列表")
+    """
+    创建综述的请求模型
 
+    用法 1：基于已有本地文献库
+    - paper_ids: 本地 Paper.id 列表，后端会基于这些文献构建上下文并调用 LLM
+
+    用法 2：占位/纯文本综述
+    - paper_ids 为空时，允许用户仅指定标题和 keywords，后续再绑定文献
+    """
+    paper_ids: Optional[List[int]] = Field(
+        default=None,
+        description="关联的本地文献 Paper.id 列表；为空时表示先创建空壳综述"
+    )
 
 class ReviewUpdate(BaseModel):
     """更新综述的请求模型"""
@@ -109,10 +119,18 @@ class LitReviewLLMResult(BaseModel):
 class ReviewGenerate(BaseModel):
     """生成综述的请求模型"""
     keywords: List[str] = Field(..., description="搜索关键词", min_length=1)
+    paper_ids: Optional[List[int]] = Field(
+        default=None,
+        description="指定使用的本地文献 ID 列表。如果提供，将忽略 sources/year_from/year_to 等搜索条件，直接使用这些文献。"
+    )
+    group_id: Optional[int] = Field(
+        default=None,
+        description="指定使用的文献分组 ID。如果提供，将使用该分组下的所有文献（受 paper_limit 限制）。"
+    )
     paper_limit: int = Field(default=20, ge=5, le=100, description="使用的文献数量限制")
     sources: List[str] = Field(
         default=["arxiv"],
-        description="文献数据源"
+        description="文献数据源。支持 'arxiv', 'scholar_serpapi', 'scopus', 'crossref'。新增支持 'local_rag' (基于本地库的语义+标签增强检索)。"
     )
     year_from: Optional[int] = Field(default=None, description="起始年份")
     year_to: Optional[int] = Field(default=None, description="结束年份")
@@ -268,3 +286,9 @@ class RenderSectionFromClaimsResponse(BaseModel):
     """阶段 3 响应：渲染后的章节与引用映射"""
     section_id: str = Field(..., description="与 SectionClaimTable 一致的章节标识")
     rendered_section: RenderedSection
+
+
+class PhdPipelineInitResponse(BaseModel):
+    """PhD Pipeline 初始化响应"""
+    review_id: int
+    claims: List[ClaimEvidence]
