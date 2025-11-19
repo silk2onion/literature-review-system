@@ -15,7 +15,11 @@ class PdfService:
 
     # 简单的 DOI 正则表达式，匹配常见的 DOI 格式
     # 10.xxxx/xxxxx
+    # 增强版：支持匹配 doi.org/ 后的 DOI，允许中间有少量空格
     DOI_PATTERN = re.compile(r'\b(10\.\d{4,9}/[-._;()/:A-Z0-9]+)\b', re.IGNORECASE)
+    
+    # 针对 https://doi.org/ 10.xxxx 这种情况的宽松匹配
+    DOI_URL_PATTERN = re.compile(r'doi\.org/\s*(10\.\d{4,9}/[-._;()/:A-Z0-9]+)', re.IGNORECASE)
 
     def extract_text(self, file_path: str) -> str:
         """
@@ -28,6 +32,11 @@ class PdfService:
                 page_text = page.extract_text()
                 if page_text:
                     text += page_text + "\n"
+            
+            # 清理常见的 PDF 乱码/伪影
+            # 例如 /gid00030/gid00035...
+            text = re.sub(r'/gid\d+', '', text)
+            
         except Exception as e:
             logger.error(f"Error extracting text from PDF {file_path}: {e}")
             raise e
@@ -37,9 +46,16 @@ class PdfService:
         """
         从文本中查找第一个匹配的 DOI
         """
+        # 1. 尝试匹配 doi.org/ 后的 DOI (处理空格)
+        match_url = self.DOI_URL_PATTERN.search(text)
+        if match_url:
+            return match_url.group(1)
+
+        # 2. 尝试直接匹配 DOI 格式
         match = self.DOI_PATTERN.search(text)
         if match:
             return match.group(1)
+            
         return None
 
     def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:

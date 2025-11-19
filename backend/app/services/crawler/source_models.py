@@ -15,31 +15,33 @@ class SourcePaper:
     # 核心元数据
     title: str
     authors: List[str]
-    abstract: Optional[str]
-    year: Optional[int]
+    # 来源 (必须字段，需放在有默认值的字段之前)
+    source: str
+    
+    abstract: Optional[str] = None
+    year: Optional[int] = None
 
     # 标识字段
-    doi: Optional[str]
-    arxiv_id: Optional[str]
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
 
-    # 来源与来源内部ID（例如 scopus 的 EID，serpapi 的 result_id）
-    source: str
-    source_id: Optional[str]
+    # 来源内部ID（例如 scopus 的 EID，serpapi 的 result_id）
+    source_id: Optional[str] = None
 
     # 出版相关信息
-    journal: Optional[str]
-    conference: Optional[str]
-    publisher: Optional[str]
-    issn: Optional[str]
-    published_date: Optional[date]
+    journal: Optional[str] = None
+    conference: Optional[str] = None
+    publisher: Optional[str] = None
+    issn: Optional[str] = None
+    published_date: Optional[date] = None
 
     # 访问链接
-    url: Optional[str]
-    pdf_url: Optional[str]
+    url: Optional[str] = None
+    pdf_url: Optional[str] = None
 
     # 主题/分类信息
-    keywords: List[str]
-    categories: List[str]
+    keywords: List[str] = None
+    categories: List[str] = None
 
     # 期刊评价指标 (新增)
     journal_impact_factor: Optional[float] = None
