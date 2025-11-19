@@ -13,6 +13,8 @@
 - 新建 Memory Bank 文件 [`productContext.md`](memory-bank/productContext.md:1)，用来记录“真实实现”的产品视图，而不是文档中早期的 Flask 示例。
 - [2025-11-18] 完成综述导出功能（后端 API + 前端下载）与“基于本地库生成综述”的新工作流拆分。
 - [2025-11-18] 修复综述导出内容为空的问题（确保 Render 阶段将内容写入数据库）。
+- [2025-11-19] 修复 `backend/app/models/__init__.py` 中的语法错误（移除多余的 markdown 标记）和 `backend/app/models/paper_chunk.py` 中的缩进错误。
+- [2025-11-19] 实现 `POST /api/papers/upload` 接口，支持 PDF 文件上传、文本提取、DOI 识别与自动入库（或更新）。
 
 ## 3. 打算近期推进的工作块
 

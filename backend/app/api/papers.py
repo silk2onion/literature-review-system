@@ -1,10 +1,12 @@
 """
 Papers API路由
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, cast, Any, Dict
 import logging
+import shutil
+from datetime import datetime
 from sqlalchemy import or_
 
 from app.database import get_db
@@ -37,7 +39,7 @@ from app.services.paper_ingest import (
     insert_or_update_staging_from_sources,
     paper_to_source_paper,
 )
-from app.services.pdf_service import PDFDownloadService
+from app.services.pdf_service import PDFDownloadService, get_pdf_service
 from app.services.semantic_groups import get_semantic_group_service
 from fastapi.responses import FileResponse
 import os
@@ -416,6 +418,88 @@ async def download_paper_pdf(
     background_tasks.add_task(download_task)
 
     return {"message": "PDF下载任务已启动", "paper_id": paper_id}
+
+
+@router.post("/upload", response_model=PaperResponse)
+async def upload_paper_pdf(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    上传 PDF 文件并创建/更新文献记录
+    1. 保存 PDF 到本地
+    2. 提取文本和 DOI
+    3. 尝试匹配已有文献或创建新文献
+    """
+    try:
+        # 1. 确保目录存在
+        pdf_dir = os.path.join(settings.PAPERS_PATH, "pdfs")
+        os.makedirs(pdf_dir, exist_ok=True)
+        
+        # 2. 保存文件
+        # 使用安全的文件名
+        filename = file.filename or "uploaded_paper.pdf"
+        safe_filename = os.path.basename(filename)
+        file_path = os.path.join(pdf_dir, safe_filename)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        logger.info(f"PDF uploaded to {file_path}")
+        
+        # 3. 提取信息
+        pdf_service = get_pdf_service()
+        text = pdf_service.extract_text(file_path)
+        doi = pdf_service.find_doi(text)
+        
+        # 4. 尝试匹配已有文献
+        paper = None
+        if doi:
+            paper = db.query(Paper).filter(Paper.doi == doi).first()
+            
+        if paper:
+            logger.info(f"Found existing paper by DOI {doi}: {paper.id}")
+            # 更新 PDF 路径
+            paper.pdf_path = file_path
+            db.commit()
+            db.refresh(paper)
+        else:
+            # 创建新文献
+            # 尝试从文件名猜测标题
+            title_guess = os.path.splitext(safe_filename)[0].replace("_", " ").replace("-", " ")
+            
+            new_paper = Paper(
+                title=title_guess,
+                doi=doi,
+                pdf_path=file_path,
+                source="upload",
+                year=datetime.now().year, # 默认当前年份
+                is_archived=False
+            )
+            db.add(new_paper)
+            db.commit()
+            db.refresh(new_paper)
+            paper = new_paper
+            
+            # 尝试生成 embedding (如果有文本)
+            if text:
+                # 截取前 5000 字符作为摘要/内容，避免过长
+                paper.abstract = text[:5000]
+                db.commit()
+                
+                try:
+                    from app.services.embedding_service import get_embedding_service
+                    embedding_service = get_embedding_service()
+                    await embedding_service.embed_paper(paper)
+                    db.commit()
+                except Exception as e:
+                    logger.warning(f"Failed to generate embedding for uploaded paper: {e}")
+
+        return PaperResponse.model_validate(paper)
+
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{paper_id}/pdf")
