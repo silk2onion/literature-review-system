@@ -1,11 +1,12 @@
 """
 数据库模型模块
 """
-from .paper import Paper
-from .review import Review, ReviewPaper
-from .crawl_job import CrawlJob
-from .staging_paper import StagingPaper
-from .tag import Tag, TagGroup, PaperTag, TagGroupTag
+from app.models.paper import Paper
+from app.models.review import Review, ReviewPaper
+from app.models.crawl_job import CrawlJob
+from app.models.staging_paper import StagingPaper
+from app.models.tag import Tag, TagGroup, PaperTag, TagGroupTag
+from app.models.paper_chunk import PaperChunk
 from .citation import PaperCitation
 from .recall_log import RecallLog
 from .group import PaperGroup, PaperGroupAssociation

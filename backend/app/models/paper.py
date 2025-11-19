@@ -60,6 +60,8 @@ class Paper(Base):
     
     # 关系
     review_papers = relationship("ReviewPaper", back_populates="paper", cascade="all, delete-orphan")
+    chunks = relationship("PaperChunk", back_populates="paper", cascade="all, delete-orphan")
+
     
     def to_dict(self):
         """转换为字典"""
