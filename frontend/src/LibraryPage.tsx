@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import CitationGraphPanel from "./CitationGraphPanel";
 import GroupManager from "./GroupManager";
 import SemanticSearchDebugPanel from "./SemanticSearchDebugPanel";
-import { groupsApi, type LiteratureGroup } from "./api/groups";
+import { groupsApi } from "./api/groups";
+import type { LiteratureGroup } from "./types";
 
 type PaperResponse = {
   id: number;
@@ -60,7 +61,11 @@ type SourceFilter = "all" | "arxiv" | "crossref";
 
 const API_BASE_URL = "http://localhost:5444";
 
-export default function LibraryPage() {
+interface LibraryPageProps {
+  onGenerateReview?: (groupId: number) => void;
+}
+
+export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
   const [query, setQuery] = useState<string>("");
   const [yearFrom, setYearFrom] = useState<string>("");
   const [yearTo, setYearTo] = useState<string>("");
@@ -83,16 +88,62 @@ export default function LibraryPage() {
   const [restoring, setRestoring] = useState<boolean>(false);
   const [syncing, setSyncing] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
+  const [removingFromGroup, setRemovingFromGroup] = useState<boolean>(false);
   const [showRagDebug, setShowRagDebug] = useState(false);
   const [showGroupManager, setShowGroupManager] = useState(false);
   const [showAddToGroupModal, setShowAddToGroupModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const [groups, setGroups] = useState<LiteratureGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [searchContext, setSearchContext] = useState<SearchLocalResponse["search_context"]>(undefined);
 
+  const handleUploadPdf = async (file: File) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(`${API_BASE_URL}/api/papers/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Upload failed");
+      }
+
+      const result = await response.json();
+      alert(`上传成功！\n识别 DOI: ${result.doi || "无"}\n标题: ${result.title}`);
+      setShowUploadModal(false);
+      // 刷新列表
+      setPage(1);
+      // 触发重新加载 (依赖项变化)
+      setTotal((prev) => prev + 1);
+      // 注意：这里最好调用 fetchData()，但如果 fetchData 是在 useEffect 中定义的，可能无法直接调用。
+      // 我们可以通过修改依赖项来触发。或者假设 fetchData 在外部定义。
+      // 既然 grep 找到了 fetchData，我们尝试直接调用它，如果它是在 useEffect 内部定义的，这会报错。
+      // 为了安全，我们先假设它是在组件作用域内定义的（通常是这样）。
+      // 如果报错，我们再修。
+      // 实际上，通常 fetchData 是定义在组件内的。
+      // 让我们先不调用 fetchData，而是通过改变一个 dummy state 来触发 useEffect?
+      // 或者更直接地，我们查看一下 fetchData 的定义位置。
+      // 算了，直接用 window.location.reload() 最稳妥作为 fallback，或者 just alert.
+      // 更好的方式是：
+      window.location.reload();
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      alert(`上传失败: ${error.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   useEffect(() => {
-    groupsApi.getGroups().then(setGroups).catch(console.error);
+    groupsApi.getGroups().then(data => setGroups(data.groups)).catch(console.error);
   }, [showGroupManager]); // Refresh groups when manager closes/updates
 
   const logInteraction = async (paperId: number, action: string) => {
@@ -197,7 +248,7 @@ export default function LibraryPage() {
 
   const handleRestoreSelected = async () => {
     if (selectedIds.size === 0) return;
-    
+
     setRestoring(true);
     try {
       const resp = await fetch(`${API_BASE_URL}/api/papers/restore`, {
@@ -224,7 +275,7 @@ export default function LibraryPage() {
 
   const handleSyncCitationsSelected = async () => {
     if (selectedIds.size === 0) return;
-    
+
     setSyncing(true);
     try {
       const resp = await fetch(`${API_BASE_URL}/api/citations/sync-batch`, {
@@ -287,9 +338,31 @@ export default function LibraryPage() {
       alert(`已将 ${selectedIds.size} 篇文献加入分组 "${group.name}"`);
       setShowAddToGroupModal(false);
       setSelectedIds(new Set()); // Optional: clear selection after adding
+      // If we are currently viewing the target group, refresh to show new papers
+      if (selectedGroupId === group.id) {
+        fetchData({ resetPage: false });
+      }
     } catch (err) {
       console.error(err);
       alert("加入分组失败");
+    }
+  };
+
+  const handleRemoveFromGroup = async () => {
+    if (selectedIds.size === 0 || !selectedGroupId) return;
+    if (!confirm(`确定要从当前分组移除选中的 ${selectedIds.size} 篇文献吗？`)) return;
+
+    setRemovingFromGroup(true);
+    try {
+      await groupsApi.removePapersFromGroup(selectedGroupId, Array.from(selectedIds));
+      alert(`已从分组移除 ${selectedIds.size} 篇文献`);
+      setSelectedIds(new Set());
+      fetchData({ resetPage: false });
+    } catch (err) {
+      console.error(err);
+      alert("移除失败");
+    } finally {
+      setRemovingFromGroup(false);
     }
   };
 
@@ -300,7 +373,7 @@ export default function LibraryPage() {
         method: "POST",
       });
       if (!resp.ok) throw new Error("Download failed");
-      
+
       // Refresh data to update PDF status
       // We don't reset page, just refresh current view
       await fetchData({ resetPage: false });
@@ -428,8 +501,8 @@ export default function LibraryPage() {
         typeof opts?.page === "number"
           ? opts.page
           : opts?.resetPage
-          ? 1
-          : page;
+            ? 1
+            : page;
 
       const payload: SearchLocalRequest = {
         q: query.trim() || undefined,
@@ -473,8 +546,7 @@ export default function LibraryPage() {
       console.error("search-local error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `检索失败：${
-          (err as { message?: string })?.message || "未知错误"
+        `检索失败：${(err as { message?: string })?.message || "未知错误"
         }`,
       );
     } finally {
@@ -635,6 +707,20 @@ export default function LibraryPage() {
           >
             {analyzing ? "分析中..." : "引用网络分析"}
           </button>
+          <button
+            onClick={() => setShowUploadModal(true)}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid #10b981",
+              backgroundColor: "transparent",
+              color: "#10b981",
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            上传 PDF
+          </button>
           {selectedIds.size > 0 && (
             <>
               <button
@@ -651,6 +737,39 @@ export default function LibraryPage() {
               >
                 加入分组
               </button>
+              {selectedGroupId && (
+                <button
+                  onClick={handleRemoveFromGroup}
+                  disabled={removingFromGroup}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #f59e0b",
+                    backgroundColor: "rgba(245, 158, 11, 0.1)",
+                    color: "#f59e0b",
+                    fontSize: 12,
+                    cursor: removingFromGroup ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {removingFromGroup ? "移除中..." : "从分组移除"}
+                </button>
+              )}
+              {selectedGroupId && onGenerateReview && (
+                <button
+                  onClick={() => onGenerateReview(selectedGroupId)}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #8b5cf6",
+                    backgroundColor: "rgba(139, 92, 246, 0.1)",
+                    color: "#8b5cf6",
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  ✨ 基于此分组生成综述
+                </button>
+              )}
               <button
                 onClick={handleSyncCitationsSelected}
                 disabled={syncing}
@@ -681,7 +800,7 @@ export default function LibraryPage() {
               >
                 {deleting ? "删除中..." : `删除选中 (${selectedIds.size})`}
               </button>
-              
+
               {!showArchived ? (
                 <button
                   onClick={handleArchiveSelected}
@@ -1283,7 +1402,7 @@ export default function LibraryPage() {
                   >
                     {p.authors && p.authors.length > 0
                       ? p.authors.slice(0, 3).join(", ") +
-                        (p.authors.length > 3 ? " ..." : "")
+                      (p.authors.length > 3 ? " ..." : "")
                       : "-"}
                   </td>
                   <td
@@ -1322,14 +1441,14 @@ export default function LibraryPage() {
                               p.journal_quartile === "Q1"
                                 ? "rgba(34, 197, 94, 0.2)"
                                 : p.journal_quartile === "Q2"
-                                ? "rgba(56, 189, 248, 0.2)"
-                                : "rgba(148, 163, 184, 0.2)",
+                                  ? "rgba(56, 189, 248, 0.2)"
+                                  : "rgba(148, 163, 184, 0.2)",
                             color:
                               p.journal_quartile === "Q1"
                                 ? "#4ade80"
                                 : p.journal_quartile === "Q2"
-                                ? "#38bdf8"
-                                : "#94a3b8",
+                                  ? "#38bdf8"
+                                  : "#94a3b8",
                             fontSize: 11,
                             fontWeight: 600,
                             width: "fit-content",
@@ -1403,7 +1522,7 @@ export default function LibraryPage() {
                       ) : (
                         "-"
                       )}
-                      
+
                       {p.pdf_path ? (
                         <a
                           href={`${API_BASE_URL}/api/papers/${p.id}/pdf`}
@@ -1694,6 +1813,88 @@ export default function LibraryPage() {
             </button>
           </div>
           <SemanticSearchDebugPanel />
+        </div>
+      )}
+
+      {showUploadModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => !uploading && setShowUploadModal(false)}
+        >
+          <div
+            style={{
+              backgroundColor: "#1e293b",
+              padding: 24,
+              borderRadius: 12,
+              width: 400,
+              maxWidth: "90%",
+              border: "1px solid #334155",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 16, fontSize: 18, color: "#e2e8f0" }}>
+              上传本地 PDF
+            </h3>
+            <p style={{ fontSize: 13, color: "#94a3b8", marginBottom: 20 }}>
+              系统将自动解析 PDF 内容、识别 DOI 并尝试获取元数据。同时会生成全文向量索引以支持 RAG 问答。
+            </p>
+
+            <div style={{ marginBottom: 20 }}>
+              <input
+                type="file"
+                accept=".pdf"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleUploadPdf(e.target.files[0]);
+                  }
+                }}
+                disabled={uploading}
+                style={{
+                  width: "100%",
+                  padding: 12,
+                  borderRadius: 8,
+                  border: "2px dashed #475569",
+                  backgroundColor: "#0f172a",
+                  color: "#e2e8f0",
+                  cursor: uploading ? "not-allowed" : "pointer",
+                }}
+              />
+            </div>
+
+            {uploading && (
+              <div style={{ textAlign: "center", color: "#3b82f6", fontSize: 14 }}>
+                正在处理中，请稍候... (解析、OCR、向量化)
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
+              <button
+                onClick={() => setShowUploadModal(false)}
+                disabled={uploading}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: 6,
+                  border: "none",
+                  backgroundColor: "#334155",
+                  color: "#e2e8f0",
+                  cursor: uploading ? "not-allowed" : "pointer",
+                }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

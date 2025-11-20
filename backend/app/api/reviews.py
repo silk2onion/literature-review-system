@@ -339,7 +339,7 @@ async def generate_review(payload: ReviewGenerate, db: Session = Depends(get_db)
         return ReviewGenerateResponse(
             success=False,
             review_id=0,
-            status="error",  # type: ignore[arg-type]
+            status=ReviewStatus.FAILED,
             message=f"综述生成接口失败: {e}",
         )
 

@@ -1,39 +1,30 @@
-"""
-文献分组 Pydantic 模型
-"""
-from datetime import datetime
 from typing import List, Optional
+from datetime import datetime
 from pydantic import BaseModel
 
-from app.schemas.paper import PaperResponse
-
-# --- 基础模型 ---
-
-class GroupBase(BaseModel):
+class PaperGroupBase(BaseModel):
     name: str
     description: Optional[str] = None
 
-class GroupCreate(GroupBase):
+class PaperGroupCreate(PaperGroupBase):
     pass
 
-class GroupUpdate(GroupBase):
+class PaperGroupUpdate(BaseModel):
     name: Optional[str] = None
+    description: Optional[str] = None
 
-# --- 响应模型 ---
-
-class GroupResponse(GroupBase):
+class PaperGroupRead(PaperGroupBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    paper_count: int = 0  # 统计该组下的文献数量
+    paper_count: int = 0
 
     class Config:
         from_attributes = True
 
-class GroupWithPapersResponse(GroupResponse):
-    papers: List[PaperResponse] = []
-
-# --- 操作模型 ---
+class PaperGroupList(BaseModel):
+    groups: List[PaperGroupRead]
+    total: int
 
 class AddPapersToGroupRequest(BaseModel):
     paper_ids: List[int]
