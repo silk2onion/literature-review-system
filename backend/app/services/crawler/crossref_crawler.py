@@ -108,6 +108,31 @@ class CrossRefCrawler:
         logger.info("[CrossRefCrawler] 返回 %d 条文献（请求 rows=%d）", len(papers), rows)
         return papers
 
+    def get_paper_by_doi(self, doi: str) -> Optional[Paper]:
+        """
+        通过 DOI 直接获取文献元数据
+        """
+        if not doi:
+            return None
+            
+        url = f"{self.BASE_URL}/{doi}"
+        logger.info("[CrossRefCrawler] 请求 DOI 元数据: %s", url)
+        
+        try:
+            resp = self.client.get(url)
+            if resp.status_code == 404:
+                logger.warning("[CrossRefCrawler] DOI 未找到: %s", doi)
+                return None
+            resp.raise_for_status()
+            
+            data = resp.json()
+            item = data.get("message", {})
+            return self._parse_item(item)
+            
+        except Exception as e:
+            logger.error("[CrossRefCrawler] 获取 DOI 失败: %s", e)
+            return None
+
     def _parse_item(self, item: dict) -> Optional[Paper]:
         """
         将 CrossRef 返回的单条 item 映射为 Paper 对象
@@ -153,8 +178,15 @@ class CrossRefCrawler:
 
         year = _extract_year("published-print") or _extract_year("published-online")
 
-        # 摘要：CrossRef 的 abstract 通常是 XML 片段，这里先直接存文本
+        # 摘要：CrossRef 的 abstract 通常是 XML 片段，需要清理
         abstract = item.get("abstract")
+        if abstract:
+            # 简单清理 XML 标签 (e.g., <jats:p>, </jats:p>, <p>, <i>, <b>)
+            import re
+            # 移除所有 <...> 标签
+            abstract = re.sub(r'<[^>]+>', '', abstract)
+            # 清理多余空白
+            abstract = re.sub(r'\s+', ' ', abstract).strip()
 
         # DOI & URL
         doi = item.get("DOI")

@@ -76,7 +76,7 @@ class OpenAIService:
                     }
                 ],
                 temperature=0.7,
-                max_tokens=2000
+                max_tokens=16000
             )
             
             finish_reason = response.choices[0].finish_reason
@@ -132,7 +132,7 @@ class OpenAIService:
                     }
                 ],
                 temperature=0.7,
-                max_tokens=4000
+                max_tokens=16000
             )
             
             content = response.choices[0].message.content or ""
@@ -148,7 +148,7 @@ class OpenAIService:
         prompt: str,
         system_prompt: str = "You are a helpful assistant.",
         temperature: float = 0.7,
-        max_tokens: int = 4000,
+        max_tokens: int = 16000,
     ) -> str:
         """
         通用文本补全
@@ -184,7 +184,7 @@ class OpenAIService:
         prompt: str,
         system_prompt: str = "You are a helpful assistant designed to output JSON.",
         temperature: float = 0.2,
-        max_tokens: int = 4000,
+        max_tokens: int = 16000,
     ) -> Dict[str, Any]:
         """
         通用 JSON 格式补全
@@ -439,6 +439,13 @@ class OpenAIService:
             if citation_context:
                 summary += f"   引用关系: {citation_context}\n"
 
+            # 增加 RAG 检索到的相关片段
+            relevant_chunks = paper.get("relevant_chunks") if isinstance(paper, dict) else getattr(paper, "relevant_chunks", None)
+            if relevant_chunks:
+                summary += "   相关片段:\n"
+                for chunk in relevant_chunks[:3]: # 最多显示3个片段
+                    summary += f"     - {chunk[:200]}...\n"
+
             paper_summaries.append(summary)
         
         papers_text = "\n".join(paper_summaries)
@@ -513,6 +520,13 @@ class OpenAIService:
             citation_context = paper.get("citation_context") if isinstance(paper, dict) else getattr(paper, "citation_context", None)
             if citation_context:
                 detail += f"   - 引用关系: {citation_context}\n"
+
+            # 增加 RAG 检索到的相关片段 (详细内容生成时显示更多)
+            relevant_chunks = paper.get("relevant_chunks") if isinstance(paper, dict) else getattr(paper, "relevant_chunks", None)
+            if relevant_chunks:
+                detail += "   - 相关全文档案片段:\n"
+                for chunk in relevant_chunks[:5]: # 最多显示5个片段
+                    detail += f"     > {chunk}\n"
 
             paper_details.append(detail)
         

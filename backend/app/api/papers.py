@@ -32,7 +32,9 @@ from app.services.paper_service import (
     delete_paper_and_cleanup,
     delete_papers,
     archive_papers,
+    archive_papers,
     restore_papers,
+    process_uploaded_pdf,
 )
 from app.schemas.paper import PaperBatchDelete
 from app.services.paper_ingest import (
@@ -306,7 +308,8 @@ async def list_papers(
         query = query.filter(
             or_(Paper.is_archived == False, Paper.is_archived == None)
         )
-    papers = query.offset(skip).limit(limit).all()
+    # 默认按添加时间倒序排列
+    papers = query.order_by(Paper.created_at.desc()).offset(skip).limit(limit).all()
     return [PaperResponse.model_validate(paper) for paper in papers]
 
 
@@ -430,8 +433,7 @@ async def upload_paper_pdf(
     """
     上传 PDF 文件并创建/更新文献记录
     1. 保存 PDF 到本地
-    2. 提取文本和 DOI
-    3. 尝试匹配已有文献或创建新文献
+    2. 调用 process_uploaded_pdf 处理 (提取文本、获取元数据、入库、Embedding)
     """
     try:
         # 1. 确保目录存在
@@ -449,97 +451,8 @@ async def upload_paper_pdf(
             
         logger.info(f"PDF uploaded to {file_path}")
         
-        # 3. 提取信息
-        pdf_service = get_pdf_service()
-        text = pdf_service.extract_text(file_path)
-        doi = pdf_service.find_doi(text)
-        
-        # 4. 尝试获取元数据 (CrossRef / Arxiv)
-        metadata_paper = None
-        if doi:
-            try:
-                logger.info(f"Fetching metadata for DOI: {doi}")
-                crossref = CrossRefCrawler(settings)
-                results = crossref.search(keywords=[doi], max_results=1)
-                if results:
-                    metadata_paper = results[0]
-                    logger.info(f"Found CrossRef metadata: {metadata_paper.title}")
-            except Exception as e:
-                logger.warning(f"Failed to fetch CrossRef metadata: {e}")
-        
-        # 5. 尝试匹配已有文献或创建新文献
-        paper = None
-        if doi:
-            paper = db.query(Paper).filter(Paper.doi == doi).first()
-            
-        if paper:
-            logger.info(f"Found existing paper by DOI {doi}: {paper.id}")
-            # 更新 PDF 路径
-            paper.pdf_path = file_path
-            
-            # 如果有元数据，更新缺失字段
-            if metadata_paper:
-                if not paper.title or paper.title == "Unknown": paper.title = metadata_paper.title
-                if not paper.authors: paper.authors = metadata_paper.authors
-                if not paper.abstract: paper.abstract = metadata_paper.abstract
-                if not paper.year: paper.year = metadata_paper.year
-                if not paper.journal: paper.journal = metadata_paper.journal
-                if not paper.url: paper.url = metadata_paper.url
-            
-            db.commit()
-            db.refresh(paper)
-        else:
-            # 创建新文献
-            if metadata_paper:
-                # 使用获取到的元数据创建
-                new_paper = Paper(
-                    title=metadata_paper.title,
-                    authors=metadata_paper.authors,
-                    abstract=metadata_paper.abstract,
-                    year=metadata_paper.year,
-                    journal=metadata_paper.journal,
-                    doi=doi,
-                    url=metadata_paper.url,
-                    pdf_path=file_path,
-                    source="upload+crossref",
-                    is_archived=False
-                )
-            else:
-                # 仅使用文件名猜测
-                title_guess = os.path.splitext(safe_filename)[0].replace("_", " ").replace("-", " ")
-                new_paper = Paper(
-                    title=title_guess,
-                    doi=doi,
-                    pdf_path=file_path,
-                    source="upload",
-                    year=datetime.now().year, # 默认当前年份
-                    is_archived=False
-                )
-            
-            db.add(new_paper)
-            db.commit()
-            db.refresh(new_paper)
-            paper = new_paper
-            
-            # 尝试生成 embedding
-            # 如果有元数据且有摘要，优先使用元数据的摘要
-            # 如果没有元数据摘要，但提取到了文本，使用提取文本
-            content_for_embedding = paper.abstract
-            if not content_for_embedding and text:
-                content_for_embedding = text[:5000]
-                # 同时更新到 paper.abstract 以便后续使用?
-                # 视情况而定，如果 abstract 是空的，填入提取文本也是合理的
-                paper.abstract = content_for_embedding
-                db.commit()
-            
-            if content_for_embedding:
-                try:
-                    from app.services.embedding_service import get_embedding_service
-                    embedding_service = get_embedding_service()
-                    await embedding_service.embed_paper(paper)
-                    db.commit()
-                except Exception as e:
-                    logger.warning(f"Failed to generate embedding for uploaded paper: {e}")
+        # 3. 调用服务层处理
+        paper = await process_uploaded_pdf(db, file_path, safe_filename)
 
         return PaperResponse.model_validate(paper)
 
@@ -570,3 +483,33 @@ async def get_paper_pdf(
         media_type="application/pdf",
         filename=os.path.basename(pdf_path)
     )
+
+
+@router.post("/backfill-embeddings")
+async def backfill_embeddings(
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    为缺少 embedding 的 Paper 批量生成向量
+    
+    Args:
+        limit: 本次最多处理多少条记录
+    
+    Returns:
+        成功生成 embedding 的 Paper 数量
+    """
+    try:
+        from app.services.embedding_service import get_embedding_service
+        
+        embedding_service = get_embedding_service()
+        updated_count = await embedding_service.backfill_missing_embeddings(db, limit=limit)
+        
+        return {
+            "success": True,
+            "updated_count": updated_count,
+            "message": f"成功为 {updated_count} 篇文献生成 embedding"
+        }
+    except Exception as e:
+        logger.error(f"Backfill embeddings failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

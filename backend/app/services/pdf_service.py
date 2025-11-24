@@ -56,7 +56,64 @@ class PdfService:
         if match:
             return match.group(1)
             
+        if match:
+            return match.group(1)
+            
         return None
+
+    def extract_abstract(self, text: str) -> Optional[str]:
+        """
+        尝试从 PDF 文本中提取摘要
+        """
+        if not text:
+            return None
+            
+        # 统一使用 IGNORECASE，简化 pattern
+        # 匹配 Abstract/Summary 标题，允许后面跟冒号、点或换行
+        start_patterns = [
+            r'(?:\n|^)Abstract\s*[:.\n]',
+            r'(?:\n|^)Summary\s*[:.\n]',
+            r'(?:\n|^)Background\s*[:.\n]', # 医学类常见
+        ]
+        
+        # 常见摘要结束标记 (下一节标题)
+        end_patterns = [
+            r'(?:\n|^)Introduction\s*[:.\n]',
+            r'(?:\n|^)1\.?\s*Introduction',
+            r'(?:\n|^)Keywords\s*[:.\n]',
+            r'(?:\n|^)Index Terms\s*[:.\n]',
+        ]
+        
+        start_idx = -1
+        for p in start_patterns:
+            match = re.search(p, text, re.IGNORECASE)
+            if match:
+                start_idx = match.end()
+                break
+                
+        if start_idx == -1:
+            return None
+            
+        # 从 start_idx 开始找结束标记
+        remaining_text = text[start_idx:]
+        end_idx = -1
+        
+        for p in end_patterns:
+            match = re.search(p, remaining_text, re.IGNORECASE)
+            if match:
+                end_idx = match.start()
+                break
+                
+        if end_idx != -1:
+            abstract = remaining_text[:end_idx].strip()
+        else:
+            # 如果找不到结束标记，但找到了 Abstract 头，
+            # 可能是摘要很短或者格式特殊，取前 3000 字符防止过长
+            abstract = remaining_text[:3000].strip()
+            
+        # 简单清理：合并多余空白
+        abstract = re.sub(r'\s+', ' ', abstract)
+        return abstract
 
     def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
         """

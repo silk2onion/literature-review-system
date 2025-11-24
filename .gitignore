@@ -90,3 +90,12 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Additional ignores for test and environment files
+tests/
+
+data/
+*.pdf
+*.db
+*.sqlite
+.env*

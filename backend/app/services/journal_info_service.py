@@ -27,11 +27,11 @@ class JournalInfo:
     - indexing: 收录平台列表（如 SCI、SSCI、Scopus、CSSCI 等）
     """
 
-    name: Optional[str]
-    issn: Optional[str]
-    impact_factor: Optional[float]
-    quartile: Optional[str]
-    indexing: Optional[List[str]]
+    name: Optional[str] = None
+    issn: Optional[str] = None
+    impact_factor: Optional[float] = None
+    quartile: Optional[str] = None
+    indexing: Optional[List[str]] = None
 
 
 class JournalInfoService:
