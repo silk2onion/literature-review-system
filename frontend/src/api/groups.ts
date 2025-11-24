@@ -1,6 +1,6 @@
 import type { Paper, LiteratureGroup } from '../types';
 
-const API_BASE_URL = '/api';
+const API_BASE_URL = 'http://localhost:5444/api';
 
 export type PaperGroup = LiteratureGroup;
 

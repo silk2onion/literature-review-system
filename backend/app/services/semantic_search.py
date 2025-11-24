@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 from sqlalchemy.orm import Session
 
 from app.models.paper import Paper
+from app.models.paper_chunk import PaperChunk
 from app.models.recall_log import RecallLog
 from app.models.tag import PaperTag, TagGroupTag
 from app.models.citation import PaperCitation
@@ -470,6 +471,93 @@ class SemanticSearchService:
             logger.exception("记录语义检索召回日志失败", exc_info=True)
 
         return hits, debug
+
+    async def search_chunks(
+        self,
+        db: Session,
+        keywords: List[str],
+        limit: int = 10,
+        paper_ids: Optional[List[int]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        在 PaperChunk.embedding 上做语义检索 (Full-Text RAG)。
+        """
+        if not keywords:
+            return []
+
+        # 1. 关键词扩展 & 向量生成
+        # 简单起见，这里复用 expand_keywords 但不强制依赖
+        query_text = ", ".join(keywords)
+        query_vec = await self._embedding.embed_text(query_text)
+        
+        if not query_vec:
+            return []
+
+        # 2. 查询候选 Chunks
+        from app.models.paper_chunk import PaperChunk
+        
+        q = db.query(PaperChunk).filter(PaperChunk.embedding.isnot(None))
+        
+        # 如果指定了 paper_ids 范围
+        if paper_ids:
+            q = q.filter(PaperChunk.paper_id.in_(paper_ids))
+            
+        # 3. 计算相似度 (内存计算，数据量大时需换向量库)
+        # 注意：如果 Chunk 数量巨大，全量加载会 OOM。
+        # 临时方案：先只加载 embedding 和 id，计算完 top-k 再取 content
+        # 或者：限制候选范围（例如只查最近 N 年的 paper 的 chunks）
+        
+        # 优化：只查询 id, paper_id, embedding
+        candidates = q.with_entities(PaperChunk.id, PaperChunk.paper_id, PaperChunk.embedding).all()
+        
+        hits = []
+        for cid, pid, vec in candidates:
+            if not isinstance(vec, list):
+                continue
+            try:
+                vec_floats = [float(x) for x in vec]
+                score = self._cosine_similarity(query_vec, vec_floats)
+                if score > 0.0:
+                    hits.append((cid, pid, score))
+            except Exception:
+                continue
+                
+        # 4. 排序并截断
+        hits.sort(key=lambda x: x[2], reverse=True)
+        top_hits = hits[:limit]
+        
+        if not top_hits:
+            return []
+            
+        # 5. 补全详细信息
+        top_ids = [h[0] for h in top_hits]
+        chunk_map = {
+            c.id: c 
+            for c in db.query(PaperChunk).filter(PaperChunk.id.in_(top_ids)).all()
+        }
+        
+        # 还需要 Paper 的标题等信息
+        top_pids = list(set(h[1] for h in top_hits))
+        paper_map = {
+            p.id: p
+            for p in db.query(Paper).filter(Paper.id.in_(top_pids)).all()
+        }
+        
+        results = []
+        for cid, pid, score in top_hits:
+            chunk = chunk_map.get(cid)
+            paper = paper_map.get(pid)
+            if chunk and paper:
+                results.append({
+                    "chunk_id": chunk.id,
+                    "paper_id": paper.id,
+                    "paper_title": paper.title,
+                    "paper_year": paper.year,
+                    "chunk_content": chunk.content,
+                    "score": score
+                })
+                
+        return results
 
 
 _semantic_search_service: Optional["SemanticSearchService"] = None

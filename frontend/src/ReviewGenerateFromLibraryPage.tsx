@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import PhdPipelinePage from "./PhdPipelinePage";
-import { groupsApi, type LiteratureGroup } from "./api/groups";
+
 
 type PaperResponse = {
   id: number;
@@ -33,7 +33,7 @@ export default function ReviewGenerateFromLibraryPage() {
   const [mode, setMode] = useState<"standard" | "phd">("standard");
 
   // --- Paper Selection State ---
-  const [sourceMode, setSourceMode] = useState<"manual" | "group">("manual");
+  // const [sourceMode, setSourceMode] = useState<"manual" | "group">("manual");
   const [query, setQuery] = useState("");
   const [papers, setPapers] = useState<PaperResponse[]>([]);
   // const [total, setTotal] = useState(0); // unused for now
@@ -41,9 +41,9 @@ export default function ReviewGenerateFromLibraryPage() {
   const [selectedPaperIds, setSelectedPaperIds] = useState<Set<number>>(new Set());
 
   // --- Group Selection State ---
-  const [groups, setGroups] = useState<LiteratureGroup[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
-  
+  // const [groups, setGroups] = useState<LiteratureGroup[]>([]);
+  // const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
+
   // --- Generation State ---
   const [keywords, setKeywords] = useState("");
   const [customPrompt, setCustomPrompt] = useState("");
@@ -141,7 +141,7 @@ export default function ReviewGenerateFromLibraryPage() {
         body: JSON.stringify({ format, include_references: true }),
       });
       if (!resp.ok) throw new Error('Export failed');
-      
+
       const blob = await resp.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -160,119 +160,59 @@ export default function ReviewGenerateFromLibraryPage() {
   };
 
   return (
-    <div
-      style={{
-        padding: "24px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "24px",
-        height: "100%",
-        boxSizing: "border-box",
-        backgroundColor: "#020617",
-        color: "#e5e7eb",
-      }}
-    >
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <h1 style={{ fontSize: "24px", fontWeight: 600, marginBottom: "8px" }}>
-            综述生成工作台
-          </h1>
-          <p style={{ color: "#9ca3af", fontSize: "14px" }}>
-            选择文献并生成综述，支持标准模式与 PhD 深度模式
-          </p>
+    <div className="page-container">
+      <header className="page-header">
+        <div className="page-title">
+          <h1>综述生成工作台</h1>
+          <p>选择文献并生成综述，支持标准模式与 PhD 深度模式</p>
         </div>
-        <div style={{ display: "flex", gap: "12px", backgroundColor: "#1e293b", padding: "4px", borderRadius: "8px" }}>
+        <div className="view-switch">
           <button
             onClick={() => setMode("standard")}
-            style={{
-              padding: "6px 16px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: mode === "standard" ? "#3b82f6" : "transparent",
-              color: mode === "standard" ? "#fff" : "#9ca3af",
-              cursor: "pointer",
-              fontWeight: 500,
-              fontSize: "13px",
-            }}
+            className={`view-switch-button ${mode === "standard" ? "active" : ""}`}
           >
             标准综述
           </button>
           <button
             onClick={() => setMode("phd")}
-            style={{
-              padding: "6px 16px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: mode === "phd" ? "#8b5cf6" : "transparent",
-              color: mode === "phd" ? "#fff" : "#9ca3af",
-              cursor: "pointer",
-              fontWeight: 500,
-              fontSize: "13px",
-            }}
+            className={`view-switch-button ${mode === "phd" ? "active" : ""}`}
           >
             PhD 深度管线
           </button>
         </div>
       </header>
 
-      <div style={{ display: "flex", gap: "24px", flex: 1, minHeight: 0 }}>
+      <div className="review-workbench-container">
         {/* Left Panel: Paper Selection */}
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            gap: "12px",
-            border: "1px solid #1f2937",
-            borderRadius: "8px",
-            padding: "16px",
-            backgroundColor: "#0f172a",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 600 }}>
-              选择文献 ({selectedPaperIds.size} 篇)
-            </h3>
-            <div style={{ display: "flex", gap: "8px" }}>
+        {/* Left Panel: Paper Selection */}
+        <div className="paper-selection-panel">
+          <div className="panel-header">
+            <h3>选择文献 ({selectedPaperIds.size} 篇)</h3>
+            <div className="search-bar-small">
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="搜索文献..."
-                style={{
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  border: "1px solid #334155",
-                  backgroundColor: "#1e293b",
-                  color: "#fff",
-                  fontSize: "13px",
-                }}
+                className="filter-input"
                 onKeyDown={(e) => e.key === "Enter" && fetchPapers()}
               />
               <button
                 onClick={fetchPapers}
-                style={{
-                  padding: "4px 12px",
-                  borderRadius: "4px",
-                  border: "none",
-                  backgroundColor: "#3b82f6",
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontSize: "13px",
-                }}
+                className="action-button primary small"
               >
                 搜索
               </button>
             </div>
           </div>
 
-          <div style={{ flex: 1, overflowY: "auto", border: "1px solid #334155", borderRadius: "4px" }}>
+          <div className="paper-list-container">
             {loadingPapers ? (
-              <div style={{ padding: "20px", textAlign: "center", color: "#9ca3af" }}>加载中...</div>
+              <div className="loading-state">加载中...</div>
             ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+              <table className="paper-list-table">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid #334155", backgroundColor: "#1e293b", textAlign: "left" }}>
-                    <th style={{ padding: "8px", width: "40px", textAlign: "center" }}>
+                  <tr>
+                    <th style={{ width: "40px", textAlign: "center" }}>
                       <input
                         type="checkbox"
                         checked={papers.length > 0 && selectedPaperIds.size === papers.length}
@@ -286,38 +226,34 @@ export default function ReviewGenerateFromLibraryPage() {
                         style={{ cursor: "pointer" }}
                       />
                     </th>
-                    <th style={{ padding: "8px" }}>标题</th>
-                    <th style={{ padding: "8px", width: "60px" }}>年份</th>
-                    <th style={{ padding: "8px", width: "80px" }}>来源</th>
+                    <th>标题</th>
+                    <th style={{ width: "60px" }}>年份</th>
+                    <th style={{ width: "80px" }}>来源</th>
                   </tr>
                 </thead>
                 <tbody>
                   {papers.map((p) => (
                     <tr
                       key={p.id}
-                      style={{
-                        borderBottom: "1px solid #1f2937",
-                        backgroundColor: selectedPaperIds.has(p.id) ? "rgba(59, 130, 246, 0.1)" : "transparent",
-                        cursor: "pointer",
-                      }}
+                      className={`paper-row ${selectedPaperIds.has(p.id) ? "selected" : ""}`}
                       onClick={() => handleTogglePaper(p.id)}
                     >
-                      <td style={{ padding: "8px", textAlign: "center" }}>
+                      <td style={{ textAlign: "center" }}>
                         <input
                           type="checkbox"
                           checked={selectedPaperIds.has(p.id)}
-                          onChange={() => {}} // Handled by row click
+                          onChange={() => { }} // Handled by row click
                           style={{ cursor: "pointer" }}
                         />
                       </td>
-                      <td style={{ padding: "8px" }}>
-                        <div style={{ fontWeight: 500, color: "#e5e7eb" }}>{p.title}</div>
-                        <div style={{ fontSize: "11px", color: "#9ca3af" }}>
+                      <td>
+                        <div className="paper-title">{p.title}</div>
+                        <div className="paper-authors">
                           {p.authors?.slice(0, 2).join(", ")}
                         </div>
                       </td>
-                      <td style={{ padding: "8px", color: "#9ca3af" }}>{p.year || "-"}</td>
-                      <td style={{ padding: "8px", color: "#9ca3af" }}>{p.source || "-"}</td>
+                      <td className="paper-meta">{p.year || "-"}</td>
+                      <td className="paper-meta">{p.source || "-"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -327,158 +263,71 @@ export default function ReviewGenerateFromLibraryPage() {
         </div>
 
         {/* Right Panel: Configuration & Output */}
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            gap: "16px",
-            overflowY: "auto",
-          }}
-        >
+        {/* Right Panel: Configuration & Output */}
+        <div className="config-panel">
           {mode === "standard" ? (
             <>
               {mode === "standard" ? (
                 <>
                   {/* Config Card */}
-                  <div
-                    style={{
-                      padding: "16px",
-                      borderRadius: "8px",
-                      backgroundColor: "#0f172a",
-                      border: "1px solid #1f2937",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "12px",
-                    }}
-                  >
-                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 600 }}>生成设置</h3>
-    
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#9ca3af", marginBottom: "4px" }}>
-                        综述关键词 (必填)
-                      </label>
+                  {/* Config Card */}
+                  <div className="config-card">
+                    <h3>生成设置</h3>
+
+                    <div className="form-group">
+                      <label>综述关键词 (必填)</label>
                       <input
                         value={keywords}
                         onChange={(e) => setKeywords(e.target.value)}
                         placeholder="例如: Urban Design, AI, Public Space"
-                        style={{
-                          width: "100%",
-                          padding: "8px",
-                          borderRadius: "4px",
-                          border: "1px solid #334155",
-                          backgroundColor: "#1e293b",
-                          color: "#fff",
-                          boxSizing: "border-box",
-                        }}
+                        className="form-input"
                       />
                     </div>
-    
-                    <div>
-                      <label style={{ display: "block", fontSize: "13px", color: "#9ca3af", marginBottom: "4px" }}>
-                        自定义提示词 (可选)
-                      </label>
+
+                    <div className="form-group">
+                      <label>自定义提示词 (可选)</label>
                       <textarea
                         value={customPrompt}
                         onChange={(e) => setCustomPrompt(e.target.value)}
                         placeholder="例如: 请重点关注这些文献中的方法论部分..."
                         rows={3}
-                        style={{
-                          width: "100%",
-                          padding: "8px",
-                          borderRadius: "4px",
-                          border: "1px solid #334155",
-                          backgroundColor: "#1e293b",
-                          color: "#fff",
-                          boxSizing: "border-box",
-                          resize: "vertical",
-                        }}
+                        className="form-textarea"
                       />
                     </div>
-    
+
                     <button
                       onClick={handleGenerate}
                       disabled={generating}
-                      style={{
-                        padding: "10px",
-                        borderRadius: "6px",
-                        border: "none",
-                        background: generating ? "#475569" : "linear-gradient(135deg, #3b82f6, #2563eb)",
-                        color: "#fff",
-                        fontWeight: 600,
-                        cursor: generating ? "not-allowed" : "pointer",
-                        marginTop: "8px",
-                      }}
+                      className="action-button primary full-width"
                     >
                       {generating ? "正在生成综述..." : "开始生成"}
                     </button>
-    
+
                     {error && (
-                      <div
-                        style={{
-                          padding: "8px",
-                          borderRadius: "4px",
-                          backgroundColor: "rgba(239, 68, 68, 0.1)",
-                          border: "1px solid #ef4444",
-                          color: "#ef4444",
-                          fontSize: "13px",
-                        }}
-                      >
+                      <div className="error-message">
                         {error}
                       </div>
                     )}
                   </div>
-    
+
                   {/* Output Preview */}
                   {generatedReview && (
-                    <div
-                      style={{
-                        flex: 1,
-                        padding: "16px",
-                        borderRadius: "8px",
-                        backgroundColor: "#0f172a",
-                        border: "1px solid #1f2937",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "12px",
-                        minHeight: "300px",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 600, color: "#22c55e" }}>生成成功!</h3>
-                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                          <span style={{ fontSize: "12px", color: "#9ca3af" }}>ID: {generatedReview.review_id}</span>
+                    <div className="output-preview-card">
+                      <div className="card-header">
+                        <h3 className="success-title">生成成功!</h3>
+                        <div className="card-actions">
+                          <span className="review-id">ID: {generatedReview.review_id}</span>
                           <button
                             onClick={() => handleExport("markdown")}
                             disabled={exporting}
-                            style={{
-                              padding: "4px 8px",
-                              borderRadius: "4px",
-                              border: "1px solid #334155",
-                              backgroundColor: "#1e293b",
-                              color: exporting ? "#9ca3af" : "#e5e7eb",
-                              fontSize: "12px",
-                              cursor: exporting ? "not-allowed" : "pointer",
-                            }}
+                            className="action-button small secondary"
                           >
                             {exporting ? "导出中..." : "导出 MD"}
                           </button>
                         </div>
                       </div>
-    
-                      <div
-                        style={{
-                          flex: 1,
-                          padding: "12px",
-                          backgroundColor: "#1e293b",
-                          borderRadius: "4px",
-                          overflowY: "auto",
-                          fontSize: "14px",
-                          lineHeight: "1.6",
-                          whiteSpace: "pre-wrap",
-                          fontFamily: "monospace",
-                        }}
-                      >
+
+                      <div className="markdown-preview">
                         {generatedReview.preview_markdown}
                       </div>
                     </div>

@@ -1,11 +1,59 @@
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  /* ScholarSync Premium Light Theme Palette */
+  --system-gray-1: #8e8e93;
+  --system-gray-2: #aeaeb2;
+  --system-gray-3: #c7c7cc;
+  --system-gray-4: #d1d1d6;
+  --system-gray-5: #e5e5ea;
+  --system-gray-6: #f2f2f7;
+
+  /* Brand Colors */
+  --system-blue: #18181b;
+  /* Primary Action (Zinc 900) - High contrast for buttons */
+  --system-blue-hover: #27272a;
+  --system-accent: #2563eb;
+  /* Secondary Accent (Blue 600) - For links/active states */
+  --system-red: #ef4444;
+  --system-green: #10b981;
+  --system-orange: #f59e0b;
+}
+
+:root {
+  /* Mac-native Palette */
+  --app-bg: #F5F5F5;
+  --sidebar-bg: rgba(240, 240, 240, 0.8);
+  --card-bg: #FFFFFF;
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F5F5F7;
+  /* Apple-like secondary background */
+  --bg-tertiary: #E5E5EA;
+
+  --text-primary: #1C1C1E;
+  --text-secondary: #8E8E93;
+  --text-tertiary: #C7C7CC;
+
+  --border-color: #D1D1D6;
+  --border-hover: #C7C7CC;
+
+  --system-blue: #007AFF;
+  --system-blue-hover: #0062CC;
+  --system-red: #FF5F57;
+  --system-yellow: #FEBC2E;
+  --system-green: #28C840;
+  --system-gray-4: #D1D1D6;
+  --system-gray-5: #E5E5EA;
+  --system-gray-6: #F2F2F7;
+
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --card-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  color-scheme: light;
+  color: var(--text-primary);
+  background-color: var(--app-bg);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -13,13 +61,30 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
+/* Dark Mode Support - Optional/Secondary */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Keeping a refined dark mode as backup, but primary design is light */
+    --bg-primary: #18181b;
+    --bg-secondary: #09090b;
+    --bg-tertiary: #27272a;
+
+    --text-primary: #f4f4f5;
+    --text-secondary: #a1a1aa;
+    --text-tertiary: #52525b;
+
+    --border-color: #27272a;
+    --border-hover: #3f3f46;
+
+    --glass-bg: rgba(24, 24, 27, 0.8);
+    --glass-border: rgba(255, 255, 255, 0.05);
+    --glass-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+
+    --system-blue: #fafafa;
+    /* Invert for dark mode */
+    --system-blue-hover: #e4e4e7;
+    --system-accent: #60a5fa;
+  }
 }
 
 body {
@@ -28,41 +93,85 @@ body {
   place-items: center;
   min-width: 320px;
   min-height: 100vh;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  /* Tighter tracking for headings */
 }
 
 h1 {
-  font-size: 3.2em;
+  font-size: 2.5rem;
+  /* Slightly smaller, more refined */
   line-height: 1.1;
 }
 
+a {
+  font-weight: 500;
+  color: var(--system-blue);
+  text-decoration: inherit;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--system-blue-hover);
+}
+
 button {
-  border-radius: 8px;
+  border-radius: 980px;
+  /* Pill shape default */
   border: 1px solid transparent;
   padding: 0.6em 1.2em;
-  font-size: 1em;
+  font-size: 0.95em;
   font-weight: 500;
   font-family: inherit;
-  background-color: #1a1a1a;
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
   cursor: pointer;
-  transition: border-color 0.25s;
+  transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
+
 button:hover {
-  border-color: #646cff;
+  background-color: var(--system-gray-6);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
 }
+
+button:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
 button:focus,
 button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--system-gray-3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--system-gray-2);
 }

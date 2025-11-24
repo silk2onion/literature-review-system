@@ -73,7 +73,7 @@ export default function StagingPapersPage() {
 
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [promoting, setPromoting] = useState<boolean>(false);
-  const [deleting, setDeleting] = useState<boolean>(false);
+  // const [deleting, setDeleting] = useState<boolean>(false);
 
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 1;
 
@@ -114,8 +114,8 @@ export default function StagingPapersPage() {
         typeof opts?.page === "number"
           ? opts.page
           : opts?.resetPage
-          ? 1
-          : page;
+            ? 1
+            : page;
 
       const payload: StagingSearchRequest = {
         q: q.trim() || undefined,
@@ -159,13 +159,12 @@ export default function StagingPapersPage() {
       console.error("staging search error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `加载失败：${
-          (err as { message?: string })?.message || "未知错误"
+        `加载失败：${(err as { message?: string })?.message || "未知错误"
         }`,
       );
       setError(
         (err as { message?: string })?.message ||
-          "加载暂存文献时出现错误",
+        "加载暂存文献时出现错误",
       );
     } finally {
       setLoading(false);
@@ -242,13 +241,12 @@ export default function StagingPapersPage() {
       console.error("promote staging error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `提升失败：${
-          (err as { message?: string })?.message || "未知错误"
+        `提升失败：${(err as { message?: string })?.message || "未知错误"
         }`,
       );
       setError(
         (err as { message?: string })?.message ||
-          "提升暂存文献时出现错误",
+        "提升暂存文献时出现错误",
       );
     } finally {
       setPromoting(false);
@@ -267,9 +265,9 @@ export default function StagingPapersPage() {
         style={{
           padding: "6px 10px",
           borderRadius: 6,
-          backgroundColor: "#020617",
+          backgroundColor: "#ffffff",
           border: `1px solid ${color}`,
-          color: "#e2e8f0",
+          color: "#0f172a",
           fontSize: 12,
           display: "inline-flex",
           alignItems: "center",
@@ -291,68 +289,25 @@ export default function StagingPapersPage() {
   };
 
   return (
-    <div
-      style={{
-        padding: "16px 24px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 16,
-        height: "100vh",
-        boxSizing: "border-box",
-        backgroundColor: "#020617",
-        color: "#e5e7eb",
-      }}
-    >
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 16,
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>
-            暂存文献库
-          </h1>
-          <p style={{ fontSize: 13, color: "#9ca3af" }}>
-            审核和筛选由爬虫抓取的原始文献元数据，将合适的记录提升为正式文献
-          </p>
+    <div className="page-container">
+      <header className="page-header">
+        <div className="page-title">
+          <h1>暂存文献库</h1>
+          <p>审核和筛选由爬虫抓取的原始文献元数据，将合适的记录提升为正式文献</p>
         </div>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-end",
-            gap: 8,
-          }}
-        >
+        <div className="page-actions">
           {renderTaskBadge()}
           <button
             type="button"
             onClick={handlePromoteSelected}
             disabled={selectedIds.length === 0 || promoting}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 999,
-              border: "none",
-              background:
-                selectedIds.length === 0 || promoting
-                  ? "#1f2937"
-                  : "linear-gradient(135deg, rgba(52,211,153,0.9), rgba(16,185,129,0.9))",
-              color: "#0b1120",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor:
-                selectedIds.length === 0 || promoting ? "default" : "pointer",
-              opacity: selectedIds.length === 0 || promoting ? 0.6 : 1,
-            }}
+            className={`action-button ${selectedIds.length > 0 && !promoting ? "primary" : ""}`}
           >
             {promoting
               ? "正在提升..."
               : selectedIds.length === 0
-              ? "选择后可提升为正式文献"
-              : `提升选中 ${selectedIds.length} 条为正式文献`}
+                ? "选择后可提升为正式文献"
+                : `提升选中 ${selectedIds.length} 条为正式文献`}
           </button>
         </div>
       </header>
@@ -371,33 +326,34 @@ export default function StagingPapersPage() {
         </div>
       )}
 
-      <section
+      <div
         style={{
-          padding: 12,
-          borderRadius: 8,
-          backgroundColor: "#020617",
-          border: "1px solid #1f2937",
           display: "flex",
-          alignItems: "flex-end",
-          gap: 12,
+          alignItems: "center",
+          gap: 16,
+          padding: "16px 0",
+          borderBottom: "1px solid #e2e8f0",
+          marginBottom: 16,
           flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#9ca3af" }}>关键词</label>
-          <div style={{ position: "relative", display: "inline-block" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 240 }}>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500, whiteSpace: "nowrap" }}>关键词:</label>
+          <div style={{ position: "relative", display: "flex", alignItems: "center", width: "100%" }}>
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="模糊匹配标题和摘要，例如 urban design"
+              placeholder="模糊匹配标题和摘要..."
               style={{
-                minWidth: 260,
-                padding: "6px 24px 6px 8px",
+                width: "100%",
+                height: 36,
+                padding: "0 30px 0 12px",
                 borderRadius: 6,
-                border: "1px solid #334155",
-                backgroundColor: "#020617",
-                color: "#e5e7eb",
+                border: "1px solid #cbd5e1",
+                backgroundColor: "#ffffff",
+                color: "#0f172a",
                 fontSize: 13,
+                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
               }}
             />
             {q.trim() !== "" && (
@@ -406,15 +362,16 @@ export default function StagingPapersPage() {
                 onClick={() => setQ("")}
                 style={{
                   position: "absolute",
-                  right: 6,
-                  top: "50%",
-                  transform: "translateY(-50%)",
+                  right: 8,
                   border: "none",
                   background: "transparent",
                   color: "#9ca3af",
                   cursor: "pointer",
-                  fontSize: 14,
-                  lineHeight: 1,
+                  fontSize: 16,
+                  padding: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
               >
                 ×
@@ -423,19 +380,23 @@ export default function StagingPapersPage() {
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#9ca3af" }}>状态</label>
+        <div style={{ width: 1, height: 20, backgroundColor: "#e2e8f0" }} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>状态:</label>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
             style={{
-              width: 120,
-              padding: "6px 8px",
+              height: 36,
+              padding: "0 8px",
               borderRadius: 6,
-              border: "1px solid #334155",
-              backgroundColor: "#020617",
-              color: "#e5e7eb",
+              border: "1px solid #cbd5e1",
+              backgroundColor: "#ffffff",
+              color: "#0f172a",
               fontSize: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+              cursor: "pointer",
             }}
           >
             {STATUS_OPTIONS.map((opt) => (
@@ -446,19 +407,24 @@ export default function StagingPapersPage() {
           </select>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#9ca3af" }}>数据源</label>
+        <div style={{ width: 1, height: 20, backgroundColor: "#e2e8f0" }} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>数据源:</label>
           <select
             value={source}
             onChange={(e) => setSource(e.target.value)}
             style={{
-              width: 140,
-              padding: "6px 8px",
+              height: 36,
+              padding: "0 8px",
               borderRadius: 6,
-              border: "1px solid #334155",
-              backgroundColor: "#020617",
-              color: "#e5e7eb",
+              border: "1px solid #cbd5e1",
+              backgroundColor: "#ffffff",
+              color: "#0f172a",
               fontSize: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+              cursor: "pointer",
+              minWidth: 100,
             }}
           >
             {SOURCE_OPTIONS.map((opt) => (
@@ -469,59 +435,64 @@ export default function StagingPapersPage() {
           </select>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#9ca3af" }}>起始年份</label>
+        <div style={{ width: 1, height: 20, backgroundColor: "#e2e8f0" }} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>年份:</label>
           <input
             value={yearFrom}
             onChange={(e) => setYearFrom(e.target.value)}
             placeholder="2015"
             type="number"
             style={{
-              width: 90,
-              padding: "6px 8px",
+              width: 70,
+              height: 36,
+              padding: "0 8px",
               borderRadius: 6,
-              border: "1px solid #334155",
-              backgroundColor: "#020617",
-              color: "#e5e7eb",
+              border: "1px solid #cbd5e1",
+              backgroundColor: "#ffffff",
+              color: "#0f172a",
               fontSize: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
             }}
           />
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#9ca3af" }}>结束年份</label>
+          <span style={{ color: "#94a3b8" }}>-</span>
           <input
             value={yearTo}
             onChange={(e) => setYearTo(e.target.value)}
             placeholder="2025"
             type="number"
             style={{
-              width: 90,
-              padding: "6px 8px",
+              width: 70,
+              height: 36,
+              padding: "0 8px",
               borderRadius: 6,
-              border: "1px solid #334155",
-              backgroundColor: "#020617",
-              color: "#e5e7eb",
+              border: "1px solid #cbd5e1",
+              backgroundColor: "#ffffff",
+              color: "#0f172a",
               fontSize: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
             }}
           />
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#9ca3af" }}>抓取任务 ID</label>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>Job ID:</label>
           <input
             value={crawlJobId}
             onChange={(e) => setCrawlJobId(e.target.value)}
-            placeholder="可选，例如 1"
+            placeholder="可选"
             type="number"
             style={{
-              width: 100,
-              padding: "6px 8px",
+              width: 60,
+              height: 36,
+              padding: "0 8px",
               borderRadius: 6,
-              border: "1px solid #334155",
-              backgroundColor: "#020617",
-              color: "#e5e7eb",
+              border: "1px solid #cbd5e1",
+              backgroundColor: "#ffffff",
+              color: "#0f172a",
               fontSize: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
             }}
           />
         </div>
@@ -530,159 +501,49 @@ export default function StagingPapersPage() {
           onClick={handleSearchClick}
           disabled={loading}
           style={{
-            padding: "8px 16px",
-            borderRadius: 999,
+            height: 36,
+            padding: "0 20px",
+            borderRadius: 6,
             border: "none",
-            background:
-              "linear-gradient(135deg, rgba(56,189,248,0.9), rgba(59,130,246,0.9))",
-            color: "#0b1120",
+            background: "linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)",
+            color: "#ffffff",
             fontSize: 13,
-            fontWeight: 600,
+            fontWeight: 500,
             cursor: loading ? "default" : "pointer",
             opacity: loading ? 0.7 : 1,
+            boxShadow: "0 1px 2px rgba(37, 99, 235, 0.2)",
+            marginLeft: "auto",
           }}
         >
-          {loading ? "检索中..." : "检索暂存文献"}
+          {loading ? "检索中..." : "检索"}
         </button>
-      </section>
+      </div>
 
-      <section
-        style={{
-          flex: 1,
-          minHeight: 0,
-          borderRadius: 8,
-          border: "1px solid #1f2937",
-          backgroundColor: "#020617",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div
-          style={{
-            padding: "8px 12px",
-            borderBottom: "1px solid #1f2937",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontSize: 12,
-            color: "#9ca3af",
-          }}
-        >
+      <section className="data-table-container">
+        <div className="table-header-info">
           <span>共 {total} 条暂存文献</span>
           <span>
             第 {page} / {totalPages} 页
           </span>
         </div>
 
-        <div
-          style={{
-            flex: 1,
-            overflow: "auto",
-          }}
-        >
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: 13,
-            }}
-          >
+        <div className="data-table-scroll">
+          <table className="data-table">
             <thead>
-              <tr
-                style={{
-                  backgroundColor: "#020617",
-                  position: "sticky",
-                  top: 0,
-                  zIndex: 1,
-                }}
-              >
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 12px",
-                    borderBottom: "1px solid #1f2937",
-                    fontWeight: 500,
-                    color: "#9ca3af",
-                    width: 40,
-                  }}
-                >
+              <tr>
+                <th style={{ width: 40, textAlign: "left" }}>
                   <input
                     type="checkbox"
                     checked={allCurrentSelected}
                     onChange={toggleSelectAllCurrent}
                   />
                 </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 12px",
-                    borderBottom: "1px solid #1f2937",
-                    fontWeight: 500,
-                    color: "#9ca3af",
-                  }}
-                >
-                  标题
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 12px",
-                    borderBottom: "1px solid #1f2937",
-                    fontWeight: 500,
-                    color: "#9ca3af",
-                    width: 120,
-                  }}
-                >
-                  来源
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 12px",
-                    borderBottom: "1px solid #1f2937",
-                    fontWeight: 500,
-                    color: "#9ca3af",
-                    width: 80,
-                  }}
-                >
-                  年份
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 12px",
-                    borderBottom: "1px solid #1f2937",
-                    fontWeight: 500,
-                    color: "#9ca3af",
-                    width: 100,
-                  }}
-                >
-                  状态
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 12px",
-                    borderBottom: "1px solid #1f2937",
-                    fontWeight: 500,
-                    color: "#9ca3af",
-                    width: 140,
-                  }}
-                >
-                  链接
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 12px",
-                    borderBottom: "1px solid #1f2937",
-                    fontWeight: 500,
-                    color: "#9ca3af",
-                    width: 100,
-                  }}
-                >
-                  抓取任务
-                </th>
+                <th>标题</th>
+                <th style={{ width: 120 }}>来源</th>
+                <th style={{ width: 80 }}>年份</th>
+                <th style={{ width: 100 }}>状态</th>
+                <th style={{ width: 140 }}>链接</th>
+                <th style={{ width: 100 }}>抓取任务</th>
               </tr>
             </thead>
             <tbody>
@@ -706,8 +567,8 @@ export default function StagingPapersPage() {
                   <tr
                     key={p.id}
                     style={{
-                      borderBottom: "1px solid #0f172a",
-                      backgroundColor: checked ? "#0b1120" : "transparent",
+                      borderBottom: "1px solid #e2e8f0",
+                      backgroundColor: checked ? "#eff6ff" : "transparent",
                     }}
                   >
                     <td
@@ -739,7 +600,7 @@ export default function StagingPapersPage() {
                           target="_blank"
                           rel="noreferrer"
                           style={{
-                            color: p.pdf_url || p.url ? "#38bdf8" : "#e5e7eb",
+                            color: p.pdf_url || p.url ? "#0284c7" : "#94a3b8",
                             textDecoration:
                               p.pdf_url || p.url ? "underline" : "none",
                             cursor:
@@ -769,7 +630,7 @@ export default function StagingPapersPage() {
                       style={{
                         padding: "8px 12px",
                         fontSize: 12,
-                        color: "#d1d5db",
+                        color: "#4b5563",
                       }}
                     >
                       {p.source || "-"}
@@ -778,7 +639,7 @@ export default function StagingPapersPage() {
                       style={{
                         padding: "8px 12px",
                         fontSize: 12,
-                        color: "#e5e7eb",
+                        color: "#1f2937",
                       }}
                     >
                       {p.year ?? "-"}
@@ -791,8 +652,8 @@ export default function StagingPapersPage() {
                           p.status === "accepted"
                             ? "#4ade80"
                             : p.status === "rejected"
-                            ? "#f97316"
-                            : "#e5e7eb",
+                              ? "#f97316"
+                              : "#64748b",
                       }}
                     >
                       {p.status || "-"}
@@ -809,7 +670,7 @@ export default function StagingPapersPage() {
                           href={`https://doi.org/${p.doi}`}
                           target="_blank"
                           rel="noreferrer"
-                          style={{ color: "#38bdf8" }}
+                          style={{ color: "#0284c7" }}
                         >
                           DOI
                         </a>
@@ -818,7 +679,7 @@ export default function StagingPapersPage() {
                           href={`https://arxiv.org/abs/${p.arxiv_id}`}
                           target="_blank"
                           rel="noreferrer"
-                          style={{ color: "#38bdf8" }}
+                          style={{ color: "#0284c7" }}
                         >
                           arXiv
                         </a>
@@ -827,7 +688,7 @@ export default function StagingPapersPage() {
                           href={p.url}
                           target="_blank"
                           rel="noreferrer"
-                          style={{ color: "#38bdf8" }}
+                          style={{ color: "#0284c7" }}
                         >
                           链接
                         </a>
@@ -854,7 +715,7 @@ export default function StagingPapersPage() {
         <div
           style={{
             padding: "8px 12px",
-            borderTop: "1px solid #1f2937",
+            borderTop: "1px solid #e2e8f0",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -881,9 +742,9 @@ export default function StagingPapersPage() {
                 style={{
                   padding: "4px 6px",
                   borderRadius: 6,
-                  border: "1px solid #334155",
-                  backgroundColor: "#020617",
-                  color: "#e5e7eb",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: "#ffffff",
+                  color: "#0f172a",
                   fontSize: 12,
                 }}
               >
@@ -901,9 +762,9 @@ export default function StagingPapersPage() {
               style={{
                 padding: "4px 10px",
                 borderRadius: 999,
-                border: "1px solid #334155",
-                backgroundColor: "#020617",
-                color: "#e5e7eb",
+                border: "1px solid #cbd5e1",
+                backgroundColor: "#ffffff",
+                color: "#0f172a",
                 fontSize: 12,
                 cursor: loading || page <= 1 ? "default" : "pointer",
                 opacity: loading || page <= 1 ? 0.5 : 1,
@@ -917,9 +778,9 @@ export default function StagingPapersPage() {
               style={{
                 padding: "4px 10px",
                 borderRadius: 999,
-                border: "1px solid #334155",
-                backgroundColor: "#020617",
-                color: "#e5e7eb",
+                border: "1px solid #cbd5e1",
+                backgroundColor: "#ffffff",
+                color: "#0f172a",
                 fontSize: 12,
                 cursor:
                   loading || page >= totalPages ? "default" : "pointer",

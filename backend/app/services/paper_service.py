@@ -18,6 +18,10 @@ from app.models.paper import Paper
 from app.models.staging_paper import StagingPaper
 from app.schemas.paper import PaperCreate, PaperUpdate
 from app.services.embedding_service import EmbeddingService, get_embedding_service
+from app.services.pdf_service import get_pdf_service
+from app.services.crawler.crossref_crawler import CrossRefCrawler
+from app.config import get_settings
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -337,3 +341,157 @@ async def promote_staging_papers(
             logger.warning("刷新 Paper(id=%s) 状态失败", getattr(paper, "id", None))
 
     return promoted
+
+
+async def process_uploaded_pdf(
+    db: Session,
+    file_path: str,
+    original_filename: str,
+) -> Paper:
+    """
+    处理上传的 PDF 文件：
+    1. 提取文本和 DOI
+    2. 尝试通过 DOI 获取元数据 (CrossRef)
+    3. 创建或更新 Paper 记录
+    4. 生成 Embedding
+    """
+    pdf_service = get_pdf_service()
+    
+    # 1. 提取信息
+    try:
+        text = pdf_service.extract_text(file_path)
+        doi = pdf_service.find_doi(text)
+    except Exception as e:
+        logger.error(f"PDF 解析失败: {e}")
+        text = ""
+        doi = None
+
+    # 2. 尝试获取元数据
+    metadata_paper = None
+    if doi:
+        try:
+            settings = get_settings()
+            crossref = CrossRefCrawler(settings)
+            # 尝试直接通过 DOI 获取元数据
+            metadata_paper = crossref.get_paper_by_doi(doi)
+            if metadata_paper:
+                logger.info(f"Found CrossRef metadata for DOI {doi}: {metadata_paper.title}")
+        except Exception as e:
+            logger.warning(f"Failed to fetch CrossRef metadata: {e}")
+
+    # 3. 匹配或创建 Paper
+    paper = None
+    if doi:
+        paper = db.query(Paper).filter(Paper.doi == doi).first()
+
+    if paper:
+        logger.info(f"Found existing paper by DOI {doi}: {paper.id}")
+        # 更新 PDF 路径
+        paper.pdf_path = file_path
+        
+        # 如果有元数据，更新缺失字段
+        if metadata_paper:
+            if not paper.title or paper.title == "Unknown": paper.title = metadata_paper.title
+            if not paper.authors: paper.authors = metadata_paper.authors
+            if not paper.abstract: paper.abstract = metadata_paper.abstract
+            if not paper.year: paper.year = metadata_paper.year
+            if not paper.journal: paper.journal = metadata_paper.journal
+            if not paper.url: paper.url = metadata_paper.url
+        
+        db.commit()
+        db.refresh(paper)
+    else:
+        # 创建新 Paper
+        if metadata_paper:
+            paper = Paper(
+                title=metadata_paper.title,
+                authors=metadata_paper.authors,
+                abstract=metadata_paper.abstract,
+                year=metadata_paper.year,
+                journal=metadata_paper.journal,
+                doi=doi,
+                url=metadata_paper.url,
+                pdf_path=file_path,
+                source="upload+crossref",
+                is_archived=False
+            )
+        else:
+            # 仅使用文件名猜测
+            title_guess = os.path.splitext(original_filename)[0].replace("_", " ").replace("-", " ")
+            paper = Paper(
+                title=title_guess,
+                doi=doi,
+                pdf_path=file_path,
+                source="upload",
+                year=datetime.now().year,
+                is_archived=False
+            )
+        
+        db.add(paper)
+        db.commit()
+        db.refresh(paper)
+
+    # 4. 生成 Embedding
+    # 如果有元数据且有摘要，优先使用元数据的摘要
+    # 如果没有元数据摘要，但提取到了文本，使用提取文本作为摘要（如果摘要为空）
+    content_for_embedding = paper.abstract
+    if not content_for_embedding and text:
+        # 尝试从文本中智能提取摘要
+        extracted_abstract = pdf_service.extract_abstract(text)
+        if extracted_abstract:
+            content_for_embedding = extracted_abstract
+        else:
+            # 提取失败，截取前 5000 字符
+            content_for_embedding = text[:5000]
+            
+        paper.abstract = content_for_embedding
+        db.commit()
+    
+    embedding_service = get_embedding_service()
+    
+    # 4.1 Paper 级 Embedding (Abstract)
+    if content_for_embedding:
+        try:
+            await embedding_service.embed_paper(paper)
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to generate paper embedding: {e}")
+
+    # 4.2 Chunk 级 Embedding (Full Text)
+    if text:
+        try:
+            # 1. 切分文本
+            chunks = pdf_service.chunk_text(text, chunk_size=1000, overlap=200)
+            if chunks:
+                logger.info(f"Generated {len(chunks)} chunks for paper {paper.id}")
+                
+                # 2. 批量生成向量
+                chunk_embeddings = await embedding_service.embed_texts(chunks)
+                
+                # 3. 保存到数据库
+                from app.models.paper_chunk import PaperChunk
+                
+                # 先清理旧的 chunks (如果是更新)
+                db.query(PaperChunk).filter(PaperChunk.paper_id == paper.id).delete()
+                
+                new_chunks = []
+                for i, (chunk_text, embedding) in enumerate(zip(chunks, chunk_embeddings)):
+                    if not embedding:
+                        continue
+                        
+                    new_chunks.append(PaperChunk(
+                        paper_id=paper.id,
+                        chunk_index=i,
+                        content=chunk_text,
+                        embedding=embedding
+                    ))
+                
+                if new_chunks:
+                    db.add_all(new_chunks)
+                    db.commit()
+                    logger.info(f"Saved {len(new_chunks)} chunks with embeddings for paper {paper.id}")
+                    
+        except Exception as e:
+            logger.error(f"Failed to process chunks for paper {paper.id}: {e}")
+
+    return paper

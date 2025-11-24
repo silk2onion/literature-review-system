@@ -396,38 +396,62 @@ async def generate_review(
             })
         logger.info(f"Using {len(papers)} local papers for review generation (Source: {'paper_ids' if payload.paper_ids else 'group_id'})")
     elif use_local_rag:
-        # 模式 C: 本地 RAG 检索 (Tag Enhanced)
-        logger.info("Using Local RAG (Tag Enhanced) for review generation...")
+        # 模式 C: 本地 RAG 检索 (Full-Text Chunk Search)
+        logger.info("Using Local RAG (Full-Text Chunk Search) for review generation...")
         semantic_service = get_semantic_search_service()
-        # Use async search
-        hits, debug_info = await semantic_service.search(
+        
+        # 1. 先进行 Chunk 级检索
+        chunk_hits = await semantic_service.search_chunks(
             db=db,
             keywords=payload.keywords,
-            year_from=payload.year_from,
-            year_to=payload.year_to,
-            limit=payload.paper_limit,
-            source="review_generation_rag"
+            limit=payload.paper_limit * 3, # 获取更多 chunks 以便聚合
+            paper_ids=None # 全库检索
         )
         
-        for hit in hits:
-            p = hit.paper
-            papers.append({
-                "title": p.title,
-                "abstract": p.abstract,
-                "year": p.year,
-                "authors": p.authors,
-                "journal": p.journal,
-                "url": p.pdf_url or p.url,
-                "source": "local_rag",
-                "id": p.id,
-                "score": hit.score
-            })
-        logger.info(f"Local RAG found {len(papers)} papers. Debug: {debug_info}")
+        # 2. 聚合 Chunks 到 Papers
+        papers_map = {}
+        for hit in chunk_hits:
+            pid = hit["paper_id"]
+            if pid not in papers_map:
+                papers_map[pid] = {
+                    "id": pid,
+                    "title": hit["paper_title"],
+                    "year": hit["paper_year"],
+                    # 其他字段可能需要额外查询，这里简化
+                    "source": "local_rag",
+                    "relevant_chunks": []
+                }
+            papers_map[pid]["relevant_chunks"].append(hit["chunk_content"])
+            
+        # 3. 转换为列表
+        papers = list(papers_map.values())
         
-        # 如果本地 RAG 结果不足且还有其他在线源，尝试补充（可选优化）
-        # 目前简单处理：如果指定了 local_rag，主要依赖它。
-        # 若需要混合，可在此处继续调用 search_across_sources 并 extend papers
+        # 如果 Chunk 检索结果太少，尝试补充 Abstract 检索
+        if len(papers) < 3:
+            logger.info("Chunk search yielded few results, falling back to Abstract search...")
+            abstract_hits, _ = await semantic_service.search(
+                db=db,
+                keywords=payload.keywords,
+                limit=payload.paper_limit,
+                source="review_generation_rag_fallback"
+            )
+            for h in abstract_hits:
+                p = h.paper
+                if p.id not in papers_map:
+                    papers.append({
+                        "id": p.id,
+                        "title": p.title,
+                        "abstract": p.abstract,
+                        "year": p.year,
+                        "authors": p.authors,
+                        "journal": p.journal,
+                        "url": p.pdf_url or p.url,
+                        "source": "local_rag_abstract",
+                        "relevant_chunks": [] # 无 chunks
+                    })
         
+        logger.info(f"Local RAG found {len(papers)} papers with relevant chunks.")
+
     else:
         # 模式 B: 执行在线搜索
         papers = search_across_sources(

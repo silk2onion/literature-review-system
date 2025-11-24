@@ -69,6 +69,34 @@ class EmbeddingService:
             return None
         return list(vector)
 
+    async def embed_texts(self, texts: List[str]) -> List[Optional[List[float]]]:
+        """
+        批量生成文本向量。
+        """
+        if not texts:
+            return []
+            
+        # 简单裁剪
+        cleaned_texts = [t[:6000] for t in texts]
+        
+        try:
+            model_name = getattr(settings, "EMBEDDING_MODEL", None) or self.default_model
+            resp = await self.client.embeddings.create(
+                model=model_name,
+                input=cleaned_texts,
+            )
+            
+            # 按顺序提取结果
+            embeddings = [None] * len(texts)
+            for item in resp.data:
+                embeddings[item.index] = list(item.embedding) # type: ignore
+                
+            return embeddings
+            
+        except Exception as exc:
+            logger.error("批量调用 embedding 接口失败: %s", exc)
+            return [None] * len(texts)
+
     async def embed_paper(self, paper: Paper) -> Optional[List[float]]:
         """
         将单篇 Paper 的 标题 + 摘要 编码为向量。
@@ -91,25 +119,39 @@ class EmbeddingService:
         Returns:
             实际成功写入 embedding 的 Paper 数量
         """
-        # 仅选择 embedding 字段为空的记录
-        qs = (
-            db.query(Paper)
-            .filter(Paper.embedding.is_(None))
-            .order_by(Paper.id.asc())
-            .limit(limit)
-        )
-        papers = qs.all()
-        if not papers:
+        # 查询所有 papers，在 Python 中过滤（因为 JSON 字段的空值判断在 SQL 中比较复杂）
+        all_papers = db.query(Paper).order_by(Paper.id.asc()).all()
+        
+        logger.info(f"Total papers in database: {len(all_papers)}")
+        
+        papers_without_embedding = []
+        for p in all_papers:
+            emb = getattr(p, "embedding", None)
+            # 检查是否为 None、空列表、空字典、空字符串
+            if not emb or emb in ([], {}, "", "null", "[]", "{}"):
+                logger.debug(f"Paper {p.id} has no embedding (type: {type(emb)}, value: {repr(emb)})")
+                papers_without_embedding.append(p)
+                if len(papers_without_embedding) >= limit:
+                    break
+            else:
+                logger.debug(f"Paper {p.id} HAS embedding (type: {type(emb)}, len: {len(emb) if isinstance(emb, (list, dict, str)) else 'N/A'})")
+        
+        logger.info(f"Papers without embedding: {len(papers_without_embedding)}")
+        
+        if not papers_without_embedding:
             logger.info("没有需要回填 embedding 的 Paper 记录")
             return 0
-        logger.info("准备为 %d 篇 Paper 生成 embedding（上限 %d）", len(papers), limit)
+            
+        logger.info("准备为 %d 篇 Paper 生成 embedding（上限 %d）", len(papers_without_embedding), limit)
         updated = 0
-        for paper in papers:
+        for paper in papers_without_embedding:
             vec = await self.embed_paper(paper)
             if vec is None:
+                logger.warning(f"Failed to generate embedding for paper {paper.id}")
                 continue
             paper.embedding = vec  # type: ignore[assignment]
             updated += 1
+            
         if updated > 0:
             db.commit()
             logger.info("成功回填 %d 条 Paper.embedding", updated)

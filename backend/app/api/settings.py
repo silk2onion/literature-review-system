@@ -1,16 +1,20 @@
 from typing import Any, Dict, List, Optional, Tuple
+import json
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 import requests
 
 from app.config import settings
+from app.database import get_db
+from app.models.system_setting import SystemSetting
 from app.services.crawler.multi_source_orchestrator import MultiSourceOrchestrator
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
 
-# ---- 运行时数据源配置（简单进程内存实现，占位版） ----
+# ---- 运行时数据源配置 ----
 
 
 class DataSourceConfig(BaseModel):
@@ -29,25 +33,7 @@ class DataSourcesConfig(BaseModel):
     rag: RagConfig
 
 
-# 初始化时从 settings 读默认值
-_runtime_config: DataSourcesConfig = DataSourcesConfig(
-    serpapi=DataSourceConfig(
-        enabled=getattr(settings, "SERPAPI_SCHOLAR_ENABLED", False),
-        api_key=getattr(settings, "SERPAPI_API_KEY", "") or "",
-        engine=getattr(settings, "SERPAPI_SCHOLAR_ENGINE", "google_scholar"),
-    ),
-    scopus=DataSourceConfig(
-        enabled=getattr(settings, "SCOPUS_ENABLED", False),
-        api_key=getattr(settings, "SCOPUS_API_KEY", "") or "",
-        engine=None,
-    ),
-    rag=RagConfig(
-        enabled=getattr(settings, "RAG_ENABLED", False),
-    ),
-)
-
-
-# ---- LLM / Embedding 模型配置（运行时选择） ----
+# ---- LLM / Embedding 模型配置 ----
 
 
 class ModelSelectionConfig(BaseModel):
@@ -62,45 +48,89 @@ class ModelOptionsResponse(BaseModel):
     current_embedding_model: str
 
 
-_runtime_model_config: ModelSelectionConfig = ModelSelectionConfig(
-    llm_model=getattr(settings, "OPENAI_MODEL", "gpt-4"),
-    embedding_model=getattr(settings, "EMBEDDING_MODEL", "text-embedding-3-small"),
-)
+# ---- 数据库辅助函数 ----
 
+def _get_setting(db: Session, key: str, default: Any = None) -> Any:
+    """从数据库读取设置，如果不存在则返回默认值"""
+    setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    if setting and setting.value:
+        try:
+            return json.loads(setting.value)
+        except json.JSONDecodeError:
+            return setting.value
+    return default
+
+def _set_setting(db: Session, key: str, value: Any):
+    """写入设置到数据库"""
+    setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    val_str = json.dumps(value)
+    
+    if setting:
+        setting.value = val_str
+    else:
+        setting = SystemSetting(key=key, value=val_str)
+        db.add(setting)
+    db.commit()
+
+
+# ---- API Endpoints ----
 
 @router.get("/settings/data-sources", response_model=DataSourcesConfig)
-def get_data_sources_config() -> DataSourcesConfig:
+def get_data_sources_config(db: Session = Depends(get_db)) -> DataSourcesConfig:
     """
     获取当前运行时数据源配置
-
-    当前实现为进程内存中的简单配置，
-    后续可以替换为数据库或文件存储。
+    优先从数据库读取，若无则回退到环境变量默认值
     """
-    return _runtime_config
+    # 默认配置 (Env)
+    default_config = {
+        "serpapi": {
+            "enabled": getattr(settings, "SERPAPI_SCHOLAR_ENABLED", False),
+            "api_key": getattr(settings, "SERPAPI_API_KEY", "") or "",
+            "engine": getattr(settings, "SERPAPI_SCHOLAR_ENGINE", "google_scholar"),
+        },
+        "scopus": {
+            "enabled": getattr(settings, "SCOPUS_ENABLED", False),
+            "api_key": getattr(settings, "SCOPUS_API_KEY", "") or "",
+            "engine": None,
+        },
+        "rag": {
+            "enabled": getattr(settings, "RAG_ENABLED", False),
+        }
+    }
+    
+    # 从 DB 读取覆盖
+    saved_config = _get_setting(db, "data_sources_config", {})
+    
+    # 合并逻辑：以 saved_config 为主，但要确保结构完整
+    # 这里简单处理：如果 saved_config 存在且结构大致对，就用它；否则用 default
+    # 更严谨的做法是逐字段 merge
+    
+    final_config = default_config.copy()
+    if saved_config and isinstance(saved_config, dict):
+        # Deep merge simple 2-level dict
+        for section, vals in saved_config.items():
+            if section in final_config and isinstance(vals, dict):
+                final_config[section].update(vals)
+    
+    return DataSourcesConfig(**final_config)
 
 
 @router.put("/settings/data-sources", response_model=DataSourcesConfig)
-def update_data_sources_config(payload: DataSourcesConfig) -> DataSourcesConfig:
+def update_data_sources_config(
+    payload: DataSourcesConfig, 
+    db: Session = Depends(get_db)
+) -> DataSourcesConfig:
     """
-    更新运行时数据源配置
-
-    注意：当前仅更新内存中的配置，不会写回 .env。
+    更新运行时数据源配置并持久化到数据库
     """
-    global _runtime_config
-    _runtime_config = payload
-    return _runtime_config
+    _set_setting(db, "data_sources_config", payload.model_dump())
+    return payload
 
 
-def _get_upstream_model_lists() -> Tuple[List[str], List[str]]:
+def _get_upstream_model_lists(api_key: str, base_url: str) -> Tuple[List[str], List[str]]:
     """
     从上游 LLM 提供方的 /models 接口动态获取模型列表。
-
-    返回:
-        (llm_models, embedding_models)
     """
-    api_key = getattr(settings, "OPENAI_API_KEY", "")
-    base_url = getattr(settings, "OPENAI_BASE_URL", "")
-
     if not api_key or not base_url:
         return [], []
 
@@ -112,7 +142,6 @@ def _get_upstream_model_lists() -> Tuple[List[str], List[str]]:
         resp.raise_for_status()
         data = resp.json()
     except Exception:
-        # 上游不可用时，让调用方走本地 SUPPORTED_* 回退逻辑
         return [], []
 
     items = data.get("data") or []
@@ -126,7 +155,6 @@ def _get_upstream_model_lists() -> Tuple[List[str], List[str]]:
     if not ids:
         return [], []
 
-    # 简单启发式：包含 embedding/embed/text-embedding 的认为是 embedding 模型
     embedding_models = sorted(
         {
             mid
@@ -137,7 +165,6 @@ def _get_upstream_model_lists() -> Tuple[List[str], List[str]]:
         }
     )
 
-    # 其它模型（排除 whisper/audio 之类）认为是 LLM 模型
     llm_models = sorted(
         {
             mid
@@ -152,14 +179,27 @@ def _get_upstream_model_lists() -> Tuple[List[str], List[str]]:
 
 
 @router.get("/settings/models", response_model=ModelOptionsResponse)
-def get_model_options() -> ModelOptionsResponse:
+def get_model_options(db: Session = Depends(get_db)) -> ModelOptionsResponse:
     """
     获取当前可用的主 LLM / Embedding 模型列表及当前选择
-
-    优先从上游 LLM 提供方的 /models 接口动态获取；
-    如果获取失败，则回退到 settings.SUPPORTED_LLM_MODELS / SUPPORTED_EMBEDDING_MODELS。
     """
-    upstream_llm, upstream_embedding = _get_upstream_model_lists()
+    # 1. 获取当前选中的模型 (DB > Env)
+    default_llm = getattr(settings, "OPENAI_MODEL", "gpt-4")
+    default_emb = getattr(settings, "EMBEDDING_MODEL", "text-embedding-3-small")
+    
+    saved_selection = _get_setting(db, "model_selection_config", {})
+    current_llm = saved_selection.get("llm_model", default_llm)
+    current_emb = saved_selection.get("embedding_model", default_emb)
+    
+    # 2. 获取模型列表
+    # 需要 API Key，这里也应该支持从 DB 读取 API Key (如果未来支持在前端配 Key)
+    # 目前 Key 还是主要从 Env 读，或者 Settings 里的 data_sources (如果不合理，暂且从 Env)
+    # 假设 OpenAI Key 还是在 Env 里配置最稳妥，或者后续加一个 System Config 页面
+    
+    api_key = getattr(settings, "OPENAI_API_KEY", "")
+    base_url = getattr(settings, "OPENAI_BASE_URL", "")
+    
+    upstream_llm, upstream_embedding = _get_upstream_model_lists(api_key, base_url)
 
     if upstream_llm or upstream_embedding:
         llm_models = upstream_llm
@@ -169,83 +209,90 @@ def get_model_options() -> ModelOptionsResponse:
         embedding_models = getattr(settings, "SUPPORTED_EMBEDDING_MODELS", [])
 
     # 确保当前选择一定出现在下拉列表里
-    if _runtime_model_config.llm_model and _runtime_model_config.llm_model not in llm_models:
-        llm_models = llm_models + [_runtime_model_config.llm_model]
-    if (
-        _runtime_model_config.embedding_model
-        and _runtime_model_config.embedding_model not in embedding_models
-    ):
-        embedding_models = embedding_models + [_runtime_model_config.embedding_model]
+    if current_llm and current_llm not in llm_models:
+        llm_models = llm_models + [current_llm]
+    if current_emb and current_emb not in embedding_models:
+        embedding_models = embedding_models + [current_emb]
 
     return ModelOptionsResponse(
         llm_models=llm_models,
         embedding_models=embedding_models,
-        current_llm_model=_runtime_model_config.llm_model,
-        current_embedding_model=_runtime_model_config.embedding_model,
+        current_llm_model=current_llm,
+        current_embedding_model=current_emb,
     )
 
 
 @router.put("/settings/models", response_model=ModelOptionsResponse)
-def update_model_options(payload: ModelSelectionConfig) -> ModelOptionsResponse:
+def update_model_options(
+    payload: ModelSelectionConfig,
+    db: Session = Depends(get_db)
+) -> ModelOptionsResponse:
     """
     更新当前使用的主 LLM 模型与 Embedding 模型
-
-    注意：
-    - 当前主要更新进程内运行时配置（_runtime_model_config）
-    - 同时更新 settings.OPENAI_MODEL / settings.EMBEDDING_MODEL，便于服务层按运行时配置读取
     """
-    global _runtime_model_config
-    _runtime_model_config = payload
-
-    # 同步更新全局 settings 中的模型名，支持运行时动态切换
+    # 1. 保存到 DB
+    _set_setting(db, "model_selection_config", payload.model_dump())
+    
+    # 2. 同步更新全局 settings (运行时生效)
     setattr(settings, "OPENAI_MODEL", payload.llm_model)
     setattr(settings, "EMBEDDING_MODEL", payload.embedding_model)
 
-    # 更新后重新获取上游模型列表，保持与 GET /settings/models 行为一致
-    upstream_llm, upstream_embedding = _get_upstream_model_lists()
-
+    # 3. 重新构建返回 (复用 get 逻辑的简化版)
+    api_key = getattr(settings, "OPENAI_API_KEY", "")
+    base_url = getattr(settings, "OPENAI_BASE_URL", "")
+    upstream_llm, upstream_embedding = _get_upstream_model_lists(api_key, base_url)
+    
     if upstream_llm or upstream_embedding:
         llm_models = upstream_llm
         embedding_models = upstream_embedding
     else:
         llm_models = getattr(settings, "SUPPORTED_LLM_MODELS", [])
         embedding_models = getattr(settings, "SUPPORTED_EMBEDDING_MODELS", [])
-
-    # 确保当前选择出现在返回列表中
-    if _runtime_model_config.llm_model and _runtime_model_config.llm_model not in llm_models:
-        llm_models = llm_models + [_runtime_model_config.llm_model]
-    if (
-        _runtime_model_config.embedding_model
-        and _runtime_model_config.embedding_model not in embedding_models
-    ):
-        embedding_models = embedding_models + [_runtime_model_config.embedding_model]
+        
+    if payload.llm_model not in llm_models:
+        llm_models.append(payload.llm_model)
+    if payload.embedding_model not in embedding_models:
+        embedding_models.append(payload.embedding_model)
 
     return ModelOptionsResponse(
         llm_models=llm_models,
         embedding_models=embedding_models,
-        current_llm_model=_runtime_model_config.llm_model,
-        current_embedding_model=_runtime_model_config.embedding_model,
+        current_llm_model=payload.llm_model,
+        current_embedding_model=payload.embedding_model,
     )
-
-
-# ---- 外部数据源测试接口 ----
 
 
 @router.get("/debug/external-sources/test")
 def debug_external_sources_test(
     query: str = "urban design",
     max_results: int = 3,
+    db: Session = Depends(get_db) # Inject DB just in case we need config from it
 ) -> Dict[str, Any]:
     """
-    使用当前配置对外部数据源做一次快速测试调用（不入库）。
-
-    - 调用 MultiSourceOrchestrator.search_all
-    - 汇总每个 source 的返回数量或错误信息
+    使用当前配置对外部数据源做一次快速测试调用
     """
+    # 确保 Orchestrator 使用最新的配置 (可能需要从 DB 读取并注入)
+    # 目前 Orchestrator 还是读 Env/Settings，
+    # 如果要支持动态 Key，需要修改 Orchestrator 或在此处临时 patch settings
+    
+    # 临时方案：从 DB 读取配置并 patch 到 settings (仅针对本次请求上下文? 不太好做)
+    # 更好的方案是 MultiSourceOrchestrator 接受 config 参数
+    # 但为了最小改动，我们假设 Key 还是主要靠 Env，或者 update_data_sources_config 时没法更新 Key 到 Env
+    # 如果用户在前端改了 Key，这里需要生效：
+    
+    saved_config = _get_setting(db, "data_sources_config", {})
+    if saved_config:
+        # 临时覆盖 settings 中的值 (注意这是全局修改，但在单进程/多线程模型下可能会有竞争，
+        # 但对于个人使用的本地应用尚可接受，或者 Orchestrator 应该重构为传递 config)
+        if "serpapi" in saved_config:
+            setattr(settings, "SERPAPI_API_KEY", saved_config["serpapi"].get("api_key"))
+            setattr(settings, "SERPAPI_SCHOLAR_ENABLED", saved_config["serpapi"].get("enabled"))
+        if "scopus" in saved_config:
+            setattr(settings, "SCOPUS_API_KEY", saved_config["scopus"].get("api_key"))
+            setattr(settings, "SCOPUS_ENABLED", saved_config["scopus"].get("enabled"))
+
     orchestrator = MultiSourceOrchestrator()
     results: Dict[str, Any] = {}
-
-    # 目前 MultiSourceOrchestrator 内部固定支持的源名称
     sources = ["scholar_serpapi", "scopus"]
 
     try:
@@ -258,10 +305,8 @@ def debug_external_sources_test(
             papers = source_results.get(src, [])
             results[src] = {
                 "count": len(papers),
-                # 这里没有直接暴露 HTTP 状态码，只给出数量；
-                # 后续如果需要，可以在各 crawler 内部记录最近一次 HTTP 状态到全局状态中再读出。
             }
-    except Exception as exc:  # 防御式：不让调试接口把异常抛到客户端
+    except Exception as exc:
         results["error"] = str(exc)
 
     return {
