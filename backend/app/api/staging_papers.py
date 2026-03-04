@@ -135,3 +135,42 @@ async def promote_staging_papers_endpoint(
 
     papers = await promote_staging_papers_service(db, records)
     return [PaperResponse.model_validate(p) for p in papers]
+
+
+class StagingPaperIdsRequest(BaseModel):
+    """通用 ID 列表请求"""
+    ids: List[int]
+
+
+@router.post("/reject")
+def reject_staging_papers(
+    payload: StagingPaperIdsRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    将指定暂存文献标记为 rejected（软删除）
+    """
+    count = (
+        db.query(StagingPaper)
+        .filter(StagingPaper.id.in_(payload.ids))
+        .update({"status": "rejected"}, synchronize_session="fetch")
+    )
+    db.commit()
+    return {"success": True, "rejected_count": count}
+
+
+@router.delete("/delete")
+def delete_staging_papers(
+    payload: StagingPaperIdsRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    永久删除指定暂存文献记录
+    """
+    count = (
+        db.query(StagingPaper)
+        .filter(StagingPaper.id.in_(payload.ids))
+        .delete(synchronize_session="fetch")
+    )
+    db.commit()
+    return {"success": True, "deleted_count": count}

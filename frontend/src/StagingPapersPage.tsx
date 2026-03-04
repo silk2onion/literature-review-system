@@ -51,6 +51,7 @@ const SOURCE_OPTIONS: { value: string; label: string }[] = [
   { value: "crossref", label: "CrossRef" },
   { value: "scholar_serpapi", label: "Google Scholar" },
   { value: "scopus", label: "Scopus" },
+  { value: "semantic_scholar", label: "Semantic Scholar" },
 ];
 
 export default function StagingPapersPage() {
@@ -202,18 +203,14 @@ export default function StagingPapersPage() {
 
   const handlePromoteSelected = async () => {
     if (selectedIds.length === 0) return;
-    if (
-      !window.confirm(
-        `确定要将当前选中的 ${selectedIds.length} 条暂存文献提升为正式文献吗？`,
-      )
-    ) {
-      return;
-    }
 
     try {
       setPromoting(true);
       setTaskStatus("running");
-      setTaskMessage("正在提升选中的暂存文献为正式文献...");
+      setTaskMessage(`正在提升 ${selectedIds.length} 条暂存文献为正式文献...`);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s 超时
 
       const resp = await fetch(`${API_BASE_URL}/api/staging-papers/promote`, {
         method: "POST",
@@ -222,7 +219,10 @@ export default function StagingPapersPage() {
           Accept: "application/json",
         },
         body: JSON.stringify({ ids: selectedIds }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!resp.ok) {
         const text = await resp.text();
@@ -250,6 +250,90 @@ export default function StagingPapersPage() {
       );
     } finally {
       setPromoting(false);
+    }
+  };
+
+  const handleRejectSelected = async () => {
+    if (selectedIds.length === 0) return;
+    if (
+      !window.confirm(
+        `确定要将当前选中的 ${selectedIds.length} 条暂存文献标记为"已拒绝"吗？`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setTaskStatus("running");
+      setTaskMessage("正在拒绝选中的暂存文献...");
+
+      const resp = await fetch(`${API_BASE_URL}/api/staging-papers/reject`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ ids: selectedIds }),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`拒绝失败: ${resp.status} ${resp.statusText} - ${text}`);
+      }
+
+      const result = await resp.json();
+      setTaskStatus("done");
+      setTaskMessage(`已拒绝 ${result.rejected_count} 条暂存文献`);
+      setSelectedIds([]);
+      await fetchData({ page });
+    } catch (err) {
+      console.error("reject staging error", err);
+      setTaskStatus("error");
+      setTaskMessage(
+        `拒绝失败：${(err as { message?: string })?.message || "未知错误"}`,
+      );
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0) return;
+    if (
+      !window.confirm(
+        `⚠️ 确定要永久删除选中的 ${selectedIds.length} 条暂存文献吗？此操作不可恢复！`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setTaskStatus("running");
+      setTaskMessage("正在永久删除选中的暂存文献...");
+
+      const resp = await fetch(`${API_BASE_URL}/api/staging-papers/delete`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ ids: selectedIds }),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`删除失败: ${resp.status} ${resp.statusText} - ${text}`);
+      }
+
+      const result = await resp.json();
+      setTaskStatus("done");
+      setTaskMessage(`已永久删除 ${result.deleted_count} 条暂存文献`);
+      setSelectedIds([]);
+      await fetchData({ page });
+    } catch (err) {
+      console.error("delete staging error", err);
+      setTaskStatus("error");
+      setTaskMessage(
+        `删除失败：${(err as { message?: string })?.message || "未知错误"}`,
+      );
     }
   };
 
@@ -295,8 +379,42 @@ export default function StagingPapersPage() {
           <h1>暂存文献库</h1>
           <p>审核和筛选由爬虫抓取的原始文献元数据，将合适的记录提升为正式文献</p>
         </div>
-        <div className="page-actions">
+        <div className="page-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           {renderTaskBadge()}
+          <button
+            type="button"
+            onClick={handleDeleteSelected}
+            disabled={selectedIds.length === 0}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 6,
+              border: selectedIds.length > 0 ? '1px solid #ef4444' : '1px solid #d1d5db',
+              backgroundColor: selectedIds.length > 0 ? '#fef2f2' : '#f9fafb',
+              color: selectedIds.length > 0 ? '#dc2626' : '#9ca3af',
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: selectedIds.length > 0 ? 'pointer' : 'default',
+            }}
+          >
+            🗑 删除 {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
+          </button>
+          <button
+            type="button"
+            onClick={handleRejectSelected}
+            disabled={selectedIds.length === 0}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 6,
+              border: selectedIds.length > 0 ? '1px solid #f97316' : '1px solid #d1d5db',
+              backgroundColor: selectedIds.length > 0 ? '#fff7ed' : '#f9fafb',
+              color: selectedIds.length > 0 ? '#ea580c' : '#9ca3af',
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: selectedIds.length > 0 ? 'pointer' : 'default',
+            }}
+          >
+            ✕ 拒绝 {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
+          </button>
           <button
             type="button"
             onClick={handlePromoteSelected}
@@ -306,8 +424,8 @@ export default function StagingPapersPage() {
             {promoting
               ? "正在提升..."
               : selectedIds.length === 0
-                ? "选择后可提升为正式文献"
-                : `提升选中 ${selectedIds.length} 条为正式文献`}
+                ? "选择后可操作"
+                : `✓ 提升 (${selectedIds.length})`}
           </button>
         </div>
       </header>

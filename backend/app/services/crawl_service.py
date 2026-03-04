@@ -139,7 +139,7 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
             legacy_sources = ["arxiv"]
             multi_sources: List[str] = []
         else:
-            legacy_supported = {"arxiv", "crossref"}
+            legacy_supported = {"arxiv", "crossref", "semantic_scholar"}
             multi_supported = {"scholar_serpapi", "scopus"}
             legacy_sources = [s for s in normalized_sources if s in legacy_supported]
             multi_sources = [s for s in normalized_sources if s in multi_supported]
@@ -178,6 +178,9 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
             )
             total_new_count += new_from_sources
 
+        # 记录本轮实际从 API 获取到的论文总数（含重复项），用于判断是否已穷尽可用结果
+        total_source_count = len(all_source_papers)
+
     except Exception as e:
         job.status = "failed"
         job.failed_count = (job.failed_count or 0) + 1
@@ -193,7 +196,9 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
     # 本轮新增数量（包含旧管线与新管线）
     new_count = total_new_count
 
-    job.fetched_count = (job.fetched_count or 0) + new_count
+    # 进度使用实际从 API 获取的论文数（而非去重后的新增数），避免反复获取相同论文而进度停滞
+    fetched_increment = max(total_source_count, new_count)
+    job.fetched_count = (job.fetched_count or 0) + fetched_increment
     job.current_page = (job.current_page or 0) + 1
     job.updated_at = datetime.utcnow()
     job.append_log({
@@ -201,6 +206,7 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         "level": "info",
         "msg": "run_once 完成",
         "new_papers": new_count,
+        "source_papers": total_source_count,
         "fetched_count": job.fetched_count,
         "current_page": job.current_page,
     })
@@ -208,6 +214,14 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
     # 判断是否完成
     if (job.fetched_count or 0) >= (job.max_results or 0):
         job.status = "completed"
+    elif total_source_count == 0:
+        # API 未返回任何结果，说明已穷尽可用论文
+        job.status = "completed"
+        job.append_log({
+            "ts": datetime.utcnow().isoformat(),
+            "level": "info",
+            "msg": "数据源未返回更多结果，任务自动标记为 completed",
+        })
     else:
         job.status = "pending"
 
