@@ -142,7 +142,7 @@ class CitationIngestService:
 
         return None
 
-    async def _create_placeholder_paper_for_reference(
+    def _create_placeholder_paper_for_reference(
         self,
         db: Session,
         ref_norm: Dict[str, Optional[object]],

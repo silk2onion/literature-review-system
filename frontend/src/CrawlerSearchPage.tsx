@@ -25,6 +25,7 @@ const SOURCE_OPTIONS = [
     { value: "crossref", label: "CrossRef" },
     { value: "scholar_serpapi", label: "Google Scholar" },
     { value: "scopus", label: "Scopus" },
+    { value: "semantic_scholar", label: "Semantic Scholar" },
 ];
 
 const STATUS_LABELS: Record<JobStatusCode, string> = {
@@ -48,14 +49,23 @@ const getStatusStyle = (status: JobStatusCode) => {
 };
 
 export default function CrawlerSearchPage() {
-    const [activeTab, setActiveTab] = useState<"new" | "history">("new");
+    // 从 sessionStorage 恢复表单状态
+    const [activeTab, setActiveTab] = useState<"new" | "history">(() => {
+        return (sessionStorage.getItem("crawl_activeTab") as "new" | "history") || "new";
+    });
 
-    // Search State
-    const [keywords, setKeywords] = useState("");
-    const [selectedSources, setSelectedSources] = useState<string[]>(["arxiv", "crossref"]);
-    const [yearFrom, setYearFrom] = useState("");
-    const [yearTo, setYearTo] = useState("");
-    const [maxResults, setMaxResults] = useState(200);
+    // Search State — 从缓存恢复
+    const [keywords, setKeywords] = useState(() => sessionStorage.getItem("crawl_keywords") || "");
+    const [selectedSources, setSelectedSources] = useState<string[]>(() => {
+        const cached = sessionStorage.getItem("crawl_selectedSources");
+        return cached ? JSON.parse(cached) : ["arxiv", "crossref"];
+    });
+    const [yearFrom, setYearFrom] = useState(() => sessionStorage.getItem("crawl_yearFrom") || "");
+    const [yearTo, setYearTo] = useState(() => sessionStorage.getItem("crawl_yearTo") || "");
+    const [maxResults, setMaxResults] = useState(() => {
+        const cached = sessionStorage.getItem("crawl_maxResults");
+        return cached ? Number(cached) : 200;
+    });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitMessage, setSubmitMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -64,6 +74,14 @@ export default function CrawlerSearchPage() {
     const [jobsLoading, setJobsLoading] = useState(false);
     const [jobsError, setJobsError] = useState<string | null>(null);
     const [actioningJobId, setActioningJobId] = useState<number | null>(null);
+
+    // 持久化表单状态到 sessionStorage
+    useEffect(() => { sessionStorage.setItem("crawl_activeTab", activeTab); }, [activeTab]);
+    useEffect(() => { sessionStorage.setItem("crawl_keywords", keywords); }, [keywords]);
+    useEffect(() => { sessionStorage.setItem("crawl_selectedSources", JSON.stringify(selectedSources)); }, [selectedSources]);
+    useEffect(() => { sessionStorage.setItem("crawl_yearFrom", yearFrom); }, [yearFrom]);
+    useEffect(() => { sessionStorage.setItem("crawl_yearTo", yearTo); }, [yearTo]);
+    useEffect(() => { sessionStorage.setItem("crawl_maxResults", String(maxResults)); }, [maxResults]);
 
     // Fetch jobs when tab changes to history
     useEffect(() => {
@@ -158,6 +176,10 @@ export default function CrawlerSearchPage() {
             const res = await fetch(`${API_BASE_URL}/api/crawl/jobs/${jobId}/${action}`, { method: 'POST' });
             if (!res.ok) throw new Error("Action failed");
             await fetchJobs();
+            // run_once 可能需要几秒才能完成（如 Semantic Scholar 限速），延迟再刷新一次
+            if (action === 'run_once') {
+                setTimeout(() => fetchJobs(), 3000);
+            }
         } catch (err) {
             alert((err as Error).message);
         } finally {

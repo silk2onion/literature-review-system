@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     SCOPUS_ENABLED: bool = False
     SCOPUS_API_KEY: str = ""
     SCOPUS_API_BASE_URL: str = "https://api.elsevier.com/content/search/scopus"
+
+    # Semantic Scholar API（免费，无需 API Key；有 Key 可提速至 10 req/sec）
+    SEMANTIC_SCHOLAR_ENABLED: bool = True
+    SEMANTIC_SCHOLAR_API_KEY: str = ""
     
     # 文件存储路径
     PAPERS_DIR: str = "../data/papers"
@@ -95,7 +99,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:3001",
+        "http://localhost:5173",
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
     ]
     
     # JWT配置（可选）
