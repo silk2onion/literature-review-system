@@ -39,7 +39,17 @@ class OpenAIService:
         向后兼容属性，供调用方记录本次调用所使用的模型名称。
         """
         return self.model
-     
+
+    @staticmethod
+    def _extract_content(response) -> str:
+        """从 LLM 响应中提取文本内容，兼容标准 OpenAI 对象和 NewAPI 的字符串返回。"""
+        if isinstance(response, str):
+            return response
+        try:
+            return response.choices[0].message.content or ""
+        except (AttributeError, IndexError):
+            return str(response)
+
     async def generate_review_framework(
         self,
         keywords: List[str],
@@ -79,9 +89,9 @@ class OpenAIService:
                 max_tokens=16000
             )
             
-            finish_reason = response.choices[0].finish_reason
+            framework = self._extract_content(response)
+            finish_reason = getattr(getattr(getattr(response, 'choices', [None])[0] if not isinstance(response, str) else None, 'finish_reason', None), '__str__', lambda: 'unknown')()
             logger.info(f"LLM response finish_reason: {finish_reason}")
-            framework = response.choices[0].message.content or ""
             
             if not framework:
                 logger.error(f"Empty framework response. Full response object: {response}")
@@ -135,7 +145,7 @@ class OpenAIService:
                 max_tokens=16000
             )
             
-            content = response.choices[0].message.content or ""
+            content = self._extract_content(response)
             logger.info(f"综述内容生成成功，长度: {len(content)}")
             return content
             
@@ -172,7 +182,7 @@ class OpenAIService:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            content = response.choices[0].message.content or ""
+            content = self._extract_content(response)
             logger.info(f"文本补全成功，长度: {len(content)}")
             return content
         except Exception as e:
@@ -209,7 +219,7 @@ class OpenAIService:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            content = response.choices[0].message.content or "{}"
+            content = self._extract_content(response) or "{}"
             logger.info("JSON 补全成功，内容: %s...", content[:100])
             import json
             return json.loads(content)
@@ -339,7 +349,7 @@ class OpenAIService:
             logger.error(f"生成结构化文献综述失败: {e}")
             raise
 
-        full_text = response.choices[0].message.content or ""
+        full_text = self._extract_content(response)
         logger.info("Lit review LLM 调用成功，长度: %d", len(full_text))
 
         # 4. 从返回中解析 Markdown 正文与 JSON 区块
@@ -585,7 +595,7 @@ class OpenAIService:
                 max_tokens=200
             )
             
-            summary = response.choices[0].message.content or ""
+            summary = self._extract_content(response)
             if summary:
                 return summary
             

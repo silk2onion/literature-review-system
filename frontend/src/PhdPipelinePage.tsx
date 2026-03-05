@@ -49,7 +49,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   initialYearFrom,
   initialYearTo,
   initialPaperLimit = 20,
-  initialSources = ['arxiv', 'scholar_serpapi', 'scopus'],
+  initialSources = ['arxiv', 'scholar_serpapi', 'scopus', 'semantic_scholar'],
   initialPaperIds = [],
   initialGroupId,
   onExit,
@@ -314,7 +314,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
               数据源
             </label>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-              {['arxiv', 'scholar_serpapi', 'scopus', 'local_rag'].map(src => (
+              {['arxiv', 'scholar_serpapi', 'scopus', 'semantic_scholar', 'local_rag'].map(src => (
                 <label key={src} style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#fff', fontSize: '13px', cursor: 'pointer' }}>
                   <input
                     type="checkbox"
