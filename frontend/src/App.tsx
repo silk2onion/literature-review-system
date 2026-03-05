@@ -14,6 +14,7 @@ import LibraryPage from "./LibraryPage";
 import StagingPapersPage from "./StagingPapersPage";
 import ReviewGenerateFromLibraryPage from "./ReviewGenerateFromLibraryPage";
 import RagDebugPage from "./RagDebugPage";
+import AgentChatPanel, { AgentToggleButton } from "./AgentChatPanel";
 import "./App.css";
 import CrawlerSearchPage from "./CrawlerSearchPage";
 
@@ -24,6 +25,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<"search" | "library" | "staging" | "rag" | "draft">("search");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
 
   // Settings State
   const [settingsData, setSettingsData] = useState({
@@ -244,6 +246,7 @@ function App() {
                 <Filter size={16} />
               </button>
             )}
+            <AgentToggleButton isOpen={agentOpen} onClick={() => setAgentOpen(!agentOpen)} />
           </div>
         </div>
 
@@ -252,6 +255,9 @@ function App() {
           {renderContent()}
         </div>
       </div>
+
+      {/* Agent Chat Panel */}
+      <AgentChatPanel isOpen={agentOpen} onClose={() => setAgentOpen(false)} />
 
       {/* Settings Modal */}
       {showSettings && (

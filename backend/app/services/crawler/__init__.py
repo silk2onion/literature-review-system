@@ -8,6 +8,7 @@ from app.config import settings
 from app.models.paper import Paper
 from app.services.crawler.arxiv_crawler import ArxivCrawler
 from app.services.crawler.crossref_crawler import CrossRefCrawler
+from app.services.crawler.semantic_scholar_crawler import SemanticScholarCrawler
 
 
 # 数据源优先级配置：数值越小优先级越高
@@ -15,6 +16,7 @@ SOURCE_PRIORITY: Dict[str, int] = {
     "scopus": 1,
     "web_of_science": 2,
     "crossref": 3,
+    "semantic_scholar": 3,  # 高质量学术数据源，与 crossref 同级
     "google_scholar": 4,
     "pubmed": 5,
     "arxiv": 10,  # 预印本，优先级较低
@@ -59,6 +61,11 @@ def search_across_sources(
             crawlers.append(CrossRefCrawler(settings=settings))
         except Exception as e:
             logger.error("初始化 CrossRefCrawler 失败: %s", e)
+    if "semantic_scholar" in normalized_sources:
+        try:
+            crawlers.append(SemanticScholarCrawler(settings=settings))
+        except Exception as e:
+            logger.error("初始化 SemanticScholarCrawler 失败: %s", e)
 
     if not crawlers:
         # 如果没有任何合法的数据源，直接返回空列表
@@ -118,4 +125,4 @@ def search_across_sources(
         return deduped[:limit]
     return deduped
 
-__all__ = ["ArxivCrawler", "CrossRefCrawler", "search_across_sources"]
+__all__ = ["ArxivCrawler", "CrossRefCrawler", "SemanticScholarCrawler", "search_across_sources"]

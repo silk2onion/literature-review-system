@@ -1135,3 +1135,329 @@
   font-family: 'SF Mono', Menlo, monospace;
   max-height: 400px;
 }
+
+/* ═══════════════════════════════════════════════════
+   AI Agent Chat Panel
+   ═══════════════════════════════════════════════════ */
+
+.agent-panel {
+  width: 380px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-color);
+  background: #fafbfc;
+  flex-shrink: 0;
+  animation: agentSlideIn 0.3s ease;
+}
+
+@keyframes agentSlideIn {
+  from {
+    width: 0;
+    opacity: 0;
+  }
+  to {
+    width: 380px;
+    opacity: 1;
+  }
+}
+
+.agent-header {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  flex-shrink: 0;
+}
+
+.agent-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-close-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary);
+}
+
+/* Mode Switcher */
+.agent-mode-switcher {
+  display: flex;
+  padding: 6px 12px;
+  gap: 2px;
+  background: #f1f5f9;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.agent-mode-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: none;
+}
+
+.agent-mode-btn:hover {
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.5);
+  transform: none;
+}
+
+.agent-mode-btn.active {
+  background: white;
+  color: #334155;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* Messages Area */
+.agent-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Single Message */
+.agent-msg {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  animation: msgFadeIn 0.3s ease;
+}
+
+@keyframes msgFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.agent-msg.user {
+  flex-direction: row-reverse;
+}
+
+.agent-msg-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.agent-msg.user .agent-msg-avatar {
+  background: var(--system-blue);
+  color: white;
+}
+
+.agent-msg.assistant .agent-msg-avatar {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+}
+
+.agent-msg-body {
+  max-width: 85%;
+  min-width: 0;
+}
+
+.agent-msg-text {
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+
+.agent-msg.user .agent-msg-text {
+  background: var(--system-blue);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.agent-msg.assistant .agent-msg-text {
+  background: white;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* Thinking animation */
+.agent-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-bottom-left-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.agent-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Input Area */
+.agent-input-area {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+  background: white;
+  flex-shrink: 0;
+}
+
+.agent-input {
+  flex: 1;
+  resize: none;
+  overflow: hidden;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: #f8f9fa;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.5;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+  min-height: 40px;
+  max-height: 100px;
+}
+
+.agent-input:focus {
+  border-color: var(--system-blue);
+  background: white;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.agent-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.agent-send-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--system-blue);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.agent-send-btn:hover:not(:disabled) {
+  background: var(--system-blue-hover);
+  transform: scale(1.05);
+}
+
+.agent-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Toggle Button */
+.agent-toggle-btn {
+  padding: 6px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.agent-toggle-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary);
+}
+
+.agent-toggle-btn.active {
+  background: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+}
+
+/* Message action bar (hover reveal) */
+.agent-msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.agent-msg:hover .agent-msg-actions {
+  opacity: 1;
+}
+
+.agent-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: white;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.agent-action-btn:hover {
+  background: #f1f5f9;
+  color: var(--text-primary);
+  border-color: #cbd5e1;
+}
+
+.agent-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
