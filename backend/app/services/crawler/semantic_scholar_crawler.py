@@ -126,28 +126,36 @@ class SemanticScholarCrawler:
                 self.BASE_URL, offset, page_size,
             )
 
-            self._rate_limit()
-
-            try:
-                resp = self.client.get(self.BASE_URL, params=params)
-                resp.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429:
-                    # 被限速，等待后重试一次
-                    logger.warning("[SemanticScholarCrawler] 被限速 (429)，等待 3 秒后重试")
-                    time.sleep(3)
-                    try:
-                        resp = self.client.get(self.BASE_URL, params=params)
-                        resp.raise_for_status()
-                    except Exception as retry_e:
-                        logger.error("[SemanticScholarCrawler] 重试失败: %s", retry_e)
+            resp = None
+            max_retries = 3
+            for attempt in range(max_retries):
+                self._rate_limit()
+                try:
+                    resp = self.client.get(self.BASE_URL, params=params)
+                    resp.raise_for_status()
+                    break
+                except httpx.HTTPStatusError as e:
+                    status = e.response.status_code
+                    if status in (429, 500, 502, 503, 504):
+                        delay = (2 ** attempt) + 2  # 3s, 4s, 6s
+                        logger.warning(f"[SemanticScholarCrawler] API 错误 ({status})，第 {attempt + 1} 次重试，等待 {delay} 秒")
+                        if attempt == max_retries - 1:
+                            logger.error("[SemanticScholarCrawler] 达到最大重试次数，放弃当前页面")
+                            resp = None
+                            break
+                        time.sleep(delay)
+                    else:
+                        logger.error(f"[SemanticScholarCrawler] 请求失败: {e}")
+                        resp = None
                         break
-                else:
-                    logger.error("[SemanticScholarCrawler] 请求失败: %s", e)
-                    raise
-            except Exception as e:
-                logger.error("[SemanticScholarCrawler] 请求失败: %s", e)
-                raise
+                except Exception as e:
+                    logger.error(f"[SemanticScholarCrawler] 未知请求失败: {e}")
+                    resp = None
+                    break
+            
+            if not resp:
+                logger.error("[SemanticScholarCrawler] 无法获取数据，终止分页")
+                break
 
             data = resp.json()
             items = data.get("data", []) or []

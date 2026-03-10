@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.agent_service import get_agent_service
+from app.services.agent_broadcast import broadcast_manager
+from fastapi import WebSocket, WebSocketDisconnect
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -58,3 +60,17 @@ async def agent_chat(
         mode=payload.mode,
     )
     return ChatResponse(**result)
+
+
+@router.websocket("/ws")
+async def agent_ws(websocket: WebSocket):
+    """WebSocket endpoint for proactive agent notifications."""
+    await broadcast_manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        broadcast_manager.disconnect(websocket)
+    except Exception:
+        broadcast_manager.disconnect(websocket)

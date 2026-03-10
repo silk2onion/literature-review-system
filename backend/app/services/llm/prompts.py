@@ -63,7 +63,7 @@ GENERATE_SECTION_CLAIMS_PROMPT = """
 根据给定的“章节提纲”，生成一个 JSON 格式的“论点–证据”表（SectionClaimTable）。
 
 【章节提纲】
-{{section_outline}}
+{section_outline}
 
 【输出要求】
 1.  严格按照以下 JSON 格式输出，不要添加任何额外说明。
@@ -76,27 +76,27 @@ GENERATE_SECTION_CLAIMS_PROMPT = """
 
 【JSON 输出格式示例】
 ```json
-{
+{{
   "section_id": "2.1",
   "section_title": "街道活力的度量方法演进",
   "claims": [
-    {
+    {{
       "claim_id": 1,
       "text": "早期的街道活力研究主要依赖于现场观察和手动计数等传统方法。",
       "rag_query": "street vitality traditional observation methods"
-    },
-    {
+    }},
+    {{
       "claim_id": 2,
       "text": "近年来，基于手机信令、社交媒体签到和街景图像分析等大数据技术，为街道活力研究提供了新的定量视角。",
       "rag_query": "urban vitality big data analytics mobile phone data"
-    },
-    {
+    }},
+    {{
       "claim_id": 3,
       "text": "空间句法（Space Syntax）模型被广泛应用于分析街道网络结构与步行流量潜力的关系。",
       "rag_query": "space syntax street network analysis pedestrian flow"
-    }
+    }}
   ]
-}
+}}
 ```
 """
 
@@ -108,12 +108,15 @@ RENDER_SECTION_FROM_CLAIMS_PROMPT_ZH = """
 
 【写作要求】
 1.  **忠于原文**：严格基于提供的“论点”和“文献片段”进行写作，不要引入外部知识或虚构信息。
-2.  **引用格式**：在段落中恰当的位置，使用 `[<citation_number>]` 的格式嵌入引用。如果一个论点由多篇文献支持，可以使用 `[<num1>, <num2>]` 的格式。
-3.  **自然流畅**：将各个论点有机地组织起来，形成逻辑清晰、语言流畅的学术段落，而不是简单的罗列。
-4.  **仅输出正文**：你的输出应该只有渲染后的章节正文，不要包含任何标题、前言或额外说明。
+2.  **引用格式**：使用 (Author, Year) 格式嵌入引用。每条论点后已标注了对应的引用标记，请在正文中原样使用。
+    - 例如: (Smith, 2020) 或 (Smith and Jones, 2020) 或 (Smith et al., 2020)
+    - 同一处多篇引用用分号: (Smith, 2020; Jones, 2021)
+3.  **零幻觉引用**：你绝对不能捏造不存在的引用。只能使用论点后附带的引用标记。
+4.  **自然流畅**：将各个论点有机地组织起来，形成逻辑清晰、语言流畅的学术段落。
+5.  **仅输出正文**：不要包含任何标题、前言、参考文献列表或额外说明。
 
 【论点与证据材料】
-{{claims_payload}}
+{claims_payload}
 """
 
 RENDER_SECTION_FROM_CLAIMS_PROMPT_EN = """
@@ -124,10 +127,182 @@ Write a complete section text based on the provided "claim-evidence" table, whic
 
 【Writing Requirements】
 1.  **Adhere to the Source**: Strictly base your writing on the provided "claims" and "literature snippets." Do not introduce external knowledge or fabricate information.
-2.  **Citation Format**: Insert citations at appropriate places in the text using the format `[<citation_number>]`. If a claim is supported by multiple papers, use the format `[<num1>, <num2>]`.
-3.  **Natural Flow**: Organize the claims into a logically clear and linguistically fluent academic paragraph, rather than a simple list.
-4.  **Output Text Only**: Your output should only be the rendered section text, without any titles, preambles, or extra explanations.
+2.  **Citation Format**: Use (Author, Year) format for inline citations. Each claim already has citation markers attached - use them exactly as provided.
+    - Example: (Smith, 2020) or (Smith and Jones, 2020) or (Smith et al., 2020)
+    - Multiple citations at one point: (Smith, 2020; Jones, 2021)
+3.  **Zero Hallucination**: You MUST NOT fabricate citations. Only use the citation markers attached to each claim.
+4.  **Natural Flow**: Organize claims into logically clear, linguistically fluent academic paragraphs.
+5.  **Output Text Only**: Do not include titles, preambles, reference lists, or extra explanations.
 
 【Claims and Evidence Material】
-{{claims_payload}}
+{claims_payload}
+"""
+
+RELEVANCE_SCORING_PROMPT = """
+You are a senior academic reviewer. Evaluate the relevance of the following paper abstract to the given research topic.
+
+【Research Topic】
+{topic}
+
+【Paper Title】
+{title}
+
+【Abstract】
+{abstract}
+
+【Task】
+Score the relevance from 0 to 10:
+- 10: Perfect match, core literature for this specific topic.
+- 7-9: Highly relevant, provides important context or evidence.
+- 4-6: Tangentially relevant or too broad/general.
+- 0-3: Irrelevant, different discipline, or purely coincidental keyword match.
+
+Provide ONLY a JSON object:
+{{
+  "score": <int>,
+  "reason": "<one sentence explanation in Chinese>"
+}}
+"""
+
+SEARCH_QUERY_EXPANSION_PROMPT = """
+You are an expert academic librarian and search specialist.
+Your task is to take a research topic and a specific section title, and generate robust English search queries for academic databases (like Semantic Scholar, Crossref).
+
+【Research Topic】
+{topic}
+
+【Section Title / Context】
+{section_title}
+{section_keywords}
+
+【Task】
+Generate 3 distinct search strategies, from highly specific to broad.
+- Tier 1 (Specific): The exact topic and section focus (e.g. "Transit-Oriented Development" AND "pedestrian safety").
+- Tier 2 (Broad): A slightly broader query if Tier 1 fails (e.g. "TOD" AND "pedestrian").
+- Tier 3 (General): The broadest query capturing the core concept.
+
+Rules:
+1. ONLY USE ENGLISH, even if the input is in another language. Academic databases are overwhelmingly English. Ensure accurate academic translation.
+2. Keep queries VERY concise. Databases fail on long phrases. Use simple boolean format implicitly (just space-separated keywords/phrases).
+3. Do not use complex operators like OR, NOT. Just the most critical keywords. Max 4 words per query.
+
+Provide ONLY a JSON object in this exact format:
+{{
+  "tier1": "most specific english keywords",
+  "tier2": "broader english keywords",
+  "tier3": "broadest english keywords"
+}}
+"""
+
+# ========== 端到端编排管线 ==========
+
+
+ORCHESTRATE_FRAMEWORK_PROMPT = """
+You are a senior academic researcher skilled at planning structured literature review frameworks.
+
+【Task】
+Based on the given research topic and keywords, generate a structured LITERATURE REVIEW outline.
+IMPORTANT: This is a literature review paper outline, NOT a PhD research plan or project timeline.
+The outline should organize existing research into thematic sections for critical analysis.
+
+【Research Topic】
+{topic}
+
+【Keywords】
+{keywords}
+
+{custom_instructions}
+
+【Output Requirements】
+1.  Output strictly in the JSON format below, with no additional text.
+2.  The framework should contain 3-6 sections covering: introduction/background, core topic literature themes, methods/techniques review, discussion and research gaps.
+3.  Each section must include:
+    - `id`: 章节编号，如 "1", "2.1"
+    - `title`: 章节标题
+    - `description`: 该章节应涵盖的内容简要描述
+    - `search_keywords`: 一个包含 2-5 个英文检索关键词的列表，用于在文献数据库中检索相关文献
+4.  search_keywords 应精准、简洁，适合学术数据库检索。
+5.  用 {language} 语言输出标题和描述。
+
+【JSON 输出格式】
+```json
+{{
+  "title": "综述标题",
+  "abstract_description": "综述摘要描述（2-3句话概括综述范围）",
+  "sections": [
+    {{
+      "id": "1",
+      "title": "引言：...",
+      "description": "本章节介绍...",
+      "search_keywords": ["keyword1", "keyword2", "keyword3"]
+    }},
+    {{
+      "id": "2",
+      "title": "...",
+      "description": "...",
+      "search_keywords": ["keyword1", "keyword2"]
+    }}
+  ]
+}}
+```
+"""
+
+ORCHESTRATE_SECTION_PROMPT_ZH = """
+你是一位精通学术写作的研究者，擅长基于文献资料撰写连贯的学术综述章节。
+
+【任务】
+根据给定的章节标题、描述和相关文献信息，撰写该章节的综述正文。
+
+【章节信息】
+- 标题: {section_title}
+- 描述: {section_description}
+
+【可引用的文献列表】
+{papers_context}
+
+【引用规范（极其重要，务必严格遵守）】
+1.  使用 (第一作者姓氏, 年份) 格式嵌入引用标注，例如:
+    - 单作者: (Smith, 2020)
+    - 双作者: (Smith & Jones, 2020)
+    - 三人及以上: (Smith et al., 2020)
+2.  同一处多篇引用用分号分隔: (Smith, 2020; Jones, 2021)
+3.  你只能引用上方【可引用的文献列表】中存在的文献，绝不引用未提供的文献。
+4.  每个引用标记必须与文献列表中的某篇文献精确对应。
+
+【写作要求】
+1.  严格基于提供的文献信息撰写，不要虚构文献或信息。
+2.  行文应逻辑清晰、学术性强、段落之间自然过渡。
+3.  每段应引用至少 2-3 篇文献来支撑论述。
+4.  仅输出章节正文（Markdown 格式），不要输出章节标题、前言或额外说明。
+5.  综述长度应在 300-600 字之间（中文）。
+"""
+
+ORCHESTRATE_SECTION_PROMPT_EN = """
+You are an expert academic researcher skilled at writing coherent literature review sections based on provided references.
+
+【Task】
+Write a review section based on the given section title, description, and relevant literature.
+
+【Section Information】
+- Title: {section_title}
+- Description: {section_description}
+
+【Available References】
+{papers_context}
+
+【Citation Rules (CRITICAL — must follow strictly)】
+1.  Use (First Author Surname, Year) format for inline citations, e.g.:
+    - Single author: (Smith, 2020)
+    - Two authors: (Smith & Jones, 2020)
+    - Three or more: (Smith et al., 2020)
+2.  Multiple citations at the same point: (Smith, 2020; Jones, 2021)
+3.  Only cite papers from the 【Available References】 list above. Never cite papers not provided.
+4.  Each citation must precisely correspond to a paper in the list.
+
+【Writing Requirements】
+1.  Base your writing strictly on the provided literature. Do not fabricate references or information.
+2.  Write with clear logic, academic rigor, and natural transitions between paragraphs.
+3.  Each paragraph should cite at least 2-3 papers to support the discussion.
+4.  Output section body text only (Markdown format). Do not include section titles, preambles, or extra explanations.
+5.  The section should be 200-500 words in length (English).
 """

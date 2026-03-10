@@ -9,6 +9,8 @@ import {
   Database,
   Archive,
   Smile,
+  FileEdit,
+  Activity,
 } from "lucide-react";
 import LibraryPage from "./LibraryPage";
 import StagingPapersPage from "./StagingPapersPage";
@@ -17,12 +19,14 @@ import RagDebugPage from "./RagDebugPage";
 import AgentChatPanel, { AgentToggleButton } from "./AgentChatPanel";
 import "./App.css";
 import CrawlerSearchPage from "./CrawlerSearchPage";
+import ReviewOrchestratePage from "./ReviewOrchestratePage";
+import MonitoringDashboard from "./MonitoringDashboard";
 
 const API_BASE_URL = "http://localhost:5444";
 
 function App() {
   // State
-  const [activeTab, setActiveTab] = useState<"search" | "library" | "staging" | "rag" | "draft">("search");
+  const [activeTab, setActiveTab] = useState<"search" | "library" | "staging" | "rag" | "draft" | "orchestrate" | "monitoring">("search");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
@@ -118,6 +122,10 @@ function App() {
         return <RagDebugPage />;
       case "draft":
         return <ReviewGenerateFromLibraryPage />;
+      case "orchestrate":
+        return <ReviewOrchestratePage />;
+      case "monitoring":
+        return <MonitoringDashboard />;
       default:
         return <StagingPapersPage />;
     }
@@ -135,6 +143,10 @@ function App() {
         return "RAG Debug";
       case "draft":
         return "Agent Survey Draft";
+      case "orchestrate":
+        return "一键综述生成";
+      case "monitoring":
+        return "任务进度监控";
       default:
         return "ScholarNative";
     }
@@ -161,6 +173,13 @@ function App() {
             >
               <Search size={16} className="sidebar-icon blue" />
               文献检索
+            </button>
+            <button
+              onClick={() => setActiveTab("monitoring")}
+              className={`sidebar-item ${activeTab === "monitoring" ? "active" : ""}`}
+            >
+              <Activity size={16} className="sidebar-icon green" />
+              任务监控
             </button>
           </div>
 
@@ -210,6 +229,13 @@ function App() {
               <PenTool size={16} className="sidebar-icon purple" />
               Agent Survey Draft
             </button>
+            <button
+              onClick={() => setActiveTab("orchestrate")}
+              className={`sidebar-item ${activeTab === "orchestrate" ? "active" : ""}`}
+            >
+              <FileEdit size={16} className="sidebar-icon green" />
+              一键综述生成
+            </button>
           </div>
         </div>
 
@@ -257,7 +283,14 @@ function App() {
       </div>
 
       {/* Agent Chat Panel */}
-      <AgentChatPanel isOpen={agentOpen} onClose={() => setAgentOpen(false)} />
+      <AgentChatPanel 
+        isOpen={agentOpen} 
+        onClose={() => setAgentOpen(false)} 
+        onNavigate={(tab) => {
+          setActiveTab(tab);
+          setAgentOpen(false);
+        }}
+      />
 
       {/* Settings Modal */}
       {showSettings && (

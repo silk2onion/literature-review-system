@@ -135,8 +135,8 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         # - multi_sources: 走新的 MultiSourceOrchestrator + paper_ingest 管线
         normalized_sources = [s.strip().lower() for s in (sources_all or []) if s and s.strip()]
         if not normalized_sources:
-            # 兼容旧逻辑：未显式指定时默认只用 arxiv
-            legacy_sources = ["arxiv"]
+            # 兼容旧逻辑：未显式指定时默认只用 semantic_scholar 和 crossref
+            legacy_sources = ["semantic_scholar", "crossref"]
             multi_sources: List[str] = []
         else:
             legacy_supported = {"arxiv", "crossref", "semantic_scholar"}

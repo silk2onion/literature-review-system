@@ -1,7 +1,9 @@
 """
 Review 相关 API 路由
 """
-from fastapi import APIRouter, HTTPException, Depends
+import asyncio
+import json
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import List, Any
 import logging
 import time
@@ -16,6 +18,10 @@ from app.schemas.review import (
     ReviewGenerateResponse,
     ReviewStatus,
     ReviewExport,
+    OrchestrationRequest,
+    OrchestrationResult,
+    PipelineTaskListResponse,
+    PipelineTaskResponse,
 )
 from app.models import Review
 from app.database import SessionLocal, get_db
@@ -34,6 +40,8 @@ from app.schemas.review import (
     RenderSectionFromClaimsResponse,
     PhdPipelineInitResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/reviews",
@@ -57,9 +65,112 @@ def get_section_review_pipeline_service(
 
 
 @router.post(
+    "/orchestrate",
+    response_model=OrchestrationResult,
+    summary="一键端到端综述生成：主题 → 框架 → 文献检索 → RAG 召回 → 生成综述(带引用) → 参考文献列表",
+)
+async def orchestrate_review(
+    payload: OrchestrationRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    端到端文献综述编排：
+
+    1. 根据主题和关键词，LLM 生成综述框架
+    2. 按框架各节检索文献（本地语义检索 + 可选在线搜索）
+    3. 为缺少 embedding 的文献补充向量
+    4. 按节进行 RAG 召回，LLM 生成综述正文（带 Author,Year 引用标注）
+    5. 自动生成 APA 格式参考文献列表
+    6. 组装完整文档并保存到数据库
+    """
+    from app.services.review_orchestrator import ReviewOrchestrationService
+
+    try:
+        service = ReviewOrchestrationService(db=db)
+        result = await service.orchestrate(payload)
+        return result
+    except Exception as e:
+        logger.error(f"Orchestration failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"综述编排失败: {e}",
+        )
+
+
+@router.post(
+    "/generate-framework",
+    summary="Step 0: Generate a literature review framework from topic and keywords",
+)
+async def generate_framework(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    Standalone framework generation (Step 0 of enhanced PhD pipeline).
+    Input: { topic: str, keywords: list[str], language?: str, custom_instructions?: str }
+    Output: { framework: { title, abstract_description, sections: [...] } }
+    """
+    from app.services.llm.prompts import ORCHESTRATE_FRAMEWORK_PROMPT
+    import json as json_mod
+
+    topic = payload.get("topic", "")
+    keywords = payload.get("keywords", [])
+    language = payload.get("language", "zh-CN")
+    custom_instructions = payload.get("custom_instructions", "")
+
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic is required")
+
+    llm_service = OpenAIService(settings=settings)
+
+    custom_block = ""
+    if custom_instructions:
+        custom_block = f"\n\n[Special Requirements]\n{custom_instructions}"
+
+    prompt = ORCHESTRATE_FRAMEWORK_PROMPT.format(
+        topic=topic,
+        keywords=", ".join(keywords) if keywords else topic,
+        language=language,
+        custom_instructions=custom_block,
+    )
+
+    try:
+        raw = await llm_service.complete(
+            prompt=prompt,
+            system_prompt=(
+                "You are an expert academic researcher. Your task is to generate a LITERATURE REVIEW outline "
+                "(not a PhD research plan or timeline). The outline should contain 3-6 sections covering: "
+                "introduction, core topic literature analysis, methods/techniques review, discussion and research gaps. "
+                "Each section should include search_keywords for finding relevant papers in academic databases."
+            ),
+            temperature=0.3,
+            max_tokens=2000,
+        )
+
+        json_match = None
+        if "```json" in raw:
+            start = raw.index("```json") + 7
+            end = raw.index("```", start)
+            json_match = raw[start:end].strip()
+        elif "```" in raw:
+            start = raw.index("```") + 3
+            end = raw.index("```", start)
+            json_match = raw[start:end].strip()
+        else:
+            json_match = raw.strip()
+
+        framework = json_mod.loads(json_match)
+        return {"framework": framework}
+
+    except Exception as e:
+        logger.error(f"Framework generation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Framework generation failed: {e}")
+
+
+@router.post(
     "/phd/init",
     response_model=PhdPipelineInitResponse,
-    summary="【PhD Pipeline】初始化：创建综述 -> 生成框架 -> 生成首批论点",
+    summary="PhD Pipeline: Create review -> Generate framework -> Generate initial claims",
 )
 async def init_phd_pipeline(
     payload: ReviewGenerate,
@@ -181,6 +292,388 @@ async def render_section_from_table(
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"渲染章节失败: {e}")
+
+
+
+
+# ========== New: Step 0.5 / 3.5 / 4 ==========
+
+@router.post(
+    "/phd/auto-search",
+    summary="PhD Pipeline Step 0.5: Auto-search papers for each framework section",
+)
+async def auto_search_for_framework(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    After framework is confirmed, auto-search papers for each section's keywords.
+    Input: {
+        sections: [{ id, title, search_keywords: [...] }],
+        papers_per_section: int (default 20),
+        sources: list (default ["semantic_scholar"]),
+        year_from?: int, year_to?: int
+    }
+    """
+    from app.services.crawl_service import create_crawl_job, run_crawl_job_once
+    from app.schemas import CrawlJobCreate
+
+    sections = payload.get("sections", [])
+    papers_per_section = int(payload.get("papers_per_section", 20))
+    sources = payload.get("sources", ["semantic_scholar"])
+    year_from = payload.get("year_from")
+    year_to = payload.get("year_to")
+
+    if not sections:
+        raise HTTPException(status_code=400, detail="sections is required")
+
+    results = []
+    total_new = 0
+
+    for section in sections:
+        sec_id = section.get("id", "?")
+        sec_title = section.get("title", "Untitled")
+        keywords = section.get("search_keywords", [])
+
+        if not keywords:
+            results.append({
+                "section_id": sec_id,
+                "section_title": sec_title,
+                "new_papers": 0,
+                "message": "No search keywords for this section",
+            })
+            continue
+
+        try:
+            job_payload = CrawlJobCreate(
+                keywords=keywords,
+                sources=sources if isinstance(sources, list) else [sources],
+                max_results=papers_per_section,
+                page_size=min(papers_per_section, 50),
+                year_from=year_from,
+                year_to=year_to,
+            )
+
+            job = create_crawl_job(db=db, payload=job_payload)
+            job, new_count = run_crawl_job_once(db, job.id)
+
+            results.append({
+                "section_id": sec_id,
+                "section_title": sec_title,
+                "job_id": job.id,
+                "new_papers": new_count,
+                "fetched": job.fetched_count or 0,
+                "status": job.status,
+            })
+            total_new += new_count
+
+        except Exception as e:
+            logger.error(f"Auto-search failed for section {sec_id}: {e}", exc_info=True)
+            results.append({
+                "section_id": sec_id,
+                "section_title": sec_title,
+                "new_papers": 0,
+                "error": str(e),
+            })
+
+    return {
+        "total_new_papers": total_new,
+        "sections_searched": len(results),
+        "per_section": results,
+    }
+
+
+@router.post(
+    "/phd/render-all",
+    summary="PhD Pipeline Step 3.5: Render ALL sections from claim tables",
+)
+async def render_all_sections(
+    payload: dict,
+    service: SectionReviewPipelineService = Depends(get_section_review_pipeline_service),
+):
+    """
+    Render all sections at once from a list of claim tables.
+    Input: {
+        section_claim_tables: [ SectionClaimTable, ... ],
+        language: str (default "zh-CN"),
+        review_id?: int
+    }
+    """
+    from app.schemas.review import SectionClaimTable
+
+    tables_raw = payload.get("section_claim_tables", [])
+    language = payload.get("language", "zh-CN")
+    review_id = payload.get("review_id")
+
+    if not tables_raw:
+        raise HTTPException(status_code=400, detail="section_claim_tables is required")
+
+    rendered_sections = []
+    all_citation_map = {}
+
+    for i, table_data in enumerate(tables_raw):
+        try:
+            table = SectionClaimTable.model_validate(table_data)
+            rendered = await service.render_section_from_claims(
+                table=table,
+                language=language,
+                review_id=review_id,
+            )
+            rendered_sections.append({
+                "section_id": table.section_id,
+                "section_title": table.section_title,
+                "text": rendered.text,
+                "citation_map": rendered.citation_map,
+            })
+            all_citation_map.update(rendered.citation_map or {})
+        except Exception as e:
+            logger.error(f"Render failed for section {i}: {e}", exc_info=True)
+            rendered_sections.append({
+                "section_id": table_data.get("section_id", f"section_{i}"),
+                "section_title": table_data.get("section_title", f"Section {i+1}"),
+                "text": f"*Rendering failed: {e}*",
+                "citation_map": {},
+            })
+
+    return {
+        "rendered_sections": rendered_sections,
+        "total_sections": len(rendered_sections),
+        "citation_map": all_citation_map,
+    }
+
+
+@router.post(
+    "/phd/assemble",
+    summary="PhD Pipeline Step 4: Assemble full document with references",
+)
+async def assemble_full_review(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    Assemble all rendered sections into a complete review document with reference list.
+    Input: {
+        review_id?: int,
+        title: str,
+        rendered_sections: [{ section_id, section_title, text, citation_map }],
+        citation_style: str (default "harvard")
+    }
+    """
+    from app.services.reference_formatter import get_reference_formatter, CitationStyle
+    from app.models.paper import Paper as PaperModel
+
+    title = payload.get("title", "Literature Review")
+    sections = payload.get("rendered_sections", [])
+    citation_style = payload.get("citation_style", "harvard")
+    review_id = payload.get("review_id")
+
+    if not sections:
+        raise HTTPException(status_code=400, detail="rendered_sections is required")
+
+    # 1. Collect all cited paper IDs from citation maps
+    all_paper_ids = set()
+    for sec in sections:
+        cmap = sec.get("citation_map", {})
+        for v in cmap.values():
+            if isinstance(v, int):
+                all_paper_ids.add(v)
+            elif isinstance(v, str) and v.isdigit():
+                all_paper_ids.add(int(v))
+
+    # 2. Load papers from DB
+    cited_papers = []
+    if all_paper_ids:
+        cited_papers = db.query(PaperModel).filter(
+            PaperModel.id.in_(list(all_paper_ids))
+        ).all()
+
+    # 3. Generate reference list
+    ref_formatter = get_reference_formatter()
+    try:
+        style_enum = CitationStyle(citation_style)
+    except ValueError:
+        style_enum = CitationStyle.HARVARD
+
+    cited_papers.sort(key=lambda p: (
+        (p.authors[0].split()[-1].lower() if p.authors and p.authors[0] else "zzz"),
+        p.year or 0,
+    ))
+
+    references_md = ref_formatter.format_reference_list(cited_papers, style=style_enum)
+
+    # 4. Assemble full markdown
+    md_lines = [f"# {title}\n"]
+
+    for sec in sections:
+        sec_title = sec.get("section_title", "Section")
+        sec_text = sec.get("text", "")
+        md_lines.append(f"\n## {sec_title}\n")
+        md_lines.append(sec_text)
+
+    md_lines.append(f"\n## References\n")
+    md_lines.append(references_md)
+
+    full_markdown = "\n".join(md_lines)
+
+    # 5. Save to DB if review_id provided
+    if review_id:
+        from app.models import Review
+        review = db.query(Review).filter(Review.id == int(review_id)).first()
+        if review:
+            review.content = full_markdown
+            db.commit()
+
+    return {
+        "full_markdown": full_markdown,
+        "references_markdown": references_md,
+        "total_cited_papers": len(cited_papers),
+        "total_sections": len(sections),
+        "review_id": review_id,
+    }
+
+
+
+
+# ============================================================
+# Async Task Endpoints (background pipeline with SSE progress)
+# ============================================================
+
+@router.post(
+    "/phd/start-task",
+    summary="Start async PhD pipeline task, returns task_id immediately",
+)
+async def start_pipeline_task(
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Start the full PhD pipeline as an async background task.
+    Returns {task_id} immediately. Use GET /phd/task/{task_id}/stream for progress.
+
+    Input: {
+        topic: str,
+        keywords: list[str],
+        papers_per_section: int (default 20),
+        sources: list (default ["semantic_scholar"]),
+        language: str (default "zh-CN"),
+        citation_style: str (default "harvard")
+    }
+    """
+    from app.services.task_runner import create_task, PipelineTaskRunner
+    from app.database import SessionLocal
+
+    topic = payload.get("topic", "")
+    keywords = payload.get("keywords", [])
+    if isinstance(keywords, str):
+        keywords = [k.strip() for k in keywords.split(",") if k.strip()]
+
+    if not topic and not keywords:
+        raise HTTPException(status_code=400, detail="topic or keywords is required")
+
+    # Use topic as fallback for keywords
+    if not keywords:
+        keywords = [topic]
+
+    task = await create_task(
+        topic=topic,
+        keywords=keywords,
+        papers_per_section=int(payload.get("papers_per_section", 20)),
+        sources=payload.get("sources", ["semantic_scholar"]),
+        language=payload.get("language", "zh-CN"),
+        citation_style=payload.get("citation_style", "harvard"),
+    )
+
+    async def _run_in_background():
+        """Create a fresh DB session for the background task."""
+        bg_db = SessionLocal()
+        try:
+            runner = PipelineTaskRunner(task=task, db=bg_db)
+            await runner.run()
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(_run_in_background)
+
+    return {
+        "task_id": task.task_id,
+        "status": "started",
+        "message": f"任务已启动！共 6 个步骤，请通过进度流查看实时进度。",
+        "stream_url": f"/api/reviews/phd/task/{task.task_id}/stream",
+    }
+
+
+@router.get(
+    "/phd/tasks",
+    response_model=PipelineTaskListResponse,
+    summary="List all PhD pipeline tasks",
+)
+async def list_pipeline_tasks():
+    """List all active and recent background tasks in memory."""
+    from app.services.task_runner import list_tasks
+    tasks = list_tasks()
+    return PipelineTaskListResponse(tasks=tasks)
+
+
+@router.get(
+    "/phd/task/{task_id}",
+    response_model=PipelineTaskResponse,
+    summary="Get current task status snapshot",
+)
+async def get_task_status(task_id: str):
+    """Get a JSON snapshot of the task's current state."""
+    from app.services.task_runner import get_task
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    return task.to_dict()
+
+
+@router.get(
+    "/phd/task/{task_id}/stream",
+    summary="SSE stream for real-time task progress",
+)
+async def stream_task_progress(task_id: str):
+    """
+    Server-Sent Events (SSE) stream for real-time task progress.
+    Events are pushed as the pipeline executes each step.
+    """
+    from app.services.task_runner import get_task
+    from fastapi.responses import StreamingResponse
+
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    async def event_generator():
+        # Send current state immediately
+        snapshot = json.dumps(task.to_dict(), ensure_ascii=False, default=str)
+        yield f"event: snapshot\ndata: {snapshot}\n\n"
+
+        # Stream live events from queue
+        while task.status in ("pending", "running"):
+            try:
+                event = await asyncio.wait_for(task.event_queue.get(), timeout=30.0)
+                ev_type = event.get("event", "update")
+                ev_data = json.dumps(event.get("data", {}), ensure_ascii=False, default=str)
+                yield f"event: {ev_type}\ndata: {ev_data}\n\n"
+            except asyncio.TimeoutError:
+                # Keep-alive ping
+                yield "event: ping\ndata: {}\n\n"
+
+        # Final state
+        final = json.dumps(task.to_dict(), ensure_ascii=False, default=str)
+        yield f"event: final\ndata: {final}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 def get_db_local():

@@ -16,7 +16,9 @@ from sqlalchemy import or_
 from app.config import settings
 from app.models.paper import Paper
 from app.models.staging_paper import StagingPaper
+from app.models.group import PaperGroup, PaperGroupAssociation
 from app.services.llm.openai_service import OpenAIService
+from app.api.settings import get_custom_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +82,85 @@ TOOLS_SCHEMA = [
     },
     {
         "name": "general_chat",
-        "description": "通用对话 — 回答关于学术概念、方法论等知识性问题",
+        "description": "General conversation - answer knowledge questions about academic concepts, methods, etc.",
         "parameters": {
-            "topic": "对话主题",
+            "topic": "conversation topic",
+        },
+    },
+    {
+        "name": "generate_framework",
+        "description": "Generate a structured literature review framework/outline from a research topic",
+        "parameters": {
+            "topic": "Research topic (required)",
+            "keywords": "Comma-separated keywords",
+            "language": "Language: zh-CN or en (default zh-CN)",
+        },
+    },
+    {
+        "name": "start_review_task",
+        "description": "启动异步完整文献综述生成任务（即 'PHD管线'、'一键综述'）。返回任务 ID，进度在侧边栏『PhD深度管线』中可见。这是执行深度综述、PhD 级长管线任务的最佳选择。",
+        "parameters": {
+            "topic": "研究课题/综述题目 (必须)",
+            "keywords": "逗号分隔的关键词",
+            "papers_per_section": "每个章节参考的文献数 (默认 20)",
+            "citation_style": "引用格式: harvard/apa/ieee/chicago/vancouver (默认 harvard)",
+        },
+    },
+    {
+        "name": "run_phd_pipeline",
+        "description": "执行 PhD 多阶段综述管线的特定阶段（生成论点、关联证据、渲染章节）。",
+        "parameters": {
+            "keywords": "研究关键词 (如果 review_id 为空则必须)",
+            "review_id": "现有综述 ID，用于继续之前的任务",
+            "stage": "管线阶段: init (初始化)/evidence (关联证据)/render (渲染) (默认 init)",
+        },
+    },
+    {
+        "name": "list_reviews",
+        "description": "List all generated literature reviews",
+        "parameters": {
+            "limit": "Max number to show (default 10)",
+        },
+    },
+    {
+        "name": "export_review",
+        "description": "Export a review to Markdown format",
+        "parameters": {
+            "review_id": "The review ID to export (required)",
+        },
+    },
+    {
+        "name": "semantic_search",
+        "description": "Perform semantic/vector search across the paper library using natural language queries",
+        "parameters": {
+            "query": "Natural language search query (required)",
+            "top_k": "Number of results (default 5)",
+        },
+    },
+    {
+        "name": "manage_groups",
+        "description": "Manage paper groups: list groups, create group, add/remove papers from groups",
+        "parameters": {
+            "action": "Action: list/create/add_papers/remove_papers",
+            "group_name": "Group name (for create)",
+            "group_id": "Group ID (for add/remove)",
+            "paper_ids": "Paper IDs to add/remove (list)",
+        },
+    },
+    {
+        "name": "check_task_progress",
+        "description": "查看指定的 pHd 管线的执行进度和详细日志。可以回答：『任务 9dc93b80 现在的进度如何？』、『它在具体搜什么词？』",
+        "parameters": {
+            "task_id": "任务 ID (8位 16进制字符串，必填)",
+        },
+    },
+    {
+        "name": "modify_task_requirements",
+        "description": "在 PHd 管线运行期间动态修改或补充需求。比如添加新的关键词、调整搜索重点。系统会自动为正在进行的任务补充检索任务。",
+        "parameters": {
+            "task_id": "任务 ID (必填)",
+            "additional_keywords": "要补充的关键词列表 (逗号分隔)",
+            "new_topic": "可选：修改该任务的研究课题",
         },
     },
 ]
@@ -93,17 +171,31 @@ TOOLS_DESCRIPTION = "\n".join(
 
 INTENT_SYSTEM_PROMPT = f"""你是一个文献综述系统的 AI 助手。用户会用自然语言告诉你想做什么。
 
-你需要分析用户的意图，选择最合适的工具来执行操作。
+### 核心原则：
+1. **优先系统功能**：当用户提到“PHD管线”、“综述”、“搜索文献”、“入库”、“分组”等词汇时，必须优先匹配系统内置工具。**严禁**将其解释为通用的科学概念（如生物模型、通用科研阶段）。
+2. **术语深度关联**：
+   - “PHD管线”、“一键生成”、“深度综述”、“走一遍管线” -> **必须**对应工具 `start_review_task`。
+   - “总结现状”、“调研题目”、“去搜一下” -> 对应工具 `search_papers`。
+   - “提升”、“通过”、“入库”、“转正式” -> 对应工具 `promote_papers`。
+3. **上下文感知**：如果用户说“去做”、“按这个生成”、“用管线跑一下”，但没提供课题名，你应该从“对话历史”中提取之前的研究课题作为 `topic` 参数。
 
 可用工具：
 {TOOLS_DESCRIPTION}
 
-请以 JSON 格式回复，包含以下字段：
-- "tool": 工具名称（必须是上面列出的工具之一）
-- "params": 工具参数（字典）
-- "reasoning": 简短说明你为什么选择这个工具（中文）
+### 输出格式：
+必须只输出一个 JSON 对象，包含：
+- "tool": 工具名称
+- "params": 参数字典
+- "reasoning": 为什么匹配到这个工具（中文）
 
-只输出 JSON，不要有其他文字。"""
+### 示例：
+用户：“搜一下城市设计中的人工智能”
+回复：{{"tool": "search_papers", "params": {{"keywords": "人工智能, 城市设计"}}, "reasoning": "用户请求搜索特定领域的文献"}}
+
+用户：“用PHD管线去做这个课题” (历史提到过 TOD 项目)
+回复：{{"tool": "start_review_task", "params": {{"topic": "TOD综合评估模型"}}, "reasoning": "用户明确要求使用PHD管线，从历史中提取研究课题"}}
+
+只输出 JSON，严禁任何解释性文字。"""
 
 
 SUMMARY_SYSTEM_PROMPT = """你是一个文献综述系统的 AI 助手。请根据操作结果，用友好、简洁的中文向用户反馈。
@@ -121,6 +213,13 @@ class AgentService:
 
     def __init__(self):
         self.llm = OpenAIService(settings=settings)
+
+    def _build_system_prompt(self, base_prompt: str, db: Session) -> str:
+        """在基础 system prompt 前拼接用户自定义提示词"""
+        custom = get_custom_system_prompt(db)
+        if custom and custom.strip():
+            return f"{custom.strip()}\n\n---\n\n{base_prompt}"
+        return base_prompt
 
     async def chat(
         self,
@@ -147,13 +246,13 @@ class AgentService:
         """
         # ── Ask 模式：纯问答，不执行任何系统操作 ──
         if mode == "ask":
-            return await self._ask_mode(message, history)
+            return await self._ask_mode(message, history, db)
 
         # ── Agent 模式：意图识别 → 工具执行 → 结果总结 ──
 
         # Step 1: 意图识别
         try:
-            intent = await self._identify_intent(message, history)
+            intent = await self._identify_intent(message, history, db)
         except Exception as e:
             logger.exception("Agent 意图识别失败")
             return {
@@ -179,7 +278,7 @@ class AgentService:
 
         # Step 3: 用 LLM 总结结果
         try:
-            summary = await self._summarize_result(message, tool, params, result)
+            summary = await self._summarize_result(message, tool, params, result, db)
         except Exception:
             logger.exception("Agent 结果总结失败")
             summary = f"操作已完成。结果：{json.dumps(result, ensure_ascii=False, default=str)[:500]}"
@@ -192,7 +291,7 @@ class AgentService:
     # ── Ask 模式 ──────────────────────────────────────
 
     async def _ask_mode(
-        self, message: str, history: List[Dict[str, str]]
+        self, message: str, history: List[Dict[str, str]], db: Session
     ) -> Dict[str, Any]:
         """纯问答模式：直接用 LLM 回答，不执行任何系统操作"""
         history_text = ""
@@ -210,14 +309,15 @@ class AgentService:
         try:
             reply = await self.llm.complete(
                 prompt=prompt,
-                system_prompt=(
+                system_prompt=self._build_system_prompt(
                     "你是一个专业的学术研究助手。用户会就学术概念、研究方法、"
                     "文献综述写作等问题向你提问。\n\n"
                     "要求：\n"
                     "1. 用中文回答，语言简洁专业\n"
                     "2. 如果涉及具体理论或概念，引用相关学者和文献\n"
                     "3. 可以使用 markdown 格式（加粗、列表等）来组织回答\n"
-                    "4. 保持亲切自然的语气"
+                    "4. 保持亲切自然的语气",
+                    db,
                 ),
                 temperature=0.7,
                 max_tokens=2000,
@@ -231,8 +331,21 @@ class AgentService:
     # ── 意图识别 ──────────────────────────────────────
 
     async def _identify_intent(
-        self, message: str, history: List[Dict[str, str]]
+        self, message: str, history: List[Dict[str, str]], db: Session
     ) -> Dict[str, Any]:
+        """识别用户意图。结合启发式规则和 LLM。"""
+        msg_lower = message.lower()
+        
+        # ── 启发式规则 (Heuristic Safety Net) ──
+        # 有些词汇是 100% 对应某个工具的，直接拦截避免 LLM 幻觉
+        if any(w in msg_lower for w in ["暂存库", "暂存文献"]):
+            return {
+                "tool": "list_staging", 
+                "params": {}, 
+                "reasoning": "启发式规则拦截：提到暂存库。"
+            }
+
+        # ── LLM 意图识别 ──
         history_text = ""
         if history:
             recent = history[-6:]  # 最近 3 轮对话
@@ -249,12 +362,37 @@ class AgentService:
 
 请分析用户意图并选择合适的工具。输出 JSON。"""
 
-        raw = await self.llm.complete(
-            prompt=prompt,
-            system_prompt=INTENT_SYSTEM_PROMPT,
-            temperature=0.1,
-            max_tokens=500,
-        )
+        import asyncio as _asyncio
+
+        async def _call_llm():
+            return await self.llm.complete(
+                prompt=prompt,
+                system_prompt=self._build_system_prompt(INTENT_SYSTEM_PROMPT, db),
+                temperature=0.1,
+                max_tokens=500,
+            )
+
+        # Retry with exponential backoff for Gemini API
+        last_err = None
+        for attempt in range(1, 6):
+            try:
+                raw = await _call_llm()
+                break
+            except Exception as e:
+                last_err = e
+                err_str = str(e).lower()
+                is_retriable = any(w in err_str for w in [
+                    "rate limit", "429", "timeout", "503", "overloaded",
+                    "resource_exhausted", "high demand", "spikes in demand",
+                    "experiencing", "500", "502", "capacity",
+                ])
+                if not is_retriable or attempt == 5:
+                    raise
+                delay = 3.0 * (2 ** (attempt - 1))
+                logger.warning(f"[Agent] LLM intent call failed (attempt {attempt}/5): {e}, retrying in {delay}s")
+                await _asyncio.sleep(delay)
+        else:
+            raise last_err
 
         # 解析 JSON（鲁棒处理 LLM 各种输出格式）
         import re as _re
@@ -297,6 +435,13 @@ class AgentService:
             "sync_citations": self._tool_sync_citations,
             "system_status": self._tool_system_status,
             "general_chat": self._tool_general_chat,
+            "generate_framework": self._tool_generate_framework,
+            "start_review_task": self._tool_start_review_task,
+            "run_phd_pipeline": self._tool_run_phd_pipeline,
+            "list_reviews": self._tool_list_reviews,
+            "export_review": self._tool_export_review,
+            "semantic_search": self._tool_semantic_search,
+            "manage_groups": self._tool_manage_groups,
         }
 
         handler = handlers.get(tool)
@@ -518,10 +663,392 @@ class AgentService:
         }
 
     async def _tool_general_chat(self, params: Dict, db: Session) -> Dict:
-        """通用对话 — 直接返回空结果，让总结步骤用 LLM 回答"""
+        """General conversation"""
         return {"type": "general_chat"}
 
-    # ── 结果总结 ──────────────────────────────────────
+    # ── New tools: Framework, PhD Pipeline, Reviews, Search, Groups ──
+
+    async def _tool_generate_framework(self, params: Dict, db: Session) -> Dict:
+        """Generate a literature review framework"""
+        from app.services.llm.prompts import ORCHESTRATE_FRAMEWORK_PROMPT
+        import re as _re
+
+        topic = params.get("topic", "")
+        if not topic:
+            return {"error": "Please provide a research topic"}
+
+        keywords_raw = params.get("keywords", topic)
+        if isinstance(keywords_raw, list):
+            keywords = keywords_raw
+        else:
+            keywords = [k.strip() for k in _re.split(r'[,\uff0c]', str(keywords_raw)) if k.strip()]
+
+        language = params.get("language", "zh-CN")
+
+        prompt = ORCHESTRATE_FRAMEWORK_PROMPT.format(
+            topic=topic,
+            keywords=", ".join(keywords),
+            language=language,
+            custom_instructions="",
+        )
+
+        try:
+            raw = await self.llm.complete(
+                prompt=prompt,
+                system_prompt=(
+                    "You are an expert academic researcher. Your task is to generate a LITERATURE REVIEW outline "
+                    "(not a PhD research plan or timeline). The outline should contain 3-6 sections covering: "
+                    "introduction, core topic literature analysis, methods/techniques review, discussion and research gaps. "
+                    "Each section should include search_keywords for finding relevant papers in academic databases."
+                ),
+                temperature=0.3,
+                max_tokens=20000,
+            )
+
+            # Extract JSON
+            if "```json" in raw:
+                start = raw.index("```json") + 7
+                end = raw.index("```", start)
+                json_text = raw[start:end].strip()
+            elif "```" in raw:
+                start = raw.index("```") + 3
+                end = raw.index("```", start)
+                json_text = raw[start:end].strip()
+            else:
+                json_text = raw.strip()
+
+            framework = json.loads(json_text)
+            sections_summary = [f"{s.get('id', i+1)}. {s.get('title', 'Untitled')}" for i, s in enumerate(framework.get('sections', []))]
+            return {
+                "title": framework.get("title", topic),
+                "sections_count": len(framework.get("sections", [])),
+                "sections": sections_summary,
+                "framework_json": framework,
+            }
+        except Exception as e:
+            return {"error": f"Framework generation failed: {e}"}
+
+
+    async def _tool_start_review_task(self, params: Dict, db: Session) -> Dict:
+        """Start an async review generation task — returns immediately with task_id"""
+        import asyncio
+        from app.services.task_runner import create_task, PipelineTaskRunner, list_tasks
+        from app.database import SessionLocal
+
+        # Check for already running tasks to prevent duplicates
+        active_tasks = [t for t in list_tasks() if t.get("status") in ["pending", "running"]]
+        if active_tasks:
+            running_id = active_tasks[0].get("task_id")
+            return {"error": f"目前已经有一个综述生成任务 (ID: {running_id}) 正在运行中，为了防止资源抢占，请等待它完成后再发起新的任务。"}
+
+        topic = params.get("topic", "")
+        keywords_raw = params.get("keywords", "")
+        if isinstance(keywords_raw, list):
+            keywords = keywords_raw
+        else:
+            import re as _re
+            keywords = [k.strip() for k in _re.split(r'[,\uff0c]', str(keywords_raw)) if k.strip()]
+
+        if not topic and not keywords:
+            return {"error": "Please provide topic or keywords"}
+        if not keywords:
+            keywords = [topic]
+
+        papers_per_section = int(params.get("papers_per_section", 20))
+        citation_style = params.get("citation_style", "harvard")
+
+        task = await create_task(
+            topic=topic,
+            keywords=keywords,
+            papers_per_section=papers_per_section,
+            sources=["semantic_scholar"],
+            language="zh-CN",
+            citation_style=citation_style,
+        )
+
+        # Launch background execution
+        async def _run_bg():
+            bg_db = SessionLocal()
+            try:
+                runner = PipelineTaskRunner(task=task, db=bg_db)
+                await runner.run()
+            finally:
+                bg_db.close()
+
+        asyncio.create_task(_run_bg())
+
+        return {
+            "task_id": task.task_id,
+            "status": "started",
+            "message": f"异步综述生成任务已启动 (ID: {task.task_id})。共6个步骤，可在 PhD 深度管线页面查看实时进度。",
+            "steps": ["生成框架", "自动检索文献", "生成论点", "关联证据", "渲染章节", "组装完整综述"],
+            "stream_url": f"/api/reviews/phd/task/{task.task_id}/stream",
+        }
+
+    async def _tool_check_task_progress(self, params: Dict, db: Session) -> Dict:
+        """Check status and logs of an async task"""
+        from app.services.task_runner import get_task
+        task_id = params.get("task_id")
+        if not task_id:
+            return {"error": "Missing task_id"}
+        
+        task = get_task(task_id)
+        if not task:
+            return {"error": f"Task {task_id} not found or has been cleared from memory after completion."}
+        
+        return {
+            "task_id": task.task_id,
+            "topic": task.topic,
+            "status": task.status,
+            "summary": task.to_dict(),
+            "message": f"任务 {task_id} 目前处于 {task.status} 状态。你可以通过日志查看具体执行进度。"
+        }
+
+    async def _tool_modify_task_requirements(self, params: Dict, db: Session) -> Dict:
+        """Modify or add keywords to a running task"""
+        from app.services.task_runner import get_task
+        task_id = params.get("task_id")
+        if not task_id:
+            return {"error": "Missing task_id"}
+        
+        task = get_task(task_id)
+        if not task:
+            return {"error": f"Task {task_id} not found."}
+        
+        added_kws = []
+        raw_kws = params.get("additional_keywords", "")
+        if raw_kws:
+            import re as _re
+            added_kws = [k.strip() for k in _re.split(r'[,\uff0c]', str(raw_kws)) if k.strip()]
+            task.keywords.extend(added_kws)
+        
+        new_topic = params.get("new_topic")
+        if new_topic:
+            task.topic = new_topic
+            
+        return {
+            "success": True,
+            "task_id": task_id,
+            "added_keywords": added_kws,
+            "current_topic": task.topic,
+            "message": f"已经为任务 {task_id} 成功追加了需求。AI 会在接下来的步骤中尝试包含这些新内容。"
+        }
+
+    async def _tool_run_phd_pipeline(self, params: Dict, db: Session) -> Dict:
+        """Run PhD pipeline stages"""
+        from app.services.review import SectionReviewPipelineService
+        from app.services.review import generate_review as core_generate_review
+        from app.services.semantic_search import get_semantic_search_service
+        from app.schemas.review import ReviewGenerate
+        import re as _re
+
+        stage = params.get("stage", "init")
+        review_id = params.get("review_id")
+
+        llm_service = OpenAIService(settings=settings)
+        semantic_service = get_semantic_search_service()
+        pipeline = SectionReviewPipelineService(db=db, llm_service=llm_service, semantic_search_service=semantic_service)
+
+        if stage == "init":
+            keywords_raw = params.get("keywords", "")
+            if isinstance(keywords_raw, list):
+                keywords = keywords_raw
+            else:
+                keywords = [k.strip() for k in _re.split(r'[,\uff0c]', str(keywords_raw)) if k.strip()]
+
+            if not keywords:
+                return {"error": "Please provide keywords for init stage"}
+
+            payload = ReviewGenerate(
+                keywords=keywords,
+                phd_pipeline=True,
+                framework_only=True,
+            )
+
+            gen_resp = await core_generate_review(db=db, payload=payload)
+            if not gen_resp.success:
+                return {"error": f"Pipeline init failed: {gen_resp.message}"}
+
+            rid = gen_resp.review_id
+            framework = gen_resp.preview_markdown
+
+            try:
+                table = await pipeline.generate_section_claims(
+                    review_id=rid,
+                    section_outline=framework or "",
+                )
+                claims_summary = [c.text[:80] for c in table.claims[:5]]
+                return {
+                    "review_id": rid,
+                    "stage": "init_complete",
+                    "claims_count": len(table.claims),
+                    "sample_claims": claims_summary,
+                    "next_step": "Run with stage=evidence and review_id to continue",
+                }
+            except Exception as e:
+                return {"review_id": rid, "error": f"Claims generation failed: {e}"}
+
+        elif stage == "evidence":
+            if not review_id:
+                return {"error": "review_id is required for evidence stage"}
+            try:
+                result = await pipeline.attach_evidence_for_review(review_id=int(review_id))
+                return {
+                    "review_id": int(review_id),
+                    "stage": "evidence_complete",
+                    "claims_with_evidence": len(result.claims) if hasattr(result, 'claims') else 0,
+                    "next_step": "Run with stage=render and review_id to generate final text",
+                }
+            except Exception as e:
+                return {"error": f"Evidence attachment failed: {e}"}
+
+        elif stage == "render":
+            if not review_id:
+                return {"error": "review_id is required for render stage"}
+            try:
+                result = await pipeline.render_review_sections(review_id=int(review_id))
+                text_preview = result.text[:300] if hasattr(result, 'text') else str(result)[:300]
+                return {
+                    "review_id": int(review_id),
+                    "stage": "render_complete",
+                    "preview": text_preview,
+                    "message": "Review rendered successfully. Use export_review to download.",
+                }
+            except Exception as e:
+                return {"error": f"Render failed: {e}"}
+
+        return {"error": f"Unknown stage: {stage}. Use init/evidence/render"}
+
+    async def _tool_list_reviews(self, params: Dict, db: Session) -> Dict:
+        """List generated reviews"""
+        from app.models import Review
+
+        limit = int(params.get("limit", 10))
+        reviews = db.query(Review).order_by(Review.id.desc()).limit(limit).all()
+
+        items = []
+        for r in reviews:
+            items.append({
+                "id": r.id,
+                "keywords": r.keywords if hasattr(r, 'keywords') else None,
+                "status": r.status if hasattr(r, 'status') else None,
+                "created_at": str(r.created_at) if hasattr(r, 'created_at') else None,
+            })
+
+        return {"total": len(items), "reviews": items}
+
+    async def _tool_export_review(self, params: Dict, db: Session) -> Dict:
+        """Export review to markdown"""
+        from app.models import Review
+
+        review_id = params.get("review_id")
+        if not review_id:
+            return {"error": "review_id is required"}
+
+        review = db.query(Review).filter(Review.id == int(review_id)).first()
+        if not review:
+            return {"error": f"Review {review_id} not found"}
+
+        content = review.content if hasattr(review, 'content') else ""
+        return {
+            "review_id": int(review_id),
+            "content_length": len(content) if content else 0,
+            "preview": (content[:500] + "...") if content and len(content) > 500 else content,
+        }
+
+    async def _tool_semantic_search(self, params: Dict, db: Session) -> Dict:
+        """Semantic/vector search across papers"""
+        from app.services.semantic_search import get_semantic_search_service
+
+        query = params.get("query", "")
+        if not query:
+            return {"error": "Please provide a search query"}
+
+        top_k = int(params.get("top_k", 5))
+
+        try:
+            service = get_semantic_search_service()
+            results = await service.search(query=query, top_k=top_k)
+
+            items = []
+            for r in results:
+                items.append({
+                    "paper_id": r.get("paper_id") or r.get("id"),
+                    "title": r.get("title", "Unknown"),
+                    "score": round(r.get("score", 0), 4) if r.get("score") else None,
+                    "year": r.get("year"),
+                })
+
+            return {"query": query, "results_count": len(items), "results": items}
+        except Exception as e:
+            return {"error": f"Semantic search failed: {e}"}
+
+    async def _tool_manage_groups(self, params: Dict, db: Session) -> Dict:
+        """Manage paper groups"""
+        action = params.get("action", "list")
+
+        if action == "list":
+            groups = db.query(PaperGroup).all()
+            items = []
+            for g in groups:
+                count = db.query(PaperGroupAssociation).filter(
+                    PaperGroupAssociation.group_id == g.id
+                ).count()
+                items.append({
+                    "id": g.id,
+                    "name": g.name,
+                    "description": g.description if hasattr(g, 'description') else None,
+                    "paper_count": count,
+                })
+            return {"groups": items, "total": len(items)}
+
+        elif action == "create":
+            name = params.get("group_name", "")
+            if not name:
+                return {"error": "group_name is required"}
+            group = PaperGroup(name=name)
+            db.add(group)
+            db.commit()
+            db.refresh(group)
+            return {"created": True, "group_id": group.id, "name": name}
+
+        elif action == "add_papers":
+            group_id = params.get("group_id")
+            paper_ids = params.get("paper_ids", [])
+            if not group_id or not paper_ids:
+                return {"error": "group_id and paper_ids are required"}
+
+            added = 0
+            for pid in paper_ids:
+                exists = db.query(PaperGroupAssociation).filter(
+                    PaperGroupAssociation.group_id == int(group_id),
+                    PaperGroupAssociation.paper_id == int(pid),
+                ).first()
+                if not exists:
+                    db.add(PaperGroupAssociation(group_id=int(group_id), paper_id=int(pid)))
+                    added += 1
+            db.commit()
+            return {"added": added, "group_id": int(group_id)}
+
+        elif action == "remove_papers":
+            group_id = params.get("group_id")
+            paper_ids = params.get("paper_ids", [])
+            if not group_id or not paper_ids:
+                return {"error": "group_id and paper_ids are required"}
+
+            removed = 0
+            for pid in paper_ids:
+                count = db.query(PaperGroupAssociation).filter(
+                    PaperGroupAssociation.group_id == int(group_id),
+                    PaperGroupAssociation.paper_id == int(pid),
+                ).delete()
+                removed += count
+            db.commit()
+            return {"removed": removed, "group_id": int(group_id)}
+
+        return {"error": f"Unknown action: {action}. Use list/create/add_papers/remove_papers"}
+
+    # ── Result summary ──────────────────────────────────────
 
     async def _summarize_result(
         self,
@@ -529,6 +1056,7 @@ class AgentService:
         tool: str,
         params: Dict,
         result: Dict,
+        db: Session,
     ) -> str:
         if tool == "general_chat":
             # 通用对话直接用 LLM 回答
@@ -549,7 +1077,7 @@ class AgentService:
 
         return await self.llm.complete(
             prompt=prompt,
-            system_prompt=SUMMARY_SYSTEM_PROMPT,
+            system_prompt=self._build_system_prompt(SUMMARY_SYSTEM_PROMPT, db),
             temperature=0.5,
             max_tokens=1000,
         )

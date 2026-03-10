@@ -21,8 +21,12 @@ type DataSourcesConfig = {
 type ModelOptions = {
   llm_models: string[]
   embedding_models: string[]
-  current_llm_model: string
   current_embedding_model: string
+}
+
+type AgentConfig = {
+  proactive_enabled: boolean
+  heartbeat_interval: number
 }
 
 type DebugResult = {
@@ -64,6 +68,13 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [modelOptions, setModelOptions] = useState<ModelOptions | null>(null)
   const [modelsLoading, setModelsLoading] = useState(false)
   const [modelsSaving, setModelsSaving] = useState(false)
+
+  const [systemPromptSaved, setSystemPromptSaved] = useState(false)
+
+  // Agent 主动模式配置
+  const [agentConfig, setAgentConfig] = useState<AgentConfig>({ proactive_enabled: true, heartbeat_interval: 60 })
+  const [agentLoading, setAgentLoading] = useState(false)
+  const [agentSaving, setAgentSaving] = useState(false)
 
   // 打开弹窗时加载当前配置
   useEffect(() => {
@@ -110,6 +121,18 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
       .finally(() => {
         setModelsLoading(false)
       })
+
+    // 加载 Agent 配置
+    setAgentLoading(true)
+    fetch(`${API_BASE_URL}/api/settings/agent`)
+      .then(res => res.json())
+      .then((data: AgentConfig) => {
+        setAgentConfig(data)
+      })
+      .catch(err => console.error('加载 Agent 配置失败', err))
+      .finally(() => setAgentLoading(false))
+
+    setSystemPromptSaved(false)
   }, [open])
 
   const handleChange = (
@@ -415,6 +438,115 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     未能获取模型列表，请检查后端模型配置或日志。
                   </div>
                 )}
+              </section>
+
+              <section className="settings-section">
+                <h3>Agent 系统提示词</h3>
+                <p className="settings-description">
+                  自定义 Agent 的系统提示词，将拼接在所有 AI 对话的开头。可用于注入 VCP 插件指令、角色设定等。
+                </p>
+                <textarea
+                  value={systemPrompt}
+                  onChange={e => {
+                    setSystemPrompt(e.target.value)
+                    setSystemPromptSaved(false)
+                  }}
+                  placeholder="输入自定义系统提示词...例如：你是一位城市设计领域的研究助手..."
+                  rows={6}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '10px',
+                    borderRadius: '6px',
+                    border: '1px solid #334155',
+                    backgroundColor: '#1e293b',
+                    color: '#e2e8f0',
+                    fontSize: '13px',
+                    fontFamily: 'monospace',
+                    resize: 'vertical',
+                    minHeight: '100px',
+                  }}
+                />
+                <div className="settings-row" style={{ marginTop: '8px' }}>
+                  <button
+                    className="settings-secondary"
+                    onClick={async () => {
+                      setSystemPromptSaving(true)
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/api/settings/system-prompt`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ content: systemPrompt }),
+                        })
+                        if (!res.ok) throw new Error('保存失败')
+                        setSystemPromptSaved(true)
+                      } catch (err) {
+                        console.error(err)
+                        setError('保存系统提示词失败')
+                      } finally {
+                        setSystemPromptSaving(false)
+                      }
+                    }}
+                    disabled={systemPromptSaving}
+                  >
+                    {systemPromptSaving ? '保存中...' : systemPromptSaved ? '✓ 已保存' : '保存提示词'}
+                  </button>
+                </div>
+              </section>
+
+              <section className="settings-section">
+                <h3>Agent 主动交互 (萌妹女仆心跳)</h3>
+                <p className="settings-description">
+                  开启后，小爱女仆会每隔一段时间检查任务进度，并主动在聊天框向你汇报~
+                </p>
+                <label className="settings-row">
+                  <span>启用主动汇报</span>
+                  <input
+                    type="checkbox"
+                    checked={agentConfig.proactive_enabled}
+                    onChange={e => setAgentConfig(prev => ({ ...prev, proactive_enabled: e.target.checked }))}
+                  />
+                </label>
+                <label className="settings-row">
+                  <span>心跳检查频率 (秒)</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input
+                      type="range"
+                      min="30"
+                      max="300"
+                      step="30"
+                      value={agentConfig.heartbeat_interval}
+                      onChange={e => setAgentConfig(prev => ({ ...prev, heartbeat_interval: parseInt(e.target.value) }))}
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: '40px' }}>{agentConfig.heartbeat_interval}s</span>
+                  </div>
+                </label>
+                <div className="settings-row">
+                  <button
+                    className="settings-secondary"
+                    onClick={async () => {
+                      setAgentSaving(true)
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/api/settings/agent`, {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(agentConfig),
+                        })
+                        if (!res.ok) throw new Error('保存失败')
+                        // 保存成功后也可以提示
+                      } catch (err) {
+                        console.error(err)
+                        setError('保存 Agent 配置失败')
+                      } finally {
+                        setAgentSaving(false)
+                      }
+                    }}
+                    disabled={agentSaving}
+                  >
+                    {agentSaving ? '保存中...' : '保存 Agent 设置'}
+                  </button>
+                </div>
               </section>
               {debugResult && (
                <section className="settings-section">

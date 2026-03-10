@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Review, RecallLog
+from app.models.paper import Paper as PaperModel
 from app.models.group import PaperGroupAssociation
 from app.models.citation import PaperCitation
 from app.schemas.review import (
@@ -85,6 +86,7 @@ class SectionReviewPipelineService:
         self,
         table: SectionClaimTable,
         top_k: int = 5,
+        paper_ids: Optional[List[int]] = None,
     ) -> SectionClaimTable:
         """阶段 2: 为每条论点附加 RAG 证据"""
         for claim in table.claims:
@@ -94,15 +96,18 @@ class SectionReviewPipelineService:
             try:
                 # 使用语义检索服务查找相关文献
                 search_results, _ = await self.semantic_search_service.search(
-                    db=self.db, keywords=[claim.rag_query], limit=top_k
+                    db=self.db, 
+                    keywords=[claim.rag_query], 
+                    limit=top_k,
+                    paper_ids=paper_ids
                 )
 
-                paper_ids = [
+                found_paper_ids = [
                     p.paper.id
                     for p in search_results
                     if getattr(p.paper, "id", None) is not None
                 ]
-                claim.support_papers = paper_ids
+                claim.support_papers = found_paper_ids
 
                 # 构造简单的文献片段说明
                 snippets = [
@@ -112,7 +117,7 @@ class SectionReviewPipelineService:
                 claim.support_snippets = snippets
 
                 # 记录“采纳”日志：这些文献被选为论点证据
-                if paper_ids:
+                if found_paper_ids:
                     try:
                         log = RecallLog(
                             event_type="accept",
@@ -125,8 +130,8 @@ class SectionReviewPipelineService:
                             extra={
                                 "claim_id": claim.claim_id,
                                 "claim_text": claim.text,
-                                "accepted_paper_ids": paper_ids,
-                                "count": len(paper_ids)
+                                "accepted_paper_ids": found_paper_ids,
+                                "count": len(found_paper_ids)
                             }
                         )
                         self.db.add(log)
@@ -142,6 +147,28 @@ class SectionReviewPipelineService:
 
         return table
 
+    def _make_citation_key(self, paper_id: int) -> str:
+        """Generate (Author, Year) citation key from paper_id"""
+        paper = self.db.query(PaperModel).filter(PaperModel.id == paper_id).first()
+        if not paper:
+            return "(Unknown, n.d.)"
+
+        authors = paper.authors or []
+        year = paper.year or "n.d."
+
+        if not authors:
+            surname = "Unknown"
+        elif len(authors) == 1:
+            surname = authors[0].split()[-1] if authors[0] else "Unknown"
+        elif len(authors) == 2:
+            s1 = authors[0].split()[-1] if authors[0] else "Unknown"
+            s2 = authors[1].split()[-1] if authors[1] else "Unknown"
+            surname = f"{s1} and {s2}"
+        else:
+            surname = (authors[0].split()[-1] if authors[0] else "Unknown") + " et al."
+
+        return f"({surname}, {year})"
+
     async def render_section_from_claims(
         self,
         table: SectionClaimTable,
@@ -150,54 +177,55 @@ class SectionReviewPipelineService:
         review_id: Optional[int] = None,
     ) -> RenderedSection:
         """
-        阶段 3: 从带证据的论点表渲染章节正文
-        如果提供了 review_id，会将渲染结果保存/更新到数据库 Review.content
+        Render section text from claim-evidence table.
+        Uses (Author, Year) Harvard-style citations instead of [number].
         """
-        # 1. 收集所有不重复的 paper_id 并创建引用映射
+        # 1. Collect unique paper_ids and build citation mapping
         all_paper_ids = set()
         for claim in table.claims:
             all_paper_ids.update(claim.support_papers)
 
         sorted_paper_ids = sorted(list(all_paper_ids))
 
-        paper_to_citation_num = {
-            paper_id: i + citation_start_index
-            for i, paper_id in enumerate(sorted_paper_ids)
+        # Generate (Author, Year) citation keys
+        paper_to_citation_key = {
+            paper_id: self._make_citation_key(paper_id)
+            for paper_id in sorted_paper_ids
         }
 
         citation_map = {
-            i + citation_start_index: paper_id
-            for i, paper_id in enumerate(sorted_paper_ids)
+            paper_to_citation_key[paper_id]: paper_id
+            for paper_id in sorted_paper_ids
         }
 
-        # 2. 构造传递给 LLM 的 payload
+        # 2. Build LLM payload with (Author, Year) markers
         claims_payload_lines = []
         for claim in table.claims:
-            citation_nums = [
-                paper_to_citation_num[paper_id]
+            citation_keys = [
+                paper_to_citation_key[paper_id]
                 for paper_id in claim.support_papers
-                if paper_id in paper_to_citation_num
+                if paper_id in paper_to_citation_key
             ]
 
-            line = f"- 论点: {claim.text}"
-            if citation_nums:
-                line += f" (引用编号: {citation_nums})"
+            line = f"- Claim: {claim.text}"
+            if citation_keys:
+                line += f" (Citations: {'; '.join(citation_keys)})"
 
             claims_payload_lines.append(line)
 
             if claim.support_snippets:
-                claims_payload_lines.append("  - 文献片段:")
+                claims_payload_lines.append("  - Literature snippets:")
                 for snippet in claim.support_snippets:
                     claims_payload_lines.append(f"    - {snippet}")
 
         claims_payload = "\n".join(claims_payload_lines)
 
-        # 3. 选择 prompt 并调用 LLM
+        # 3. Select prompt and call LLM
         if language.lower() == "en":
-            system_prompt = "You are an expert academic writer in the field of urban design, skilled at organizing structured 'claim-evidence' materials into fluent and coherent academic paragraphs."
+            system_prompt = "You are an expert academic writer skilled at organizing structured 'claim-evidence' materials into fluent and coherent academic paragraphs."
             prompt_template = RENDER_SECTION_FROM_CLAIMS_PROMPT_EN
         else:
-            system_prompt = "你是一位精通城市设计领域的学术写作者，擅长将结构化的“论点–证据”材料组织成流畅、连贯的学术段落。"
+            system_prompt = "You are an expert academic writer skilled at organizing structured claim-evidence materials into fluent, coherent academic paragraphs in Chinese."
             prompt_template = RENDER_SECTION_FROM_CLAIMS_PROMPT_ZH
 
         prompt = prompt_template.format(claims_payload=claims_payload)
