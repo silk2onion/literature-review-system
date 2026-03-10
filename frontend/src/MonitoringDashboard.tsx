@@ -41,6 +41,7 @@ export default function MonitoringDashboard() {
   const [crawlerJobs, setCrawlerJobs] = useState<CrawlerJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'phd' | 'crawler'>('phd');
+  const [resumingTaskId, setResumingTaskId] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
@@ -220,34 +221,43 @@ export default function MonitoringDashboard() {
                   {task.status === 'failed' && (
                     <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
                       <button
+                        disabled={resumingTaskId === task.task_id}
                         onClick={async () => {
                           try {
+                            setResumingTaskId(task.task_id);
                             const res = await fetch(`${API_BASE_URL}/api/reviews/phd/task/${task.task_id}/resume`, {
                               method: 'POST',
                             });
                             if (!res.ok) {
                               const errText = await res.text();
                               alert(`恢复失败: ${errText}`);
+                              setResumingTaskId(null);
                               return;
                             }
                             // Refresh data immediately
-                            fetchData();
+                            await fetchData();
                           } catch (e) {
                             alert(`恢复请求失败: ${e}`);
+                          } finally {
+                            setResumingTaskId(null);
                           }
                         }}
                         style={{
                           padding: '6px 14px',
                           borderRadius: '6px',
                           border: 'none',
-                          background: 'linear-gradient(135deg, #10b981, #059669)',
+                          background: resumingTaskId === task.task_id ? '#94a3b8' : 'linear-gradient(135deg, #10b981, #059669)',
                           color: '#fff',
                           fontWeight: 600,
-                          cursor: 'pointer',
+                          cursor: resumingTaskId === task.task_id ? 'not-allowed' : 'pointer',
                           fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
                         }}
                       >
-                        ▶️ 断点续跑
+                        {resumingTaskId === task.task_id ? <Loader2 size={12} className="animate-spin" /> : '▶️'}
+                        {resumingTaskId === task.task_id ? '正在恢复...' : '断点续跑'}
                       </button>
                     </div>
                   )}
