@@ -76,6 +76,30 @@ class SectionReviewPipelineService:
             structured_result = await self.llm_service.complete_json(
                 prompt=prompt, system_prompt=system_prompt
             )
+            
+            # LLM may return a single dict or a list of section tables
+            if isinstance(structured_result, list):
+                # Merge multiple section tables into one combined table
+                all_claims = []
+                first_section_id = "1"
+                first_section_title = "Combined Claims"
+                for i, item in enumerate(structured_result):
+                    if isinstance(item, dict):
+                        if i == 0:
+                            first_section_id = item.get("section_id", "1")
+                            first_section_title = item.get("section_title", "Combined Claims")
+                        for claim in item.get("claims", []):
+                            # Add section context to claims
+                            claim["section_id"] = item.get("section_id", str(i + 1))
+                            claim["section_title"] = item.get("section_title", f"Section {i + 1}")
+                            all_claims.append(claim)
+                
+                structured_result = {
+                    "section_id": first_section_id,
+                    "section_title": first_section_title,
+                    "claims": all_claims,
+                }
+            
             table = SectionClaimTable.model_validate(structured_result)
             return table
         except Exception as e:

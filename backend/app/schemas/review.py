@@ -213,6 +213,8 @@ class ClaimEvidence(BaseModel):
     rag_query: str = Field(..., description="用于向量检索 / RAG 的查询语句")
     support_papers: List[int] = Field(default_factory=list, description="通过 RAG 命中的 Paper ID 列表")
     support_snippets: List[str] = Field(default_factory=list, description="来自文献的简短片段或说明")
+    section_id: Optional[str] = Field(default=None, description="所属章节标识（合并多章节时自动填入）")
+    section_title: Optional[str] = Field(default=None, description="所属章节标题（合并多章节时自动填入）")
 
 
 class SectionClaimTable(BaseModel):
