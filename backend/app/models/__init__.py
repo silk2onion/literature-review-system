@@ -8,6 +8,7 @@ from app.models.staging_paper import StagingPaper
 from app.models.tag import Tag, TagGroup, PaperTag, TagGroupTag
 from app.models.paper_chunk import PaperChunk
 from app.models.system_setting import SystemSetting
+from app.models.pipeline_task import PipelineTask
 from .citation import PaperCitation
 from .recall_log import RecallLog
 from .group import PaperGroup, PaperGroupAssociation
@@ -26,4 +27,5 @@ __all__ = [
     "RecallLog",
     "PaperGroup",
     "PaperGroupAssociation",
+    "PipelineTask",
 ]
