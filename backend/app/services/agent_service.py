@@ -835,21 +835,68 @@ class AgentService:
         }
 
     async def _tool_run_phd_pipeline(self, params: Dict, db: Session) -> Dict:
-        """Run PhD pipeline stages"""
+        """Run PhD pipeline stages asynchronously so Agent doesn't block"""
         from app.services.review import SectionReviewPipelineService
-        from app.services.review import generate_review as core_generate_review
         from app.services.semantic_search import get_semantic_search_service
-        from app.schemas.review import ReviewGenerate
-        import re as _re
+        from app.database import SessionLocal
+        import asyncio
 
         stage = params.get("stage", "init")
-        review_id = params.get("review_id")
+        review_id_raw = params.get("review_id")
+        
+        async def _run_init_bg(keywords: list):
+            bg_db = SessionLocal()
+            try:
+                from app.services.review import generate_review as core_generate_review
+                from app.schemas.review import ReviewGenerate
+                llm_svc = OpenAIService(settings=settings)
+                sem_svc = get_semantic_search_service()
+                pipeline = SectionReviewPipelineService(db=bg_db, llm_service=llm_svc, semantic_search_service=sem_svc)
+                
+                payload = ReviewGenerate(
+                    keywords=keywords,
+                    phd_pipeline=True,
+                    framework_only=True,
+                )
+                gen_resp = await core_generate_review(db=bg_db, payload=payload)
+                if gen_resp.success:
+                    rid = gen_resp.review_id
+                    framework = gen_resp.preview_markdown
+                    await pipeline.generate_section_claims(
+                        review_id=rid,
+                        section_outline=framework or "",
+                    )
+            except Exception as e:
+                logger.error(f"Async init failed: {e}")
+            finally:
+                bg_db.close()
 
-        llm_service = OpenAIService(settings=settings)
-        semantic_service = get_semantic_search_service()
-        pipeline = SectionReviewPipelineService(db=db, llm_service=llm_service, semantic_search_service=semantic_service)
+        async def _run_evidence_bg(rid: int):
+            bg_db = SessionLocal()
+            try:
+                llm_svc = OpenAIService(settings=settings)
+                sem_svc = get_semantic_search_service()
+                pipeline = SectionReviewPipelineService(db=bg_db, llm_service=llm_svc, semantic_search_service=sem_svc)
+                await pipeline.attach_evidence_for_review(review_id=rid)
+            except Exception as e:
+                logger.error(f"Async evidence failed: {e}")
+            finally:
+                bg_db.close()
+
+        async def _run_render_bg(rid: int):
+            bg_db = SessionLocal()
+            try:
+                llm_svc = OpenAIService(settings=settings)
+                sem_svc = get_semantic_search_service()
+                pipeline = SectionReviewPipelineService(db=bg_db, llm_service=llm_svc, semantic_search_service=sem_svc)
+                await pipeline.render_review_sections(review_id=rid)
+            except Exception as e:
+                logger.error(f"Async render failed: {e}")
+            finally:
+                bg_db.close()
 
         if stage == "init":
+            import re as _re
             keywords_raw = params.get("keywords", "")
             if isinstance(keywords_raw, list):
                 keywords = keywords_raw
@@ -858,64 +905,34 @@ class AgentService:
 
             if not keywords:
                 return {"error": "Please provide keywords for init stage"}
-
-            payload = ReviewGenerate(
-                keywords=keywords,
-                phd_pipeline=True,
-                framework_only=True,
-            )
-
-            gen_resp = await core_generate_review(db=db, payload=payload)
-            if not gen_resp.success:
-                return {"error": f"Pipeline init failed: {gen_resp.message}"}
-
-            rid = gen_resp.review_id
-            framework = gen_resp.preview_markdown
-
-            try:
-                table = await pipeline.generate_section_claims(
-                    review_id=rid,
-                    section_outline=framework or "",
-                )
-                claims_summary = [c.text[:80] for c in table.claims[:5]]
-                return {
-                    "review_id": rid,
-                    "stage": "init_complete",
-                    "claims_count": len(table.claims),
-                    "sample_claims": claims_summary,
-                    "next_step": "Run with stage=evidence and review_id to continue",
-                }
-            except Exception as e:
-                return {"review_id": rid, "error": f"Claims generation failed: {e}"}
+            
+            asyncio.create_task(_run_init_bg(keywords))
+            return {
+                "stage": "init_started",
+                "message": f"已在后台启动初始化阶段（生成论点）。稍后可在监控面板或这里询问结果。",
+            }
 
         elif stage == "evidence":
-            if not review_id:
+            if not review_id_raw:
                 return {"error": "review_id is required for evidence stage"}
-            try:
-                result = await pipeline.attach_evidence_for_review(review_id=int(review_id))
-                return {
-                    "review_id": int(review_id),
-                    "stage": "evidence_complete",
-                    "claims_with_evidence": len(result.claims) if hasattr(result, 'claims') else 0,
-                    "next_step": "Run with stage=render and review_id to generate final text",
-                }
-            except Exception as e:
-                return {"error": f"Evidence attachment failed: {e}"}
+            rid = int(review_id_raw)
+            asyncio.create_task(_run_evidence_bg(rid))
+            return {
+                "review_id": rid,
+                "stage": "evidence_started",
+                "message": f"已在后台启动证据关联阶段（查询文献支撑）。",
+            }
 
         elif stage == "render":
-            if not review_id:
+            if not review_id_raw:
                 return {"error": "review_id is required for render stage"}
-            try:
-                result = await pipeline.render_review_sections(review_id=int(review_id))
-                text_preview = result.text[:300] if hasattr(result, 'text') else str(result)[:300]
-                return {
-                    "review_id": int(review_id),
-                    "stage": "render_complete",
-                    "preview": text_preview,
-                    "message": "Review rendered successfully. Use export_review to download.",
-                }
-            except Exception as e:
-                return {"error": f"Render failed: {e}"}
+            rid = int(review_id_raw)
+            asyncio.create_task(_run_render_bg(rid))
+            return {
+                "review_id": rid,
+                "stage": "render_started",
+                "message": f"已在后台启动最终渲染阶段（生成完整文本）。",
+            }
 
         return {"error": f"Unknown stage: {stage}. Use init/evidence/render"}
 
