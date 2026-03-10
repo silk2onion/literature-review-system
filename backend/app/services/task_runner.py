@@ -128,11 +128,17 @@ class TaskState:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> TaskState:
+    def from_dict(cls, data: Dict) -> "TaskState":
+        keywords = data.get("keywords", [])
+        topic = data.get("topic", "")
+        if not keywords:
+            # Fallback for old tasks where keywords weren't saved to DB state_data
+            keywords = [topic] if topic else ["literature review"]
+
         t = cls(
             task_id=data.get("task_id", ""),
-            topic=data.get("topic", ""),
-            keywords=data.get("keywords", []),
+            topic=topic,
+            keywords=keywords,
             papers_per_section=data.get("papers_per_section", 20),
             sources=data.get("sources", ["semantic_scholar"]),
             language=data.get("language", "zh-CN"),
