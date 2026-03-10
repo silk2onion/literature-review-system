@@ -442,6 +442,8 @@ class AgentService:
             "export_review": self._tool_export_review,
             "semantic_search": self._tool_semantic_search,
             "manage_groups": self._tool_manage_groups,
+            "check_task_progress": self._tool_check_task_progress,
+            "modify_task_requirements": self._tool_modify_task_requirements,
         }
 
         handler = handlers.get(tool)
