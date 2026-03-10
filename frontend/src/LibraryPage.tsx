@@ -98,6 +98,11 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
   const [groups, setGroups] = useState<LiteratureGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [searchContext, setSearchContext] = useState<SearchLocalResponse["search_context"]>(undefined);
+  const [message, setMessage] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState<{ show: boolean; count: number }>({
+    show: false,
+    count: 0,
+  });
 
   const handleUploadPdf = async (file: File) => {
     if (!file) return;
@@ -188,11 +193,12 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
 
   const handleDeleteSelected = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`确定要删除选中的 ${selectedIds.size} 篇文献吗？此操作不可恢复。`)) {
-      return;
-    }
+    setShowConfirmModal({ show: true, count: selectedIds.size });
+  };
 
+  const executeDelete = async () => {
     setDeleting(true);
+    const countToDelete = selectedIds.size;
     try {
       const resp = await fetch(`${API_BASE_URL}/api/papers/batch-delete`, {
         method: "POST",
@@ -205,14 +211,17 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
       }
 
       const data = await resp.json();
-      alert(`成功删除 ${data.deleted_count} 篇文献`);
+      setMessage({ text: `成功删除 ${data.deleted_count} 篇文献`, type: "success" });
+      setTimeout(() => setMessage(null), 3000);
       setSelectedIds(new Set());
-      fetchData({ resetPage: false }); // Refresh current page
+      fetchData({ resetPage: false });
     } catch (err) {
       console.error(err);
-      alert("删除出错");
+      setMessage({ text: "删除出错", type: "error" });
+      setTimeout(() => setMessage(null), 3000);
     } finally {
       setDeleting(false);
+      setShowConfirmModal({ show: false, count: 0 });
     }
   };
 
@@ -491,7 +500,7 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
     // showArchived is handled in fetchData payload, not client-side filtering
   ]);
 
-  const fetchData = async (opts?: { resetPage?: boolean; page?: number }) => {
+  const fetchData = async (opts?: { resetPage?: boolean; page?: number; pageSize?: number }) => {
     try {
       setLoading(true);
       setTaskStatus("running");
@@ -505,12 +514,13 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
             ? 1
             : page;
 
+      const effectivePageSize = opts?.pageSize ?? pageSize;
       const payload: SearchLocalRequest = {
         q: query.trim() || undefined,
         year_from: yearFrom ? Number(yearFrom) : undefined,
         year_to: yearTo ? Number(yearTo) : undefined,
         page: effectivePage,
-        page_size: pageSize,
+        page_size: effectivePageSize,
         group_id: selectedGroupId || undefined,
         include_archived: showArchived,
       };
@@ -657,6 +667,13 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
             {analyzing ? "分析中..." : "引用网络分析"}
           </button>
           <button
+            onClick={() => fetchData({ resetPage: false })}
+            className="action-button"
+            title="刷新当前列表"
+          >
+            🔄 刷新
+          </button>
+          <button
             onClick={() => setShowUploadModal(true)}
             className="action-button primary"
           >
@@ -739,6 +756,34 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
             </>
           )}
           {renderTaskBadge()}
+          {message && (
+            <div
+              className={`status-message ${message.type}`}
+              style={{
+                marginLeft: 12,
+                padding: "6px 12px",
+                borderRadius: 6,
+                fontSize: 13,
+                backgroundColor: message.type === "success" ? "#dcfce7" : "#fee2e2",
+                color: message.type === "success" ? "#166534" : "#991b1b",
+                border: `1px solid ${message.type === "success" ? "#bbf7d0" : "#fecaca"}`,
+                animation: "fadeIn 0.3s ease-in-out",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  backgroundColor: message.type === "success" ? "#22c55e" : "#ef4444",
+                }}
+              />
+              {message.text}
+            </div>
+          )}
         </div>
       </header>
 
@@ -1312,7 +1357,7 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                   const newSize = Number(e.target.value) || 20;
                   setPage(1);
                   setPageSize(newSize);
-                  fetchData({ resetPage: true }).catch((err) =>
+                  fetchData({ resetPage: true, pageSize: newSize }).catch((err) =>
                     console.error("change page size error", err),
                   );
                 }}
@@ -1433,6 +1478,75 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                 className="action-button"
               >
                 取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {showConfirmModal.show && (
+        <div 
+          className="modal-overlay" 
+          style={{ 
+            zIndex: 9999,
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          <div 
+            className="modal-content" 
+            style={{ 
+              maxWidth: 400,
+              backgroundColor: 'white',
+              padding: '24px',
+              borderRadius: '12px',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
+            }}
+          >
+            <h3 style={{ color: "#ef4444", marginTop: 0 }}>⚠️ 确认永久删除</h3>
+            <p style={{ margin: "16px 0", color: "#4b5563", fontSize: '14px', lineHeight: 1.6 }}>
+              确定要删除选中的 <strong>{showConfirmModal.count}</strong> 篇文献吗？
+              <br />
+              <span style={{ fontSize: "0.9em", color: "#ef4444" }}>※ 此操作将从数据库和向量库中永久移除，不可恢复。</span>
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 24 }}>
+              <button
+                className="action-button"
+                onClick={() => setShowConfirmModal({ show: false, count: 0 })}
+                disabled={deleting}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: 'white',
+                  cursor: 'pointer'
+                }}
+              >
+                取消
+              </button>
+              <button
+                className="action-button danger"
+                onClick={executeDelete}
+                disabled={deleting}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                {deleting ? "正在执行..." : "确认删除"}
               </button>
             </div>
           </div>

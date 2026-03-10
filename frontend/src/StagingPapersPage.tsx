@@ -68,8 +68,13 @@ export default function StagingPapersPage() {
   const [total, setTotal] = useState<number>(0);
   const [items, setItems] = useState<StagingPaper[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [taskStatus, setTaskStatus] = useState<TaskStatus>("idle");
-  const [taskMessage, setTaskMessage] = useState<string>("");
+  const [taskStatus, setTaskStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [taskMessage, setTaskMessage] = useState("");
+  const [showConfirmModal, setShowConfirmModal] = useState<{
+    show: boolean;
+    type: "delete" | "reject" | null;
+    count: number;
+  }>({ show: false, type: null, count: 0 });
   const [error, setError] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -104,12 +109,14 @@ export default function StagingPapersPage() {
   const effectiveStatusValue = status === "all" ? undefined : status;
   const effectiveSourceValue = source === "all" ? undefined : source;
 
-  const fetchData = async (opts?: { resetPage?: boolean; page?: number }) => {
+  const fetchData = async (opts?: { resetPage?: boolean; page?: number; pageSize?: number }) => {
     try {
       setLoading(true);
       setError(null);
-      setTaskStatus("running");
-      setTaskMessage("正在加载暂存文献...");
+      if (taskStatus !== "done" || taskMessage.includes("加载中")) {
+        setTaskStatus("running");
+        setTaskMessage("正在加载暂存文献...");
+      }
 
       const effectivePage =
         typeof opts?.page === "number"
@@ -118,6 +125,7 @@ export default function StagingPapersPage() {
             ? 1
             : page;
 
+      const effectivePageSize = opts?.pageSize ?? pageSize;
       const payload: StagingSearchRequest = {
         q: q.trim() || undefined,
         status: effectiveStatusValue,
@@ -126,7 +134,7 @@ export default function StagingPapersPage() {
         year_from: yearFrom ? Number(yearFrom) : undefined,
         year_to: yearTo ? Number(yearTo) : undefined,
         page: effectivePage,
-        page_size: pageSize,
+        page_size: effectivePageSize,
       };
 
       const resp = await fetch(`${API_BASE_URL}/api/staging-papers/search`, {
@@ -149,13 +157,15 @@ export default function StagingPapersPage() {
       setItems(data.items || []);
       setTotal(data.total ?? 0);
       setPage(effectivePage);
-      setTaskStatus("done");
-      setTaskMessage(
-        `加载完成：共 ${data.total} 条暂存记录，当前第 ${effectivePage} / ${Math.max(
-          Math.ceil((data.total || 0) / pageSize),
-          1,
-        )} 页`,
-      );
+      if (!taskMessage.includes("已永久删除") && !taskMessage.includes("已标记拒绝")) {
+        setTaskStatus("done");
+        setTaskMessage(
+          `加载完成：共 ${data.total} 条暂存记录，当前第 ${effectivePage} / ${Math.max(
+            Math.ceil((data.total || 0) / pageSize),
+            1,
+          )} 页`,
+        );
+      }
     } catch (err) {
       console.error("staging search error", err);
       setTaskStatus("error");
@@ -254,18 +264,12 @@ export default function StagingPapersPage() {
   };
 
   const handleRejectSelected = async () => {
-    if (selectedIds.length === 0) return;
-    if (
-      !window.confirm(
-        `确定要将当前选中的 ${selectedIds.length} 条暂存文献标记为"已拒绝"吗？`,
-      )
-    ) {
-      return;
-    }
+    const rejectCount = selectedIds.length;
+    if (rejectCount === 0) return;
 
     try {
       setTaskStatus("running");
-      setTaskMessage("正在拒绝选中的暂存文献...");
+      setTaskMessage(`正在将选中的 ${rejectCount} 条暂存文献标记为已拒绝...`);
 
       const resp = await fetch(`${API_BASE_URL}/api/staging-papers/reject`, {
         method: "POST",
@@ -282,9 +286,12 @@ export default function StagingPapersPage() {
       }
 
       const result = await resp.json();
+      console.log("Reject result:", result);
       setTaskStatus("done");
-      setTaskMessage(`已拒绝 ${result.rejected_count} 条暂存文献`);
+      setTaskMessage(`已标记拒绝 ${result.rejected_count} 条暂存文献`);
       setSelectedIds([]);
+      // Clear message after 3 seconds
+      setTimeout(() => setTaskMessage(""), 3000);
       await fetchData({ page });
     } catch (err) {
       console.error("reject staging error", err);
@@ -296,21 +303,15 @@ export default function StagingPapersPage() {
   };
 
   const handleDeleteSelected = async () => {
-    if (selectedIds.length === 0) return;
-    if (
-      !window.confirm(
-        `⚠️ 确定要永久删除选中的 ${selectedIds.length} 条暂存文献吗？此操作不可恢复！`,
-      )
-    ) {
-      return;
-    }
+    const deleteCount = selectedIds.length;
+    if (deleteCount === 0) return;
 
     try {
       setTaskStatus("running");
-      setTaskMessage("正在永久删除选中的暂存文献...");
+      setTaskMessage(`正在永久删除选中的 ${deleteCount} 条暂存文献...`);
 
       const resp = await fetch(`${API_BASE_URL}/api/staging-papers/delete`, {
-        method: "DELETE",
+        method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
@@ -324,9 +325,12 @@ export default function StagingPapersPage() {
       }
 
       const result = await resp.json();
+      console.log("Delete result:", result);
       setTaskStatus("done");
       setTaskMessage(`已永久删除 ${result.deleted_count} 条暂存文献`);
       setSelectedIds([]);
+      // Clear message after 3 seconds
+      setTimeout(() => setTaskMessage(""), 3000);
       await fetchData({ page });
     } catch (err) {
       console.error("delete staging error", err);
@@ -383,7 +387,15 @@ export default function StagingPapersPage() {
           {renderTaskBadge()}
           <button
             type="button"
-            onClick={handleDeleteSelected}
+            onClick={() => fetchData({ page })}
+            className="action-button"
+            style={{ padding: '6px 14px' }}
+          >
+            🔄 刷新
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowConfirmModal({ show: true, type: "delete", count: selectedIds.length })}
             disabled={selectedIds.length === 0}
             style={{
               padding: '6px 14px',
@@ -400,7 +412,7 @@ export default function StagingPapersPage() {
           </button>
           <button
             type="button"
-            onClick={handleRejectSelected}
+            onClick={() => setShowConfirmModal({ show: true, type: "reject", count: selectedIds.length })}
             disabled={selectedIds.length === 0}
             style={{
               padding: '6px 14px',
@@ -853,7 +865,7 @@ export default function StagingPapersPage() {
                   const newSize = Number(e.target.value) || 20;
                   setPage(1);
                   setPageSize(newSize);
-                  fetchData({ resetPage: true }).catch((err) =>
+                  fetchData({ resetPage: true, pageSize: newSize }).catch((err) =>
                     console.error("change staging page size error", err),
                   );
                 }}
@@ -910,6 +922,71 @@ export default function StagingPapersPage() {
           </div>
         </div>
       </section>
+      {/* Deletion/Rejection Confirmation Modal */}
+      {showConfirmModal.show && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '24px',
+            borderRadius: '12px',
+            maxWidth: '400px',
+            width: '90%',
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
+          }}>
+            <h3 style={{ marginTop: 0, color: showConfirmModal.type === 'delete' ? '#ef4444' : '#f97316' }}>
+              {showConfirmModal.type === 'delete' ? '⚠️ 确认永久删除' : '确认标记拒绝'}
+            </h3>
+            <p style={{ color: '#4b5563', fontSize: '14px', lineHeight: '1.5' }}>
+              {showConfirmModal.type === 'delete' 
+                ? `确定要永久删除选中的 ${showConfirmModal.count} 条暂存文献吗？此操作不可恢复！`
+                : `确定要将当前选中的 ${showConfirmModal.count} 条暂存文献标记为"已拒绝"吗？`}
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+              <button 
+                onClick={() => setShowConfirmModal({ show: false, type: null, count: 0 })}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: 'white',
+                  cursor: 'pointer'
+                }}
+              >
+                取消
+              </button>
+              <button 
+                onClick={() => {
+                  if (showConfirmModal.type === 'delete') handleDeleteSelected();
+                  else if (showConfirmModal.type === 'reject') handleRejectSelected();
+                  setShowConfirmModal({ show: false, type: null, count: 0 });
+                }}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: showConfirmModal.type === 'delete' ? '#ef4444' : '#f97316',
+                  color: 'white',
+                  fontWeight: 500,
+                  cursor: 'pointer'
+                }}
+              >
+                确认{showConfirmModal.type === 'delete' ? '删除' : '拒绝'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
