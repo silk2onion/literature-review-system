@@ -83,6 +83,11 @@ class TaskState:
         self.total_cited_papers: int = 0
         self.paper_ids: List[int] = []  # IDs of papers that passed relevance filtering
 
+        # Checkpoint data: stores serialised intermediate products for resume
+        self.checkpoint_data: Dict[str, Any] = {}
+        # last_completed_step: the step_key of the latest successfully completed step
+        self.last_completed_step: Optional[str] = None
+
         # event queue for SSE streaming
         self.event_queue: asyncio.Queue = asyncio.Queue()
 
@@ -104,6 +109,11 @@ class TaskState:
             "task_id": self.task_id,
             "status": self.status,
             "topic": self.topic,
+            "keywords": self.keywords,
+            "papers_per_section": self.papers_per_section,
+            "sources": self.sources,
+            "language": self.language,
+            "citation_style": self.citation_style,
             "created_at": self.created_at,
             "finished_at": self.finished_at,
             "error": self.error,
@@ -111,6 +121,9 @@ class TaskState:
             "full_markdown": self.full_markdown,
             "references_markdown": self.references_markdown,
             "total_cited_papers": self.total_cited_papers,
+            "paper_ids": self.paper_ids,
+            "checkpoint_data": self.checkpoint_data,
+            "last_completed_step": self.last_completed_step,
             "steps": [s.to_dict() for s in self.steps],
         }
 
@@ -133,6 +146,9 @@ class TaskState:
         t.full_markdown = data.get("full_markdown")
         t.references_markdown = data.get("references_markdown")
         t.total_cited_papers = data.get("total_cited_papers", 0)
+        t.paper_ids = data.get("paper_ids", [])
+        t.checkpoint_data = data.get("checkpoint_data", {})
+        t.last_completed_step = data.get("last_completed_step")
         
         if "steps" in data:
             t.steps = []
@@ -240,6 +256,45 @@ def list_tasks() -> List[Dict]:
     return result
 
 
+async def resume_task(task_id: str, db: Session) -> TaskState:
+    """
+    Resume a failed/stopped task from its last checkpoint.
+    Returns the TaskState (now running again).
+    """
+    task = get_task(task_id)
+    if not task:
+        raise ValueError(f"Task {task_id} not found")
+    
+    if task.status not in ("failed", "done"):
+        raise ValueError(f"Task {task_id} is in status '{task.status}', can only resume failed tasks")
+    
+    last_step = task.last_completed_step
+    if not last_step:
+        # No checkpoint at all — need to start from scratch
+        resume_from = None
+    else:
+        # Find the NEXT step after the last completed one
+        step_order = PipelineTaskRunner.STEP_ORDER
+        try:
+            idx = step_order.index(last_step)
+            if idx + 1 < len(step_order):
+                resume_from = step_order[idx + 1]
+            else:
+                raise ValueError(f"Task {task_id} already completed all steps")
+        except ValueError:
+            resume_from = None
+    
+    # Re-register in memory store
+    async with _store_lock:
+        _task_store[task_id] = task
+    
+    # Launch the runner in background
+    runner = PipelineTaskRunner(task, db)
+    asyncio.create_task(runner.run(resume_from=resume_from))
+    
+    return task
+
+
 # ────────────────────────────────────────────────────────────
 # Retry helper
 # ────────────────────────────────────────────────────────────
@@ -344,6 +399,17 @@ class PipelineTaskRunner:
             # if no loop, run synchronous
             save()
 
+    # Pipeline step ordering for resume logic
+    STEP_ORDER = ["framework", "auto_search", "claims", "evidence", "render", "assemble"]
+
+    def _save_checkpoint(self, step_key: str, data: Dict[str, Any] = None):
+        """Save a checkpoint after a successful step."""
+        self.task.last_completed_step = step_key
+        if data:
+            self.task.checkpoint_data[step_key] = data
+        # Force a persist to DB
+        self._persist_task_state_bg()
+
     def _step_start(self, step_key: str, message: str = ""):
         step = self.task.get_step(step_key)
         if step:
@@ -368,18 +434,82 @@ class PipelineTaskRunner:
             step.message = f"失败: {error}"
         self._emit("step_update", self.task.to_dict())
 
-    async def run(self):
-        """Main pipeline execution."""
+    def _should_skip(self, step_key: str, resume_from: Optional[str]) -> bool:
+        """Check if a step should be skipped during resume."""
+        if resume_from is None:
+            return False
+        try:
+            resume_idx = self.STEP_ORDER.index(resume_from)
+            step_idx = self.STEP_ORDER.index(step_key)
+            return step_idx < resume_idx
+        except ValueError:
+            return False
+
+    def _restore_checkpoint(self, resume_from: str):
+        """Restore intermediate products from checkpoint_data before resuming."""
+        cp = self.task.checkpoint_data
+        
+        # Restore framework (needed by step 2+)
+        if "framework" in cp:
+            self.task.framework = cp["framework"].get("framework")
+
+        # Restore paper_ids (needed by step 3+)
+        if "auto_search" in cp:
+            self.task.paper_ids = cp["auto_search"].get("paper_ids", [])
+            
+        # Restore claim_table (needed by step 4+)
+        if "claims" in cp:
+            from app.schemas.review import SectionClaimTable
+            self._claim_table = SectionClaimTable.model_validate(cp["claims"]["claim_table"])
+            self.task.review_id = cp["claims"].get("review_id")
+
+        # Restore claim_table with evidence (needed by step 5+)
+        if "evidence" in cp:
+            from app.schemas.review import SectionClaimTable
+            self._claim_table = SectionClaimTable.model_validate(cp["evidence"]["claim_table"])
+
+        # Restore rendered sections (needed by step 6)
+        if "render" in cp:
+            self._rendered_sections = cp["render"].get("rendered_sections", [])
+            self._all_citation_map = cp["render"].get("all_citation_map", {})
+        
+        logger.info(f"[Task {self.task.task_id}] Restored checkpoint up to step '{resume_from}'")
+
+    async def run(self, resume_from: Optional[str] = None):
+        """Main pipeline execution. If resume_from is set, skip steps before it."""
         self.task.status = "running"
+        self.task.error = None  # Clear any previous error
+        self.task.finished_at = None
+        
+        if resume_from:
+            logger.info(f"[Task {self.task.task_id}] Resuming from step '{resume_from}'")
+            self._restore_checkpoint(resume_from)
+            # Reset failed/pending steps from resume_from onwards
+            should_reset = False
+            for step in self.task.steps:
+                if step.step == resume_from:
+                    should_reset = True
+                if should_reset:
+                    step.status = "pending"
+                    step.message = ""
+                    step.started_at = None
+                    step.finished_at = None
+
         self._emit("task_start", {"task_id": self.task.task_id, "topic": self.task.topic})
 
         try:
-            await self._step_generate_framework()
-            await self._step_auto_search()
-            await self._step_generate_claims()
-            await self._step_attach_evidence()
-            await self._step_render_all()
-            await self._step_assemble()
+            if not self._should_skip("framework", resume_from):
+                await self._step_generate_framework()
+            if not self._should_skip("auto_search", resume_from):
+                await self._step_auto_search()
+            if not self._should_skip("claims", resume_from):
+                await self._step_generate_claims()
+            if not self._should_skip("evidence", resume_from):
+                await self._step_attach_evidence()
+            if not self._should_skip("render", resume_from):
+                await self._step_render_all()
+            if not self._should_skip("assemble", resume_from):
+                await self._step_assemble()
 
             self.task.status = "done"
             self.task.finished_at = datetime.now().isoformat()
@@ -435,6 +565,7 @@ class PipelineTaskRunner:
             self.task.framework = framework
             sections_count = len(framework.get("sections", []))
             self._step_done(step_key, f"框架生成完成：{sections_count} 个章节")
+            self._save_checkpoint("framework", {"framework": self.task.framework})
         except Exception as e:
             self._step_fail(step_key, str(e))
             raise
@@ -598,6 +729,7 @@ class PipelineTaskRunner:
                     self._step_start(step_key, f"已审查 {reviewed_count} 篇文献，采纳 {len(accepted_papers)} 篇...")
 
             self._step_done(step_key, f"审查完成：总共发现 {reviewed_count} 篇文献，AI 采纳了 {len(accepted_papers)} 篇符合课题方向的文献。")
+            self._save_checkpoint("auto_search", {"paper_ids": self.task.paper_ids})
 
     # ── Step 3: Generate Claims ──────────────────────────────
 
@@ -640,6 +772,10 @@ class PipelineTaskRunner:
             self._claim_table = await with_retry(_call, max_attempts=3, step_log=step)
             claims_count = len(self._claim_table.claims)
             self._step_done(step_key, f"生成了 {claims_count} 条论点")
+            self._save_checkpoint("claims", {
+                "claim_table": self._claim_table.model_dump(),
+                "review_id": self.task.review_id,
+            })
         except Exception as e:
             self._step_fail(step_key, str(e))
             raise
@@ -670,6 +806,9 @@ class PipelineTaskRunner:
             self._claim_table = await with_retry(_call, max_attempts=3, step_log=step)
             papers_found = sum(len(c.support_papers or []) for c in self._claim_table.claims)
             self._step_done(step_key, f"为 {len(self._claim_table.claims)} 条论点关联了约 {papers_found} 篇文献")
+            self._save_checkpoint("evidence", {
+                "claim_table": self._claim_table.model_dump(),
+            })
         except Exception as e:
             self._step_fail(step_key, str(e))
             raise
@@ -739,6 +878,10 @@ class PipelineTaskRunner:
                 })
 
         self._step_done(step_key, f"完成 {len(self._rendered_sections)} 个章节渲染")
+        self._save_checkpoint("render", {
+            "rendered_sections": self._rendered_sections,
+            "all_citation_map": self._all_citation_map,
+        })
 
     # ── Step 6: Assemble ─────────────────────────────────────
 

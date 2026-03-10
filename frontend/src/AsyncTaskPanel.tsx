@@ -384,7 +384,68 @@ export const AsyncTaskPanel: React.FC<AsyncTaskPanelProps> = ({
 
           {/* Failure retry button */}
           {task.status === 'failed' && (
-            <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+            <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/api/reviews/phd/task/${task.task_id}/resume`, {
+                      method: 'POST',
+                    });
+                    if (!res.ok) {
+                      const errText = await res.text();
+                      setError(`恢复失败: ${errText}`);
+                      return;
+                    }
+                    setError(null);
+                    // Reconnect SSE stream
+                    cleanup();
+                    const es = new EventSource(`${API_BASE_URL}/api/reviews/phd/task/${task.task_id}/stream`);
+                    eventSourceRef.current = es;
+                    const handleEvent = (e: MessageEvent) => {
+                      try {
+                        const taskData: TaskState = JSON.parse(e.data);
+                        setTask(taskData);
+                        if (taskData.status === 'done' || taskData.status === 'failed') {
+                          cleanup();
+                        }
+                      } catch { /* ignore */ }
+                    };
+                    es.addEventListener('snapshot', handleEvent);
+                    es.addEventListener('step_update', handleEvent);
+                    es.addEventListener('task_done', handleEvent);
+                    es.addEventListener('final', handleEvent);
+                    es.addEventListener('task_error', (e: MessageEvent) => {
+                      try {
+                        const errData = JSON.parse(e.data);
+                        setError(errData.error || 'Task failed');
+                        if (errData.task) setTask(errData.task);
+                      } catch { /* ignore */ }
+                      cleanup();
+                    });
+                    es.onerror = () => {
+                      cleanup();
+                      fetch(`${API_BASE_URL}/api/reviews/phd/task/${task.task_id}`)
+                        .then(r => r.json())
+                        .then(setTask)
+                        .catch(() => {});
+                    };
+                  } catch (e) {
+                    setError(`恢复请求失败: ${e}`);
+                  }
+                }}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  color: '#fff',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                }}
+              >
+                ▶️ 断点续跑
+              </button>
               <button
                 onClick={() => { setTask(null); setTaskId(null); setError(null); }}
                 style={{
