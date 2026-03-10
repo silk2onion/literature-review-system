@@ -344,3 +344,21 @@ def save_system_prompt_endpoint(payload: SystemPromptPayload, db: Session = Depe
 def get_custom_system_prompt(db: Session) -> str:
     """供其他模块调用：获取用户自定义的系统提示词"""
     return _get_setting(db, "agent_system_prompt", "") or ""
+
+
+# ---- Agent 配置管理 ----
+
+@router.get("/settings/agent", response_model=AgentConfig)
+def get_agent_config(db: Session = Depends(get_db)):
+    """获取 Agent 的主动交互配置"""
+    saved_config = _get_setting(db, "agent_config", {})
+    if not saved_config:
+        return AgentConfig()
+    return AgentConfig(**saved_config)
+
+
+@router.put("/settings/agent", response_model=AgentConfig)
+def save_agent_config(payload: AgentConfig, db: Session = Depends(get_db)):
+    """保存 Agent 的主动交互配置"""
+    _set_setting(db, "agent_config", payload.model_dump())
+    return payload
