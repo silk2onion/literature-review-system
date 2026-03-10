@@ -11,7 +11,7 @@ class CrawlJobBase(BaseModel):
     """抓取任务基础参数"""
     keywords: List[str] = Field(..., min_length=1, description="关键词列表")
     sources: List[str] = Field(
-        default=["arxiv", "crossref"],
+        default=["semantic_scholar", "crossref"],
         description="数据源列表"
     )
     year_from: Optional[int] = Field(default=None, description="起始年份")

@@ -159,7 +159,7 @@ def reject_staging_papers(
     return {"success": True, "rejected_count": count}
 
 
-@router.delete("/delete")
+@router.post("/delete")
 def delete_staging_papers(
     payload: StagingPaperIdsRequest,
     db: Session = Depends(get_db),

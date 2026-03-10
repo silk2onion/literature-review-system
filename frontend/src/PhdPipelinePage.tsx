@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SemanticSearchDebugPanel from './SemanticSearchDebugPanel';
+import { AsyncTaskPanel } from './AsyncTaskPanel';
 
 const API_BASE_URL = 'http://localhost:5444';
 
@@ -79,6 +80,137 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   const [exportLoading, setExportLoading] = useState(false);
   const [showRagDebug, setShowRagDebug] = useState(false);
   const [manualReviewId, setManualReviewId] = useState('');
+
+  // Step 0: Framework generation
+  const [topic, setTopic] = useState('');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [framework, setFramework] = useState<any>(null);
+  const [frameworkLoading, setFrameworkLoading] = useState(false);
+  const [frameworkConfirmed, setFrameworkConfirmed] = useState(false);
+
+  // Step 0.5: Auto-search state
+  const [papersPerSection, setPapersPerSection] = useState(20);
+  const [autoSearchLoading, setAutoSearchLoading] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [autoSearchResults, setAutoSearchResults] = useState<any[]>([]);
+  const [autoSearchDone, setAutoSearchDone] = useState(false);
+
+  // Step 4: Assemble state
+  const [assembleLoading, setAssembleLoading] = useState(false);
+  const [fullReviewMarkdown, setFullReviewMarkdown] = useState('');
+  const [citationStyle, setCitationStyle] = useState('harvard');
+  const [assembleStats, setAssembleStats] = useState<{cited: number; sections: number} | null>(null);
+
+
+  const handleStep0_GenerateFramework = async () => {
+    setFrameworkLoading(true);
+    setError(null);
+    setFramework(null);
+    setFrameworkConfirmed(false);
+
+    try {
+      const kws = keywords.split(/[,\uff0c]/).map(k => k.trim()).filter(k => k);
+      const res = await fetch(`${API_BASE_URL}/api/reviews/generate-framework`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic,
+          keywords: kws.length > 0 ? kws : [topic],
+          language: 'zh-CN',
+        }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `Framework generation failed: ${res.status}`);
+      }
+
+      const data = await res.json();
+      setFramework(data.framework);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setFrameworkLoading(false);
+    }
+  };
+
+  
+  const handleStep05_AutoSearch = async () => {
+    if (!framework || !framework.sections) {
+      setError('Please generate and confirm a framework first.');
+      return;
+    }
+    setAutoSearchLoading(true);
+    setError(null);
+    setAutoSearchResults([]);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/reviews/phd/auto-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sections: framework.sections,
+          papers_per_section: papersPerSection,
+          sources: sources,
+          year_from: yearFrom ? parseInt(yearFrom) : undefined,
+          year_to: yearTo ? parseInt(yearTo) : undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `Auto-search failed: ${res.status}`);
+      }
+
+      const data = await res.json();
+      setAutoSearchResults(data.per_section || []);
+      setAutoSearchDone(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAutoSearchLoading(false);
+    }
+  };
+
+  const handleStep4_Assemble = async () => {
+    if (!finalRender && !reviewId) {
+      setError('Please complete rendering before assembly.');
+      return;
+    }
+    setAssembleLoading(true);
+    setError(null);
+
+    try {
+      const renderedSections = finalRender
+        ? [{ section_id: '1', section_title: framework?.title || 'Literature Review', text: finalRender, citation_map: {} }]
+        : [];
+
+      const res = await fetch(`${API_BASE_URL}/api/reviews/phd/assemble`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          review_id: reviewId,
+          title: framework?.title || topic || 'Literature Review',
+          rendered_sections: renderedSections,
+          citation_style: citationStyle,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `Assembly failed: ${res.status}`);
+      }
+
+      const data = await res.json();
+      setFullReviewMarkdown(data.full_markdown || '');
+      setAssembleStats({ cited: data.total_cited_papers || 0, sections: data.total_sections || 0 });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAssembleLoading(false);
+    }
+  };
+
 
   const handleStep1_GenerateClaims = async () => {
     setLoading(true);
@@ -292,7 +424,26 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div style={{ opacity: groupId ? 0.5 : 1, pointerEvents: groupId ? 'none' : 'auto' }}>
             <label style={{ display: 'block', fontSize: '13px', color: '#9ca3af', marginBottom: '4px' }}>
-              关键词 (逗号分隔)
+              Research Topic (Step 0)
+            </label>
+            <input
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="e.g., Transit-Oriented Development and Cultural Heritage"
+              style={{
+                width: '100%',
+                padding: '8px',
+                borderRadius: '4px',
+                border: '1px solid #334155',
+                backgroundColor: '#1e293b',
+                color: '#fff',
+                boxSizing: 'border-box'
+              }}
+            />
+          </div>
+          <div style={{ opacity: groupId ? 0.5 : 1, pointerEvents: groupId ? 'none' : 'auto' }}>
+            <label style={{ display: 'block', fontSize: '13px', color: '#9ca3af', marginBottom: '4px' }}>
+              Keywords (comma-separated)
             </label>
             <input
               value={keywords}
@@ -417,7 +568,219 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
       </div>
 
       <div className="pipeline-steps-container">
-        {/* 步骤一：生成主张 */}
+        {/* Step 0: Generate Framework */}
+        <div className="pipeline-step">
+          <h3>Step 0: Generate Review Framework</h3>
+          <button
+            onClick={handleStep0_GenerateFramework}
+            disabled={frameworkLoading || !topic.trim() || frameworkConfirmed}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              background: frameworkConfirmed ? '#334155' : 'linear-gradient(135deg, #8b5cf6, #6d28d9)',
+              color: '#fff',
+              fontWeight: 600,
+              cursor: frameworkLoading || !topic.trim() || frameworkConfirmed ? 'not-allowed' : 'pointer',
+              opacity: frameworkLoading || !topic.trim() || frameworkConfirmed ? 0.6 : 1,
+            }}
+          >
+            {frameworkLoading ? 'Generating...' : frameworkConfirmed ? 'Framework Confirmed' : 'Generate Framework'}
+          </button>
+
+          {framework && (
+            <div className="step-result" style={{ marginTop: '12px' }}>
+              <h4>{framework.title || 'Review Framework'}</h4>
+              {framework.abstract_description && (
+                <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>
+                  {framework.abstract_description}
+                </p>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {(framework.sections || []).map((sec: { id: string; title: string; description: string; search_keywords?: string[] }, idx: number) => (
+                  <div key={idx} style={{
+                    padding: '10px 14px',
+                    backgroundColor: '#1e293b',
+                    borderRadius: '6px',
+                    border: '1px solid #334155',
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '4px',
+                    }}>
+                      <strong style={{ color: '#e2e8f0', fontSize: '14px' }}>
+                        {sec.id}. {sec.title}
+                      </strong>
+                    </div>
+                    <p style={{ color: '#94a3b8', fontSize: '12px', margin: '4px 0' }}>
+                      {sec.description}
+                    </p>
+                    {sec.search_keywords && (
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
+                        {sec.search_keywords.map((kw: string, ki: number) => (
+                          <span key={ki} style={{
+                            padding: '2px 8px',
+                            backgroundColor: 'rgba(139, 92, 246, 0.2)',
+                            border: '1px solid rgba(139, 92, 246, 0.4)',
+                            borderRadius: '12px',
+                            fontSize: '11px',
+                            color: '#c4b5fd',
+                          }}>
+                            {kw}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {!frameworkConfirmed && (
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  <button
+                    onClick={() => setFrameworkConfirmed(true)}
+                    style={{
+                      padding: '8px 20px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #10b981, #059669)',
+                      color: '#fff',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Confirm Framework
+                  </button>
+                  <button
+                    onClick={handleStep0_GenerateFramework}
+                    disabled={frameworkLoading}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      border: '1px solid #334155',
+                      background: 'transparent',
+                      color: '#94a3b8',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Regenerate
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        
+        {/* Step 0.5: Auto-Search Papers */}
+        <div className="pipeline-step">
+          <h3>Step 0.5: Auto-Search Literature</h3>
+          <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>
+            {frameworkConfirmed
+              ? 'Framework confirmed. Search papers for each section using its keywords.'
+              : 'Generate and confirm a framework first.'}
+          </p>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '12px' }}>
+            <label style={{ color: '#9ca3af', fontSize: '13px' }}>Papers per section:</label>
+            <select
+              value={papersPerSection}
+              onChange={(e) => setPapersPerSection(parseInt(e.target.value))}
+              style={{
+                padding: '6px 10px',
+                borderRadius: '4px',
+                border: '1px solid #334155',
+                backgroundColor: '#1e293b',
+                color: '#fff',
+              }}
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={30}>30</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+          <button
+            onClick={handleStep05_AutoSearch}
+            disabled={autoSearchLoading || !frameworkConfirmed || autoSearchDone}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              background: autoSearchDone ? '#334155' : 'linear-gradient(135deg, #f59e0b, #d97706)',
+              color: '#fff',
+              fontWeight: 600,
+              cursor: autoSearchLoading || !frameworkConfirmed || autoSearchDone ? 'not-allowed' : 'pointer',
+              opacity: autoSearchLoading || !frameworkConfirmed || autoSearchDone ? 0.6 : 1,
+            }}
+          >
+            {autoSearchLoading ? 'Searching...' : autoSearchDone ? 'Search Complete' : 'Auto-Search Papers'}
+          </button>
+
+          {autoSearchResults.length > 0 && (
+            <div className="step-result" style={{ marginTop: '12px' }}>
+              <h4>Search Results:</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {autoSearchResults.map((r: {section_id: string; section_title: string; new_papers: number; fetched?: number; error?: string}, idx: number) => (
+                  <div key={idx} style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    backgroundColor: '#1e293b',
+                    borderRadius: '6px',
+                    border: '1px solid #334155',
+                  }}>
+                    <span style={{ color: '#e2e8f0', fontSize: '13px' }}>{r.section_title}</span>
+                    <span style={{
+                      color: r.error ? '#ef4444' : '#10b981',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                    }}>
+                      {r.error ? 'Error' : `+${r.new_papers} new (${r.fetched || 0} total)`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ⚡ Async Full Pipeline Panel */}
+        <div className="pipeline-step">
+          <div style={{ marginBottom: '8px' }}>
+            <h3 style={{ marginBottom: '4px' }}>🤖 全自动一键模式（推荐）</h3>
+            <p style={{ color: '#94a3b8', fontSize: '13px', margin: 0 }}>
+              全流程自动完成 · 后台运行 · 失败自动重试 · 实时进度
+            </p>
+          </div>
+          <AsyncTaskPanel
+            topic={topic}
+            keywords={keywords.split(/[,，]/).map(k => k.trim()).filter(k => k)}
+            papersPerSection={papersPerSection}
+            sources={sources}
+            language="zh-CN"
+            citationStyle={citationStyle}
+          />
+        </div>
+
+        <div className="pipeline-step" style={{ opacity: 0.7, pointerEvents: 'none' }}>
+          <div style={{
+            padding: '8px 14px',
+            background: 'rgba(148,163,184,0.05)',
+            border: '1px dashed #334155',
+            borderRadius: '8px',
+            color: '#475569',
+            fontSize: '12px',
+            marginBottom: '12px',
+            textAlign: 'center',
+          }}>
+            — 或选择下面的手动分步控制模式 —
+          </div>
+        </div>
+
+        {/* Step 1: Generate Claims */}
         <div className="pipeline-step">
           <h3>步骤 1: 生成主张 (Claims)</h3>
           <button onClick={handleStep1_GenerateClaims} disabled={loading || claims.length > 0}>
@@ -514,7 +877,99 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
       </div>
 
       {/* RAG Debug Drawer */}
-      {showRagDebug && (
+      
+        {/* Step 4: Assemble Complete Review */}
+        <div className="pipeline-step">
+          <h3>Step 4: Assemble Complete Review</h3>
+          <p style={{ color: '#94a3b8', fontSize: '13px', marginBottom: '12px' }}>
+            Combine all rendered sections and generate a reference list.
+          </p>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '12px' }}>
+            <label style={{ color: '#9ca3af', fontSize: '13px' }}>Citation Style:</label>
+            <select
+              value={citationStyle}
+              onChange={(e) => setCitationStyle(e.target.value)}
+              style={{
+                padding: '6px 10px',
+                borderRadius: '4px',
+                border: '1px solid #334155',
+                backgroundColor: '#1e293b',
+                color: '#fff',
+              }}
+            >
+              <option value="harvard">Harvard</option>
+              <option value="apa">APA 7th</option>
+              <option value="ieee">IEEE</option>
+              <option value="chicago">Chicago</option>
+              <option value="vancouver">Vancouver</option>
+            </select>
+          </div>
+          <button
+            onClick={handleStep4_Assemble}
+            disabled={assembleLoading || (!finalRender && !reviewId)}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: 'none',
+              background: assembleStats ? '#334155' : 'linear-gradient(135deg, #ec4899, #be185d)',
+              color: '#fff',
+              fontWeight: 600,
+              cursor: assembleLoading || (!finalRender && !reviewId) ? 'not-allowed' : 'pointer',
+              opacity: assembleLoading || (!finalRender && !reviewId) ? 0.6 : 1,
+            }}
+          >
+            {assembleLoading ? 'Assembling...' : assembleStats ? 'Assembly Complete' : 'Assemble Full Review'}
+          </button>
+
+          {assembleStats && (
+            <div style={{ marginTop: '8px', color: '#10b981', fontSize: '13px' }}>
+              Assembled {assembleStats.sections} sections, {assembleStats.cited} papers cited.
+            </div>
+          )}
+
+          {fullReviewMarkdown && (
+            <div className="step-result" style={{ marginTop: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <h4>Complete Review:</h4>
+                <button
+                  onClick={() => {
+                    const blob = new Blob([fullReviewMarkdown], { type: 'text/markdown' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `review_${reviewId || 'draft'}.md`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '6px',
+                    border: '1px solid #334155',
+                    background: 'transparent',
+                    color: '#60a5fa',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                  }}
+                >
+                  Download .md
+                </button>
+              </div>
+              <div style={{
+                maxHeight: '500px',
+                overflow: 'auto',
+                padding: '16px',
+                backgroundColor: '#0f172a',
+                borderRadius: '8px',
+                border: '1px solid #1e293b',
+              }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{fullReviewMarkdown}</ReactMarkdown>
+              </div>
+            </div>
+          )}
+        </div>
+
+
+        {showRagDebug && (
         <div
           style={{
             position: 'fixed',

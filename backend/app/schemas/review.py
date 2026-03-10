@@ -296,3 +296,129 @@ class PhdPipelineInitResponse(BaseModel):
     """PhD Pipeline 初始化响应"""
     review_id: int
     claims: List[ClaimEvidence]
+
+
+# ========== 端到端编排管线 ==========
+
+class FrameworkSection(BaseModel):
+    """综述框架中的单个章节"""
+    id: str = Field(..., description="章节编号，如 '1', '2.1'")
+    title: str = Field(..., description="章节标题")
+    description: str = Field(..., description="章节描述")
+    search_keywords: List[str] = Field(
+        default_factory=list,
+        description="用于检索文献的关键词列表"
+    )
+
+
+class ReviewFramework(BaseModel):
+    """综述框架结构"""
+    title: str = Field(..., description="综述标题")
+    abstract_description: str = Field(default="", description="综述范围概述")
+    sections: List[FrameworkSection] = Field(
+        default_factory=list, description="章节列表"
+    )
+
+
+class OrchestrationRequest(BaseModel):
+    """端到端编排请求"""
+    topic: str = Field(..., description="研究主题", min_length=2)
+    keywords: List[str] = Field(
+        ..., description="研究关键词列表", min_length=1
+    )
+    paper_limit: int = Field(
+        default=30, ge=5, le=100,
+        description="每节检索的文献数量上限"
+    )
+    language: str = Field(
+        default="zh-CN",
+        description="输出语言: 'zh-CN' 或 'en'"
+    )
+    citation_style: str = Field(
+        default="harvard",
+        description="引用格式: 'harvard' (默认), 'apa', 'ieee', 'chicago', 'vancouver'"
+    )
+    year_from: Optional[int] = Field(default=None, description="起始年份")
+    year_to: Optional[int] = Field(default=None, description="结束年份")
+    custom_instructions: Optional[str] = Field(
+        default=None,
+        description="自定义指令（附加到框架生成 prompt 中）"
+    )
+    use_local_only: bool = Field(
+        default=False,
+        description="是否仅使用本地已有文献（不进行在线搜索）"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "topic": "TOD与文化遗产保护",
+                "keywords": ["TOD", "heritage conservation", "sustainable urban design"],
+                "paper_limit": 30,
+                "language": "en",
+                "citation_style": "harvard",
+                "year_from": 2015,
+            }
+        }
+
+
+class SectionResult(BaseModel):
+    """单节生成结果"""
+    section_id: str
+    section_title: str
+    text: str = Field(..., description="该节综述正文（含 Author,Year 引用）")
+    cited_paper_ids: List[int] = Field(
+        default_factory=list,
+        description="该节引用的 paper IDs"
+    )
+
+
+class OrchestrationResult(BaseModel):
+    """端到端编排结果"""
+    review_id: int
+    title: str
+    framework: ReviewFramework
+    sections: List[SectionResult]
+    full_markdown: str = Field(..., description="完整综述 Markdown（含参考文献列表）")
+    references_markdown: str = Field(..., description="参考文献列表 Markdown")
+    citation_map: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="(Author, Year) → paper info 映射"
+    )
+    stats: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="统计信息"
+    )
+
+
+# ========== Task Monitoring ==========
+
+class PipelineTaskStep(BaseModel):
+    """单步任务进度信息"""
+    step: str
+    label: str
+    status: str
+    message: str
+    elapsed: Optional[float] = None
+    attempt: int
+    max_attempts: int
+
+
+class PipelineTaskResponse(BaseModel):
+    """PhD 管线任务完整状态"""
+    task_id: str
+    status: str
+    topic: str
+    created_at: str
+    finished_at: Optional[str] = None
+    error: Optional[str] = None
+    review_id: Optional[int] = None
+    full_markdown: Optional[str] = None
+    references_markdown: Optional[str] = None
+    total_cited_papers: int
+    steps: List[PipelineTaskStep]
+
+
+class PipelineTaskListResponse(BaseModel):
+    """任务列表响应"""
+    tasks: List[PipelineTaskResponse]

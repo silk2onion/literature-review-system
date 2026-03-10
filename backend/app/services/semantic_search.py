@@ -321,6 +321,7 @@ class SemanticSearchService:
         year_to: Optional[int] = None,
         limit: int = 20,
         source: Optional[str] = None,
+        paper_ids: Optional[List[int]] = None,
     ) -> Tuple[List[SemanticSearchHit], SemanticSearchDebugInfo]:
         """
         在本地 Paper.embedding 上做语义检索。
@@ -376,6 +377,8 @@ class SemanticSearchService:
 
         # 3) 取出所有有 embedding 的候选论文
         q = db.query(Paper).filter(Paper.embedding.isnot(None))
+        if paper_ids:
+            q = q.filter(Paper.id.in_(paper_ids))
         if year_from is not None:
             q = q.filter(Paper.year >= year_from)
         if year_to is not None:

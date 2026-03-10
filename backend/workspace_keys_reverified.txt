@@ -1,0 +1,12 @@
+Key: antigravity.agentViewContainerId.state
+Value: {"antigravity.agentPanel":{"collapsed":false,"isHidden":true},"antigravity.agentSidePanel":{"collapsed":false,"isHidden":true}}
+---
+Key: chat.ChatSessionStore.index
+Value: {"version":1,"entries":{}}
+---
+Key: antigravity.agentViewContainerId.numberOfVisibleViews
+Value: 1
+---
+Key: chat.customModes
+Value: []
+---

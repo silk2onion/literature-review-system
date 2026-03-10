@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     SEMANTIC_SCHOLAR_ENABLED: bool = True
     SEMANTIC_SCHOLAR_API_KEY: str = ""
     
+    # AI 助手主动模式配置
+    AGENT_PROACTIVE_ENABLED: bool = True
+    AGENT_HEARTBEAT_INTERVAL: int = 60  # 秒
+
+    
     # 文件存储路径
     PAPERS_DIR: str = "../data/papers"
     EXPORTS_DIR: str = "../data/exports"

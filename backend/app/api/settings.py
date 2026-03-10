@@ -41,6 +41,11 @@ class ModelSelectionConfig(BaseModel):
     embedding_model: str
 
 
+class AgentConfig(BaseModel):
+    proactive_enabled: bool = True
+    heartbeat_interval: int = 60  # seconds
+
+
 class ModelOptionsResponse(BaseModel):
     llm_models: List[str]
     embedding_models: List[str]
@@ -314,3 +319,28 @@ def debug_external_sources_test(
         "max_results": max_results,
         "results": results,
     }
+
+
+# ---- 系统提示词管理 ----
+
+class SystemPromptPayload(BaseModel):
+    content: str = ""
+
+
+@router.get("/settings/system-prompt")
+def get_system_prompt_endpoint(db: Session = Depends(get_db)):
+    """获取用户自定义的 Agent 系统提示词"""
+    content = _get_setting(db, "agent_system_prompt", "")
+    return {"content": content}
+
+
+@router.put("/settings/system-prompt")
+def save_system_prompt_endpoint(payload: SystemPromptPayload, db: Session = Depends(get_db)):
+    """保存用户自定义的 Agent 系统提示词"""
+    _set_setting(db, "agent_system_prompt", payload.content)
+    return {"success": True, "message": "系统提示词已保存"}
+
+
+def get_custom_system_prompt(db: Session) -> str:
+    """供其他模块调用：获取用户自定义的系统提示词"""
+    return _get_setting(db, "agent_system_prompt", "") or ""

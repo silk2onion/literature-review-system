@@ -25,6 +25,7 @@ from app.api import (
 )
 from app.api import settings as settings_api
 from app.api.agent import router as agent_router
+from app.services.agent_heartbeat import heartbeat_service
 
 
 @asynccontextmanager
@@ -43,6 +44,10 @@ async def lifespan(app: FastAPI):
     # 初始化数据库
     init_db()
     print("✓ 数据库初始化完成")
+    
+    # 启动 AI 助手主动心跳
+    await heartbeat_service.start()
+    print("✓ AI 助手主动心跳已启动")
     
     print("✅ 系统启动成功！")
     
