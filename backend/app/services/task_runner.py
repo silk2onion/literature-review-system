@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 from app.models.staging_paper import StagingPaper
 from app.models.paper import Paper as PaperModel
+from app.models.pipeline_task import PipelineTask
+from app.database import SessionLocal
 from app.services.paper_ingest import paper_to_source_paper, insert_or_update_papers_from_sources
 from app.services.llm.prompts import RELEVANCE_SCORING_PROMPT
 
@@ -112,6 +114,38 @@ class TaskState:
             "steps": [s.to_dict() for s in self.steps],
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict) -> TaskState:
+        t = cls(
+            task_id=data.get("task_id", ""),
+            topic=data.get("topic", ""),
+            keywords=data.get("keywords", []),
+            papers_per_section=data.get("papers_per_section", 20),
+            sources=data.get("sources", ["semantic_scholar"]),
+            language=data.get("language", "zh-CN"),
+            citation_style=data.get("citation_style", "harvard")
+        )
+        t.status = data.get("status", "pending")
+        t.created_at = data.get("created_at", datetime.now().isoformat())
+        t.finished_at = data.get("finished_at")
+        t.error = data.get("error")
+        t.review_id = data.get("review_id")
+        t.full_markdown = data.get("full_markdown")
+        t.references_markdown = data.get("references_markdown")
+        t.total_cited_papers = data.get("total_cited_papers", 0)
+        
+        if "steps" in data:
+            t.steps = []
+            for s in data["steps"]:
+                step = StepLog(s.get("step", ""), s.get("label", ""))
+                step.status = s.get("status", "pending")
+                step.message = s.get("message", "")
+                step.attempt = s.get("attempt", 1)
+                step.max_attempts = s.get("max_attempts", 3)
+                t.steps.append(step)
+                
+        return t
+
 
 # ────────────────────────────────────────────────────────────
 # In-memory task store
@@ -139,17 +173,71 @@ async def create_task(
         language=language,
         citation_style=citation_style,
     )
+    
+    # Save to database initially
+    try:
+        with SessionLocal() as db:
+            db_task = PipelineTask(
+                task_id=task.task_id,
+                topic=task.topic,
+                keywords=task.keywords,
+                status=task.status,
+                state_data=task.to_dict(),
+            )
+            db.add(db_task)
+            db.commit()
+    except Exception as e:
+        logger.error(f"Failed to create DB task for {task_id}: {e}")
+
     async with _store_lock:
         _task_store[task_id] = task
     return task
 
 
 def get_task(task_id: str) -> Optional[TaskState]:
-    return _task_store.get(task_id)
+    # 1. Look in memory cache
+    task = _task_store.get(task_id)
+    if task:
+        return task
+        
+    # 2. Look in database (history fallback)
+    try:
+        with SessionLocal() as db:
+            db_task = db.query(PipelineTask).filter(PipelineTask.task_id == task_id).first()
+            if db_task and db_task.state_data:
+                # Reconstruct task state from db JSON and store briefly in memory
+                restored_task = TaskState.from_dict(db_task.state_data)
+                _task_store[task_id] = restored_task
+                return restored_task
+    except Exception as e:
+        logger.error(f"Failed to retrieve DB task {task_id}: {e}")
+        
+    return None
 
 
 def list_tasks() -> List[Dict]:
-    return [t.to_dict() for t in _task_store.values()]
+    # 1. Get from DB
+    tasks_dict = {}
+    try:
+        with SessionLocal() as db:
+            db_tasks = db.query(PipelineTask).order_by(PipelineTask.created_at.desc()).limit(50).all()
+            for t in db_tasks:
+                if t.state_data:
+                    tasks_dict[t.task_id] = t.state_data
+    except Exception as e:
+        logger.error(f"Failed to list DB tasks: {e}")
+
+    # 2. Overlay memory
+    for task_id, task in _task_store.items():
+        tasks_dict[task_id] = task.to_dict()
+        
+    # Sort by created_at descending
+    result = list(tasks_dict.values())
+    try:
+        result.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    except Exception:
+        pass
+    return result
 
 
 # ────────────────────────────────────────────────────────────
@@ -206,7 +294,7 @@ class PipelineTaskRunner:
         self.db = db
 
     def _emit(self, event_type: str, data: Any):
-        """Push an SSE event to the task's event queue."""
+        """Push an SSE event to the task's event queue and persist state."""
         try:
             self.task.event_queue.put_nowait({
                 "event": event_type,
@@ -214,6 +302,47 @@ class PipelineTaskRunner:
             })
         except asyncio.QueueFull:
             pass  # drop if queue full
+            
+        # Background DB update
+        self._persist_task_state_bg()
+
+    def _persist_task_state_bg(self):
+        """Asynchronously flush memory state to DB to not block current step"""
+        state_snapshot = self.task.to_dict()
+        task_id = self.task.task_id
+        status = self.task.status
+        topic = self.task.topic
+        keywords = self.task.keywords
+        finished_at = self.task.finished_at
+        error = getattr(self.task, "error", None)
+        review_id = self.task.review_id
+        
+        def save():
+            try:
+                # using a short-lived local session to avoid thread conflicts
+                with SessionLocal() as db_session:
+                    db_task = db_session.query(PipelineTask).filter(PipelineTask.task_id == task_id).first()
+                    if db_task:
+                        db_task.status = status
+                        db_task.state_data = state_snapshot
+                        if finished_at:
+                            try:
+                                db_task.finished_at = datetime.fromisoformat(finished_at) if isinstance(finished_at, str) else datetime.utcfromtimestamp(finished_at)
+                            except:
+                                db_task.finished_at = datetime.utcnow()
+                        db_task.error = error
+                        db_task.review_id = review_id
+                        db_session.commit()
+            except Exception as e:
+                logger.error(f"Background save failed for task {task_id}: {e}")
+                
+        # run in executor to not block async loop
+        try:
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, save)
+        except Exception:
+            # if no loop, run synchronous
+            save()
 
     def _step_start(self, step_key: str, message: str = ""):
         step = self.task.get_step(step_key)
