@@ -66,6 +66,7 @@ export const AsyncTaskPanel: React.FC<AsyncTaskPanelProps> = ({
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showMarkdown, setShowMarkdown] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const cleanup = () => {
@@ -386,14 +387,17 @@ export const AsyncTaskPanel: React.FC<AsyncTaskPanelProps> = ({
           {task.status === 'failed' && (
             <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
               <button
+                disabled={isResuming}
                 onClick={async () => {
                   try {
+                    setIsResuming(true);
                     const res = await fetch(`${API_BASE_URL}/api/reviews/phd/task/${task.task_id}/resume`, {
                       method: 'POST',
                     });
                     if (!res.ok) {
                       const errText = await res.text();
                       setError(`恢复失败: ${errText}`);
+                      setIsResuming(false);
                       return;
                     }
                     setError(null);
@@ -431,22 +435,29 @@ export const AsyncTaskPanel: React.FC<AsyncTaskPanelProps> = ({
                     };
                   } catch (e) {
                     setError(`恢复请求失败: ${e}`);
+                  } finally {
+                    setIsResuming(false);
                   }
                 }}
                 style={{
                   padding: '8px 16px',
                   borderRadius: '6px',
                   border: 'none',
-                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  background: isResuming ? '#94a3b8' : 'linear-gradient(135deg, #10b981, #059669)',
                   color: '#fff',
                   fontWeight: 600,
-                  cursor: 'pointer',
+                  cursor: isResuming ? 'not-allowed' : 'pointer',
                   fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
                 }}
               >
-                ▶️ 断点续跑
+                {isResuming ? <Loader2 size={14} className="animate-spin" /> : '▶️'} 
+                {isResuming ? '正在恢复...' : '断点续跑'}
               </button>
               <button
+                disabled={isResuming}
                 onClick={() => { setTask(null); setTaskId(null); setError(null); }}
                 style={{
                   padding: '8px 16px',
