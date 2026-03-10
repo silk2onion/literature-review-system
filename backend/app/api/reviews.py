@@ -676,6 +676,33 @@ async def stream_task_progress(task_id: str):
     )
 
 
+@router.post(
+    "/phd/task/{task_id}/resume",
+    summary="Resume a failed pipeline task from its last checkpoint",
+)
+async def resume_pipeline_task(task_id: str, db: Session = Depends(get_db)):
+    """
+    Resume a failed or stopped pipeline task.
+    Picks up from the step after the last successfully completed one.
+    """
+    from app.services.task_runner import resume_task
+
+    try:
+        task = await resume_task(task_id, db)
+        return {
+            "task_id": task.task_id,
+            "status": "resuming",
+            "resume_from_step": task.last_completed_step,
+            "message": f"任务已从断点恢复！将从 '{task.last_completed_step}' 之后继续执行。",
+            "stream_url": f"/api/reviews/phd/task/{task.task_id}/stream",
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Resume task failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"恢复任务失败: {e}")
+
+
 def get_db_local():
     """
     保留一个本文件内的 Session 获取器（兼容你现在的写法）。
