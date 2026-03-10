@@ -216,6 +216,41 @@ export default function MonitoringDashboard() {
                       {task.error}
                     </div>
                   )}
+
+                  {task.status === 'failed' && (
+                    <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(`${API_BASE_URL}/api/reviews/phd/task/${task.task_id}/resume`, {
+                              method: 'POST',
+                            });
+                            if (!res.ok) {
+                              const errText = await res.text();
+                              alert(`恢复失败: ${errText}`);
+                              return;
+                            }
+                            // Refresh data immediately
+                            fetchData();
+                          } catch (e) {
+                            alert(`恢复请求失败: ${e}`);
+                          }
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #10b981, #059669)',
+                          color: '#fff',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                        }}
+                      >
+                        ▶️ 断点续跑
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))
             )}
