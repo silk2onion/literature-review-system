@@ -112,7 +112,8 @@ class SectionReviewPipelineService:
         top_k: int = 5,
         paper_ids: Optional[List[int]] = None,
     ) -> SectionClaimTable:
-        """阶段 2: 为每条论点附加 RAG 证据"""
+        """阶段 2: 为每条论点附加 RAG 证据 (带有 LLM Fallback)"""
+        total_found = 0
         for claim in table.claims:
             if not claim.rag_query:
                 continue
@@ -140,20 +141,20 @@ class SectionReviewPipelineService:
                 ]
                 claim.support_snippets = snippets
 
-                # 记录“采纳”日志：这些文献被选为论点证据
                 if found_paper_ids:
+                    total_found += len(found_paper_ids)
                     try:
                         log = RecallLog(
                             event_type="accept",
                             source="review_generate_evidence",
-                            query_keywords=[claim.rag_query],
+                            query_keywords=[getattr(claim, 'rag_query', '')],
                             group_keys=None,
-                            paper_id=None, # 批量记录时 paper_id 可为空，详情放 extra
+                            paper_id=None,
                             rank=None,
                             score=None,
                             extra={
-                                "claim_id": claim.claim_id,
-                                "claim_text": claim.text,
+                                "claim_id": getattr(claim, 'claim_id', None),
+                                "claim_text": getattr(claim, 'text', ''),
                                 "accepted_paper_ids": found_paper_ids,
                                 "count": len(found_paper_ids)
                             }
@@ -165,9 +166,62 @@ class SectionReviewPipelineService:
 
             except Exception as e:
                 logger.error(f"Failed to attach evidence for claim {claim.claim_id} ('{claim.text}'): {e}", exc_info=True)
-                # 即使失败也继续处理下一条，不中断整个流程
                 claim.support_papers = []
                 claim.support_snippets = []
+
+        # -- LLM Fallback Strategy --
+        if total_found == 0 and paper_ids:
+            logger.warning(f"Vector search returned 0 evidence for section {table.section_id}. Falling back to LLM matching.")
+            from app.services.llm.prompts import LLM_MATCH_CLAIMS_TO_PAPERS_PROMPT
+            
+            # Fetch papers
+            papers = self.db.query(PaperModel).filter(PaperModel.id.in_(paper_ids)).all()
+            papers_list_str = "\n".join([f"[{p.id}] {p.title} - {(p.abstract or '')[:200]}..." for p in papers])
+            
+            claims_list_str = ""
+            for c in table.claims:
+                cid = getattr(c, 'claim_id', None)
+                txt = getattr(c, 'text', '')
+                claims_list_str += f"[{cid}] {txt}\n"
+            
+            prompt = LLM_MATCH_CLAIMS_TO_PAPERS_PROMPT.format(
+                claims_list=claims_list_str,
+                papers_list=papers_list_str
+            )
+            
+            try:
+                result = await self.llm_service.complete_json(prompt=prompt, system_prompt="You are an expert academic librarian.")
+                
+                # result is expected to be a list of dicts: {"claim_id": 1, "support_papers": [10, 20]}
+                if isinstance(result, list):
+                    match_map = {}
+                    for item in result:
+                        if isinstance(item, dict):
+                            cid = item.get("claim_id")
+                            sps = item.get("support_papers", [])
+                            if cid is not None:
+                                # Ensure papers are cast to int to prevent Pydantic validation errors
+                                try:
+                                    clean_sps = [int(p) for p in sps]
+                                except (ValueError, TypeError):
+                                    clean_sps = []
+                                match_map[cid] = clean_sps
+                    
+                    for claim in table.claims:
+                        # Find the matching ID correctly whether it's int or str
+                        matched_ids = match_map.get(claim.claim_id) or match_map.get(str(claim.claim_id)) or []
+                        if matched_ids:
+                            claim.support_papers = matched_ids
+                            # Build snippets
+                            snips = []
+                            for pid in matched_ids:
+                                p_obj = next((p for p in papers if p.id == pid), None)
+                                if p_obj:
+                                    snips.append(f"[{p_obj.id}] {p_obj.title} ({p_obj.year or 'N/A'}): {(p_obj.abstract or '')[:100]}...")
+                            claim.support_snippets = snips
+                            
+            except Exception as e:
+                logger.error(f"LLM fallback matching failed: {e}", exc_info=True)
 
         return table
 

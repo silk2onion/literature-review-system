@@ -64,6 +64,29 @@ def get_section_review_pipeline_service(
     )
 
 
+@router.get(
+    "/",
+    response_model=List[ReviewResponse],
+    summary="获取所有综述列表",
+)
+def list_reviews(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    """
+    返回所有已生成的综述列表，按创建时间倒序排列。
+    """
+    reviews = (
+        db.query(Review)
+        .order_by(Review.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return reviews
+
+
 @router.post(
     "/orchestrate",
     response_model=OrchestrationResult,
@@ -943,4 +966,30 @@ def get_review_by_id(review_id: int):
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
     return review
+
+
+@router.delete(
+    "/{review_id}",
+    summary="删除指定综述",
+)
+def delete_review(
+    review_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    物理删除综述记录及其关联。
+    """
+    from app.models import ReviewPaper
+    
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    # 删除关联
+    db.query(ReviewPaper).filter(ReviewPaper.review_id == review_id).delete()
+    # 删除综述
+    db.delete(review)
+    db.commit()
+    
+    return {"success": True, "message": f"Review {review_id} deleted"}
 
