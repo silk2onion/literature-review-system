@@ -11,6 +11,7 @@ import {
   Smile,
   FileEdit,
   Activity,
+  FileText,
 } from "lucide-react";
 import LibraryPage from "./LibraryPage";
 import StagingPapersPage from "./StagingPapersPage";
@@ -21,12 +22,14 @@ import "./App.css";
 import CrawlerSearchPage from "./CrawlerSearchPage";
 import ReviewOrchestratePage from "./ReviewOrchestratePage";
 import MonitoringDashboard from "./MonitoringDashboard";
+import ReviewListPage from "./ReviewListPage";
+
 
 const API_BASE_URL = "http://localhost:5444";
 
 function App() {
   // State
-  const [activeTab, setActiveTab] = useState<"search" | "library" | "staging" | "rag" | "draft" | "orchestrate" | "monitoring">("search");
+  const [activeTab, setActiveTab] = useState<"search" | "library" | "staging" | "rag" | "draft" | "orchestrate" | "monitoring" | "reviews">("search");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
@@ -126,6 +129,8 @@ function App() {
         return <ReviewOrchestratePage />;
       case "monitoring":
         return <MonitoringDashboard />;
+      case "reviews":
+        return <ReviewListPage />;
       default:
         return <StagingPapersPage />;
     }
@@ -147,6 +152,8 @@ function App() {
         return "一键综述生成";
       case "monitoring":
         return "任务进度监控";
+      case "reviews":
+        return "文献综述书架";
       default:
         return "ScholarNative";
     }
@@ -235,6 +242,13 @@ function App() {
             >
               <FileEdit size={16} className="sidebar-icon green" />
               一键综述生成
+            </button>
+            <button
+              onClick={() => setActiveTab("reviews")}
+              className={`sidebar-item ${activeTab === "reviews" ? "active" : ""}`}
+            >
+              <FileText size={16} className="sidebar-icon purple" />
+              文献综述
             </button>
           </div>
         </div>

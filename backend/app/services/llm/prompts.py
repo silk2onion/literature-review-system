@@ -101,19 +101,28 @@ GENERATE_SECTION_CLAIMS_PROMPT = """
 """
 
 RENDER_SECTION_FROM_CLAIMS_PROMPT_ZH = """
-你是一位精通城市设计领域的学术写作者，擅长将结构化的“论点–证据”材料组织成流畅、连贯的学术段落。
+你是一位精通城市设计领域的学术写作者，擅长将结构化的“论点–证据”材料组织成流畅、连贯的学术长文段落。
 
 【任务】
-根据给定的“论点–证据”表（包含每条论点及其支撑文献片段），撰写一段完整的章节正文。
+根据给定的“论点–证据”表（包含每条论点及其支撑文献片段），撰写一段详实、深度的完整章节正文。
 
-【写作要求】
-1.  **忠于原文**：严格基于提供的“论点”和“文献片段”进行写作，不要引入外部知识或虚构信息。
-2.  **引用格式**：使用 (Author, Year) 格式嵌入引用。每条论点后已标注了对应的引用标记，请在正文中原样使用。
+【写作要求（非常重要）】
+1.  **深度与长度**：请将这一章写成一篇**深度的学术短文**（约 500-800 字），包含 3-5 个逻辑延展的自然段。不要只是简单地罗列论点。
+2.  **连贯的学术叙事（Connecting Sentences）**：**绝对不要**像列清单一样把论点生硬地拼凑在一起。你必须使用优秀的学术语言，在不同的论点之间加入**不需要引用的连接句、过渡句和背景解释句**，让整篇文章读起来气势连贯、逻辑严密、像一篇真正由人类学者精心雕琢的顶会论文。
+3.  **引用格式**：使用 (Author, Year) 格式嵌入引用。每条论据后已标注了对应的引用标记，请在正文中原样使用。
     - 例如: (Smith, 2020) 或 (Smith and Jones, 2020) 或 (Smith et al., 2020)
     - 同一处多篇引用用分号: (Smith, 2020; Jones, 2021)
-3.  **零幻觉引用**：你绝对不能捏造不存在的引用。只能使用论点后附带的引用标记。
-4.  **自然流畅**：将各个论点有机地组织起来，形成逻辑清晰、语言流畅的学术段落。
-5.  **仅输出正文**：不要包含任何标题、前言、参考文献列表或额外说明。
+4.  **零幻觉引用**：你绝对不能捏造不存在的引用。只能使用论点后附带的引用标记。如果某个论点没有引用标记，你可以作为一般性陈述写出，但不要乱加 (Author, Year)。
+5.  **输出格式**：请严格返回一个 JSON 对象，不要包含其他解释文本。格式如下：
+```json
+{{
+  "text": "你的正文内容，注意换行使用 \\n",
+  "citation_map": {{
+    "(Huston et al., 2012)": "(Huston et al., 2012)"
+  }}
+}}
+```
+注意：citation_map 只需要原样包含你真正在正文里使用到的引用标记，Key 和 Value 都可以是你插入的 "(Author, Year)" 字符串。由于后端会自动映射，你不需要返回文献的数字 ID。
 
 【论点与证据材料】
 {claims_payload}
@@ -123,20 +132,55 @@ RENDER_SECTION_FROM_CLAIMS_PROMPT_EN = """
 You are an expert academic writer in the field of urban design, skilled at organizing structured "claim-evidence" materials into fluent and coherent academic paragraphs.
 
 【Task】
-Write a complete section text based on the provided "claim-evidence" table, which includes claims and their supporting literature snippets.
+Write a complete, detailed, and in-depth section text based on the provided "claim-evidence" table.
 
-【Writing Requirements】
-1.  **Adhere to the Source**: Strictly base your writing on the provided "claims" and "literature snippets." Do not introduce external knowledge or fabricate information.
-2.  **Citation Format**: Use (Author, Year) format for inline citations. Each claim already has citation markers attached - use them exactly as provided.
+【Writing Requirements (CRITICAL)】
+1.  **Depth and Length**: Write this section as an **in-depth academic essay** (approx. 500-800 words), comprising 3-5 naturally flowing paragraphs. Do not just list the claims.
+2.  **Coherent Academic Narrative (Connecting Sentences)**: **DO NOT** just paste the claims together like a bulleted list. You MUST use sophisticated academic language to insert **connecting sentences, transitional phrases, and background elaboration (which do not require citations)** between the claims. The text must flow logically and read like a meticulously crafted paper by a human scholar.
+3.  **Citation Format**: Use (Author, Year) format for inline citations. Citation markers are attached to claims - use them exactly as provided.
     - Example: (Smith, 2020) or (Smith and Jones, 2020) or (Smith et al., 2020)
     - Multiple citations at one point: (Smith, 2020; Jones, 2021)
-3.  **Zero Hallucination**: You MUST NOT fabricate citations. Only use the citation markers attached to each claim.
-4.  **Natural Flow**: Organize claims into logically clear, linguistically fluent academic paragraphs.
-5.  **Output Text Only**: Do not include titles, preambles, reference lists, or extra explanations.
+4.  **Zero Hallucination**: You MUST NOT fabricate citations. Only use the citation markers provided. 
+5.  **Output Format**: You MUST return a strict JSON object with no additional text. Format:
+```json
+{{
+  "text": "Your complete section text, use \\n for paragraphs",
+  "citation_map": {{
+    "(Author, Year)": "(Author, Year)"
+  }}
+}}
+```
 
 【Claims and Evidence Material】
 {claims_payload}
 """
+
+LLM_MATCH_CLAIMS_TO_PAPERS_PROMPT = """
+You are an expert academic research assistant.
+Your task is to match specific academic claims with the most relevant papers from a provided list.
+
+【Claims】
+{claims_list}
+
+【Available Papers】
+{papers_list}
+
+【Task Details】
+For EACH claim listed above, find the best supporting papers from the Available Papers list based on semantic relevance to the claim's core argument or the 'rag_query' provided.
+- You can assign 0 to 3 papers to each claim.
+- Try your best to find at least 1 paper for a claim if remotely relevant.
+- Return the result strictly as a JSON list of objects matching this format:
+```json
+[
+  {{
+    "claim_id": <int>,
+    "support_papers": [<int>, <int>] 
+  }}
+]
+```
+Do not include any other text except the JSON array.
+"""
+
 
 RELEVANCE_SCORING_PROMPT = """
 You are a senior academic reviewer. Evaluate the relevance of the following paper abstract to the given research topic.

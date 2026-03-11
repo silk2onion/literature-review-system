@@ -207,7 +207,8 @@ export default function MonitoringDashboard() {
                     <div style={styles.currentStep}>
                       <span style={{ color: '#94a3b8' }}>当前步骤: </span>
                       <span style={{ color: '#f59e0b' }}>
-                        {task.steps.find(s => s.status === 'running')?.label || '进行中...'}
+                        {task.steps.find(s => s.status === 'running' || s.status === 'retrying')?.label || '进行中...'}
+                        {task.steps.find(s => s.status === 'retrying') && ' (重试中)'}
                       </span>
                     </div>
                   )}

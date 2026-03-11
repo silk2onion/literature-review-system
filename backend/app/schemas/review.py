@@ -264,13 +264,13 @@ class AttachEvidenceResponse(BaseModel):
 class RenderedSection(BaseModel):
     """
     阶段 3：渲染后的章节结果
-    - text: 带引用编号的章节 Markdown/正文
-    - citation_map: 引用编号到 Paper.id 的映射，例如 {1: 12, 2: 35}
+    - text: 带引用标记的章节 Markdown/正文
+    - citation_map: 引用标记到真实标记或Paper.id 的映射，例如 {"(Smith, 2020)": 12} 或 {"(Smith, 2020)": "(Smith, 2020)"}
     """
-    text: str = Field(..., description="渲染后的章节正文（Markdown 或纯文本），包含 [1][2,3] 等引用编号")
-    citation_map: Dict[int, int] = Field(
+    text: str = Field(..., description="渲染后的章节正文（Markdown 或纯文本），包含 (Author, Year) 等引用编号")
+    citation_map: Dict[str, Any] = Field(
         default_factory=dict,
-        description="引用编号到 Paper.id 的映射，例如 {1: 12, 2: 35}"
+        description="引用编号到 Paper.id 或原始标记 的映射"
     )
 
 

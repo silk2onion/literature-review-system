@@ -174,6 +174,7 @@ class TaskState:
 # ────────────────────────────────────────────────────────────
 
 _task_store: Dict[str, TaskState] = {}
+_active_runners: set[str] = set()
 _store_lock = asyncio.Lock()
 
 
@@ -267,12 +268,19 @@ async def resume_task(task_id: str, db: Session) -> TaskState:
     Resume a failed/stopped task from its last checkpoint.
     Returns the TaskState (now running again).
     """
+    async with _store_lock:
+        if task_id in _active_runners:
+            logger.warning(f"Task {task_id} is already running, ignoring resume request")
+            return _task_store[task_id]
+
     task = get_task(task_id)
     if not task:
         raise ValueError(f"Task {task_id} not found")
     
-    if task.status not in ("failed", "done"):
-        raise ValueError(f"Task {task_id} is in status '{task.status}', can only resume failed tasks")
+    if task.status not in ("failed", "done", "running"):
+        raise ValueError(f"Task {task_id} is in status '{task.status}', cannot resume")
+    
+    logger.info(f"🚀 Resuming task {task_id} (current status: {task.status})")
     
     last_step = task.last_completed_step
     if not last_step:
@@ -296,6 +304,7 @@ async def resume_task(task_id: str, db: Session) -> TaskState:
     
     # Launch the runner in background
     runner = PipelineTaskRunner(task, db)
+    # The runner's run method handles _active_runners registration
     asyncio.create_task(runner.run(resume_from=resume_from))
     
     return task
@@ -364,46 +373,38 @@ class PipelineTaskRunner:
         except asyncio.QueueFull:
             pass  # drop if queue full
             
-        # Background DB update
-        self._persist_task_state_bg()
+        # Update DB
+        self._persist_task_state(self.task.status, self.task.to_dict())
 
-    def _persist_task_state_bg(self):
-        """Asynchronously flush memory state to DB to not block current step"""
-        state_snapshot = self.task.to_dict()
+    def _persist_task_state(self, status: str, snapshot: Dict[str, Any]):
+        """Flush memory state to DB. synchronous inside the runner's caller (which is async-task)."""
         task_id = self.task.task_id
-        status = self.task.status
         topic = self.task.topic
         keywords = self.task.keywords
         finished_at = self.task.finished_at
         error = getattr(self.task, "error", None)
         review_id = self.task.review_id
         
-        def save():
-            try:
-                # using a short-lived local session to avoid thread conflicts
-                with SessionLocal() as db_session:
-                    db_task = db_session.query(PipelineTask).filter(PipelineTask.task_id == task_id).first()
-                    if db_task:
-                        db_task.status = status
-                        db_task.state_data = state_snapshot
-                        if finished_at:
-                            try:
-                                db_task.finished_at = datetime.fromisoformat(finished_at) if isinstance(finished_at, str) else datetime.utcfromtimestamp(finished_at)
-                            except:
-                                db_task.finished_at = datetime.utcnow()
-                        db_task.error = error
-                        db_task.review_id = review_id
-                        db_session.commit()
-            except Exception as e:
-                logger.error(f"Background save failed for task {task_id}: {e}")
-                
-        # run in executor to not block async loop
         try:
-            loop = asyncio.get_running_loop()
-            loop.run_in_executor(None, save)
-        except Exception:
-            # if no loop, run synchronous
-            save()
+            with SessionLocal() as db_session:
+                db_task = db_session.query(PipelineTask).filter(PipelineTask.task_id == task_id).first()
+                if db_task:
+                    db_task.status = status
+                    db_task.state_data = snapshot
+                    db_task.keywords = keywords
+                    if finished_at:
+                        try:
+                            if isinstance(finished_at, str):
+                                db_task.finished_at = datetime.fromisoformat(finished_at)
+                            else:
+                                db_task.finished_at = datetime.utcfromtimestamp(finished_at)
+                        except:
+                            db_task.finished_at = datetime.utcnow()
+                    db_task.error = error
+                    db_task.review_id = review_id
+                    db_session.commit()
+        except Exception as e:
+            logger.error(f"Save failed for task {task_id}: {e}")
 
     # Pipeline step ordering for resume logic
     STEP_ORDER = ["framework", "auto_search", "claims", "evidence", "render", "assemble"]
@@ -414,7 +415,7 @@ class PipelineTaskRunner:
         if data:
             self.task.checkpoint_data[step_key] = data
         # Force a persist to DB
-        self._persist_task_state_bg()
+        self._persist_task_state(self.task.status, self.task.to_dict())
 
     def _step_start(self, step_key: str, message: str = ""):
         step = self.task.get_step(step_key)
@@ -483,51 +484,65 @@ class PipelineTaskRunner:
 
     async def run(self, resume_from: Optional[str] = None):
         """Main pipeline execution. If resume_from is set, skip steps before it."""
-        self.task.status = "running"
-        self.task.error = None  # Clear any previous error
-        self.task.finished_at = None
+        task_id = self.task.task_id
         
-        if resume_from:
-            logger.info(f"[Task {self.task.task_id}] Resuming from step '{resume_from}'")
-            self._restore_checkpoint(resume_from)
-            # Reset failed/pending steps from resume_from onwards
-            should_reset = False
-            for step in self.task.steps:
-                if step.step == resume_from:
-                    should_reset = True
-                if should_reset:
-                    step.status = "pending"
-                    step.message = ""
-                    step.started_at = None
-                    step.finished_at = None
-
-        self._emit("task_start", {"task_id": self.task.task_id, "topic": self.task.topic})
+        async with _store_lock:
+            if task_id in _active_runners:
+                logger.warning(f"Runner already active for task {task_id}")
+                return
+            _active_runners.add(task_id)
 
         try:
-            if not self._should_skip("framework", resume_from):
-                await self._step_generate_framework()
-            if not self._should_skip("auto_search", resume_from):
-                await self._step_auto_search()
-            if not self._should_skip("claims", resume_from):
-                await self._step_generate_claims()
-            if not self._should_skip("evidence", resume_from):
-                await self._step_attach_evidence()
-            if not self._should_skip("render", resume_from):
-                await self._step_render_all()
-            if not self._should_skip("assemble", resume_from):
-                await self._step_assemble()
+            self.task.status = "running"
+            self.task.error = None  # Clear any previous error
+            self.task.finished_at = None
+            
+            if resume_from:
+                logger.info(f"[Task {self.task.task_id}] Resuming from step '{resume_from}'")
+                self._restore_checkpoint(resume_from)
+                # Reset failed/pending steps from resume_from onwards
+                should_reset = False
+                for step in self.task.steps:
+                    if step.step == resume_from:
+                        should_reset = True
+                    if should_reset:
+                        step.status = "pending"
+                        step.message = ""
+                        step.started_at = None
+                        step.finished_at = None
 
-            self.task.status = "done"
-            self.task.finished_at = datetime.now().isoformat()
-            self._emit("task_done", self.task.to_dict())
-            logger.info(f"[Task {self.task.task_id}] Completed successfully")
+            self._emit("task_start", {"task_id": self.task.task_id, "topic": self.task.topic})
 
-        except Exception as e:
-            self.task.status = "failed"
-            self.task.error = str(e)
-            self.task.finished_at = datetime.now().isoformat()
-            self._emit("task_error", {"error": str(e), "task": self.task.to_dict()})
-            logger.error(f"[Task {self.task.task_id}] Failed: {e}", exc_info=True)
+            try:
+                if not self._should_skip("framework", resume_from):
+                    await self._step_generate_framework()
+                if not self._should_skip("auto_search", resume_from):
+                    await self._step_auto_search()
+                if not self._should_skip("claims", resume_from):
+                    await self._step_generate_claims()
+                if not self._should_skip("evidence", resume_from):
+                    await self._step_attach_evidence()
+                if not self._should_skip("render", resume_from):
+                    await self._step_render_all()
+                if not self._should_skip("assemble", resume_from):
+                    await self._step_assemble()
+
+                self.task.status = "done"
+                self.task.finished_at = datetime.now().isoformat()
+                self._emit("task_done", self.task.to_dict())
+                logger.info(f"[Task {self.task.task_id}] Completed successfully")
+
+            except Exception as e:
+                self.task.status = "failed"
+                self.task.error = str(e)
+                self.task.finished_at = datetime.now().isoformat()
+                self._emit("task_error", {"error": str(e), "task": self.task.to_dict()})
+                logger.error(f"[Task {self.task.task_id}] Failed: {e}", exc_info=True)
+                
+        finally:
+            async with _store_lock:
+                if task_id in _active_runners:
+                    _active_runners.remove(task_id)
 
     # ── Step 1: Generate Framework ──────────────────────────
 
@@ -549,11 +564,11 @@ class PipelineTaskRunner:
                 topic=self.task.topic,
                 keywords=kws,
                 language=lang_label,
-                custom_instructions="",
+                custom_instructions="Please ensure each section is detailed enough to warrant a 500-800 word academic discussion later.",
             )
             system_prompt = (
-                "You are an expert academic researcher. Generate a LITERATURE REVIEW outline "
-                "(not a PhD research plan). Include 3-6 sections with search_keywords per section."
+                "You are an expert academic researcher. Generate a DETAILED LITERATURE REVIEW outline "
+                "(not a PhD research plan). Include 4-7 sections with search_keywords per section."
             )
             raw = await llm.complete(prompt=prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=2000)
             return raw
