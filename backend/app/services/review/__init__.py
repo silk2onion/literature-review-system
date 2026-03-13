@@ -77,6 +77,13 @@ class SectionReviewPipelineService:
                 prompt=prompt, system_prompt=system_prompt
             )
             
+            # Ensure mandatory fields have values to prevent Pydantic validation errors
+            if isinstance(structured_result, dict):
+                if not structured_result.get("section_id"):
+                    structured_result["section_id"] = "1"
+                if not structured_result.get("section_title"):
+                    structured_result["section_title"] = "Section 1"
+            
             # LLM may return a single dict or a list of section tables
             if isinstance(structured_result, list):
                 # Merge multiple section tables into one combined table
@@ -86,12 +93,14 @@ class SectionReviewPipelineService:
                 for i, item in enumerate(structured_result):
                     if isinstance(item, dict):
                         if i == 0:
-                            first_section_id = item.get("section_id", "1")
-                            first_section_title = item.get("section_title", "Combined Claims")
+                            first_section_id = item.get("section_id") or "1"
+                            first_section_title = item.get("section_title") or "Combined Claims"
                         for claim in item.get("claims", []):
-                            # Add section context to claims
-                            claim["section_id"] = item.get("section_id", str(i + 1))
-                            claim["section_title"] = item.get("section_title", f"Section {i + 1}")
+                            # Add section context to claims if missing
+                            if not claim.get("section_id"):
+                                claim["section_id"] = item.get("section_id") or str(i + 1)
+                            if not claim.get("section_title"):
+                                claim["section_title"] = item.get("section_title") or f"Section {i + 1}"
                             all_claims.append(claim)
                 
                 structured_result = {
@@ -170,8 +179,10 @@ class SectionReviewPipelineService:
                 claim.support_snippets = []
 
         # -- LLM Fallback Strategy --
-        if total_found == 0 and paper_ids:
-            logger.warning(f"Vector search returned 0 evidence for section {table.section_id}. Falling back to LLM matching.")
+        # If we have fixed paper_ids but didn't find enough evidence (or 0),
+        # force an LLM-based matching as it's more reliable for small sets of papers
+        if paper_ids and (total_found < len(table.claims)):
+            logger.info(f"Vector search results are sparse. Forcing LLM matching fallback for {len(paper_ids)} papers.")
             from app.services.llm.prompts import LLM_MATCH_CLAIMS_TO_PAPERS_PROMPT
             
             # Fetch papers
@@ -309,13 +320,49 @@ class SectionReviewPipelineService:
         prompt = prompt_template.format(claims_payload=claims_payload)
 
         try:
-            rendered_text = await self.llm_service.complete(
+            # Use complete_json to ensure valid structure
+            result = await self.llm_service.complete_json(
                 prompt=prompt, system_prompt=system_prompt
             )
 
+            # Extract text and citation_map
+            # The LLM might return {"text": "...", "citation_map": {"(Author, Year)": "(Author, Year)"}}
+            if isinstance(result, dict):
+                final_text = result.get("text", "")
+                llm_citation_map = result.get("citation_map", {})
+            else:
+                # Fallback if it's not a dict
+                final_text = str(result)
+                llm_citation_map = {}
+
+            # Map the LLM's chosen citations back to actual paper_ids
+            # Reverse the paper_to_citation_key to get key -> id
+            citation_key_to_id = {v: k for k, v in paper_to_citation_key.items()}
+            
+            final_citation_map = {}
+            for key in llm_citation_map.keys():
+                if key in citation_key_to_id:
+                    final_citation_map[key] = citation_key_to_id[key]
+                else:
+                    # Look for partial matches if LLM slightly altered the string
+                    found = False
+                    for existing_key, paper_id in citation_key_to_id.items():
+                        if existing_key.strip("()") in key:
+                            final_citation_map[key] = paper_id
+                            found = True
+                            break
+                    if not found:
+                        logger.warning(f"Citation key '{key}' not found in provided references map")
+
+            # Final check: if the LLM completely ignored the JSON format and just returned text
+            if not final_text and isinstance(result, str):
+                final_text = result
+                # We still try to populate citation_map from provided sorted list as a safety fallback
+                final_citation_map = citation_map 
+
             return RenderedSection(
-                text=rendered_text,
-                citation_map=citation_map,
+                text=final_text,
+                citation_map=final_citation_map,
             )
         except Exception as e:
             logger.error(f"Failed to render section from claims: {e}", exc_info=True)
