@@ -189,7 +189,7 @@ def get_model_options(db: Session = Depends(get_db)) -> ModelOptionsResponse:
     获取当前可用的主 LLM / Embedding 模型列表及当前选择
     """
     # 1. 获取当前选中的模型 (DB > Env)
-    default_llm = getattr(settings, "OPENAI_MODEL", "gpt-4")
+    default_llm = getattr(settings, "OPENAI_MODEL", "gpt-5.4")
     default_emb = getattr(settings, "EMBEDDING_MODEL", "text-embedding-3-small")
     
     saved_selection = _get_setting(db, "model_selection_config", {})

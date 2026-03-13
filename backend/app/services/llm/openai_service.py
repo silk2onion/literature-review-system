@@ -31,7 +31,7 @@ class OpenAIService:
         为了支持运行时通过 /api/settings/models 调整模型，这里每次访问时
         都从 settings 读取最新的 OPENAI_MODEL，而不是在 __init__ 时固定。
         """
-        return getattr(self.settings, "OPENAI_MODEL", "gpt-4")
+        return getattr(self.settings, "OPENAI_MODEL", "gpt-5.4")
 
     @property
     def model_name(self) -> str:
@@ -183,7 +183,7 @@ class OpenAIService:
                 max_tokens=max_tokens,
             )
             content = self._extract_content(response)
-            logger.info(f"文本补全成功，长度: {len(content)}")
+            logger.info(f"文本补全成功 (Model: {self.model})，长度: {len(content)}")
             return content
         except Exception as e:
             logger.error(f"文本补全失败: {e}")
@@ -220,7 +220,7 @@ class OpenAIService:
                 max_tokens=max_tokens,
             )
             content = self._extract_content(response) or "{}"
-            logger.info("JSON 补全成功，内容: %s...", content[:100])
+            logger.info(f"JSON 补全成功 (Model: {self.model})，内容: %s...", content[:100])
             import json
             return json.loads(content)
         except Exception as e:
@@ -350,7 +350,7 @@ class OpenAIService:
             raise
 
         full_text = self._extract_content(response)
-        logger.info("Lit review LLM 调用成功，长度: %d", len(full_text))
+        logger.info(f"Lit review LLM 调用成功 (Model: {self.model}), 长度: %d", len(full_text))
 
         # 4. 从返回中解析 Markdown 正文与 JSON 区块
         markdown_part, json_part = self._split_markdown_and_json(full_text)
