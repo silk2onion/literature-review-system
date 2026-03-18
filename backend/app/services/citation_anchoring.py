@@ -1,0 +1,358 @@
+"""
+Citation Anchoring Post-Processor
+=================================
+Resolves [[REF_x]] placeholders in LLM-generated text to real academic citations.
+
+Architecture:
+    1. LLM generates text with [[REF_42]] placeholders (where 42 = paper.id)
+    2. This module extracts all [[REF_x]] markers
+    3. Looks up paper records by ID
+    4. Replaces placeholders with formatted inline citations (Author, Year)
+    5. Returns processed text + definitive list of cited paper IDs
+
+Design Decision:
+    Using deterministic integer-based anchoring instead of fragile (Author, Year) regex
+    matching eliminates false positives, partial matches, and hallucinated citations.
+"""
+
+import re
+import logging
+from typing import Optional
+
+from sqlalchemy.orm import Session
+
+from app.models.paper import Paper
+from app.services.reference_formatter import ReferenceFormatterService, CitationStyle
+
+logger = logging.getLogger(__name__)
+
+# Pattern to match [[REF_x]] where x is a positive integer (paper ID)
+REF_PATTERN = re.compile(r'\[\[REF_(\d+)\]\]')
+
+
+def extract_ref_ids(text: str) -> list[int]:
+    """Extract all unique paper IDs from [[REF_x]] placeholders in text.
+
+    Args:
+        text: LLM-generated text containing [[REF_x]] markers.
+
+    Returns:
+        Sorted list of unique integer paper IDs.
+    """
+    if not text:
+        return []
+    matches = REF_PATTERN.findall(text)
+    return sorted(set(int(m) for m in matches))
+
+
+def build_paper_context_block(
+    papers: list,
+    lang: str = "zh"
+) -> str:
+    """Build a context block for LLM prompts with [[REF_x]] markers.
+
+    This formats the paper list so the LLM knows which [[REF_x]] ID
+    corresponds to which paper, enabling it to cite correctly.
+
+    Args:
+        papers: List of Paper ORM objects or dicts with id, title, authors, year, abstract, etc.
+        lang: Language code ('zh' or 'en').
+
+    Returns:
+        Formatted string block for injection into LLM prompts.
+
+    Example output:
+        [[REF_42]] Smith, J.; Wang, L. (2021) - "Transit-Oriented Development and Urban Form"
+        Journal: Journal of Urban Planning, Q1 | SCI
+        Abstract: This paper examines the relationship between TOD and urban morphology...
+        ---
+    """
+    if not papers:
+        return "(No papers available)\n"
+
+    lines = []
+    for p in papers:
+        # Support both ORM objects and dicts
+        if isinstance(p, dict):
+            pid = p.get('id', 0)
+            title = p.get('title', 'Unknown Title')
+            authors = p.get('authors', 'Unknown')
+            year = p.get('year') or p.get('publication_year', 'N/A')
+            abstract = p.get('abstract', '')
+            journal = p.get('journal', '') or p.get('source', '')
+            doi = p.get('doi', '')
+            # Journal quality info
+            quartile = p.get('quartile', '')
+            impact_factor = p.get('impact_factor', '')
+            indexed_by = p.get('indexed_by', '')
+        else:
+            pid = p.id
+            title = p.title or 'Unknown Title'
+            authors = p.authors or 'Unknown'
+            year = p.year or getattr(p, 'publication_year', 'N/A')
+            abstract = p.abstract or ''
+            journal = p.journal or getattr(p, 'source', '') or ''
+            doi = getattr(p, 'doi', '') or ''
+            quartile = getattr(p, 'quartile', '') or ''
+            impact_factor = getattr(p, 'impact_factor', '') or ''
+            indexed_by = getattr(p, 'indexed_by', '') or ''
+
+        # Header line with REF marker
+        header = f"[[REF_{pid}]] {authors} ({year}) - \"{title}\""
+        lines.append(header)
+
+        # Journal info line (if available)
+        journal_parts = []
+        if journal:
+            journal_parts.append(f"Journal: {journal}")
+        if quartile:
+            journal_parts.append(quartile)
+        if impact_factor:
+            journal_parts.append(f"IF={impact_factor}")
+        if indexed_by:
+            journal_parts.append(indexed_by)
+        if journal_parts:
+            lines.append(", ".join(journal_parts))
+
+        # DOI (if available)
+        if doi:
+            lines.append(f"DOI: {doi}")
+
+        # Abstract - use full abstract, not truncated
+        if abstract:
+            # Limit to ~500 chars to balance context vs token cost
+            abs_text = abstract.strip()
+            if len(abs_text) > 500:
+                abs_text = abs_text[:497] + "..."
+            lines.append(f"Abstract: {abs_text}")
+
+        lines.append("---")
+
+    return "\n".join(lines) + "\n"
+
+
+def resolve_ref_placeholders(
+    text: str,
+    db: Session,
+    citation_style: str = "harvard",
+    collect_missing: bool = True,
+) -> tuple[str, list[int], list[int]]:
+    """Replace all [[REF_x]] placeholders with formatted inline citations.
+
+    This is the core post-processing function. It:
+    1. Extracts all [[REF_x]] IDs from the text
+    2. Batch-loads corresponding Paper records from DB
+    3. Replaces each [[REF_x]] with the appropriate (Author, Year) citation
+    4. Tracks which IDs were successfully resolved and which were missing
+
+    Args:
+        text: LLM-generated text with [[REF_x]] placeholders.
+        db: SQLAlchemy database session.
+        citation_style: Citation format style (harvard/apa/ieee/chicago/vancouver).
+        collect_missing: If True, collect IDs that don't exist in DB.
+
+    Returns:
+        Tuple of:
+        - resolved_text: Text with [[REF_x]] replaced by (Author, Year)
+        - cited_ids: List of successfully resolved paper IDs
+        - missing_ids: List of paper IDs not found in database
+    """
+    if not text:
+        return text, [], []
+
+    ref_ids = extract_ref_ids(text)
+    if not ref_ids:
+        return text, [], []
+
+    # Batch load papers from DB
+    papers = db.query(Paper).filter(Paper.id.in_(ref_ids)).all()
+    paper_map: dict[int, Paper] = {p.id: p for p in papers}
+
+    cited_ids: list[int] = []
+    missing_ids: list[int] = []
+
+    formatter = ReferenceFormatterService()
+    # Resolve style string to CitationStyle enum
+    try:
+        style_enum = CitationStyle(citation_style) if isinstance(citation_style, str) else citation_style
+    except ValueError:
+        style_enum = CitationStyle.HARVARD
+
+    def replace_ref(match: re.Match) -> str:
+        paper_id = int(match.group(1))
+        paper = paper_map.get(paper_id)
+
+        if paper is None:
+            if collect_missing:
+                missing_ids.append(paper_id)
+            logger.warning(f"Citation anchor [[REF_{paper_id}]] references non-existent paper ID {paper_id}")
+            return f"[REF_{paper_id}_NOT_FOUND]"
+
+        cited_ids.append(paper_id)
+
+        # Build inline citation using ReferenceFormatterService
+        inline = formatter.make_inline_citation(paper, style=style_enum)
+        return inline
+
+    resolved_text = REF_PATTERN.sub(replace_ref, text)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_cited = []
+    for pid in cited_ids:
+        if pid not in seen:
+            seen.add(pid)
+            unique_cited.append(pid)
+
+    unique_missing = sorted(set(missing_ids))
+
+    if unique_missing:
+        logger.warning(
+            f"Citation anchoring: {len(unique_missing)} missing paper IDs: {unique_missing}"
+        )
+
+    logger.info(
+        f"Citation anchoring resolved {len(unique_cited)} papers, "
+        f"{len(unique_missing)} missing, from {len(ref_ids)} unique refs"
+    )
+
+    return resolved_text, unique_cited, unique_missing
+
+
+def resolve_ref_placeholders_with_map(
+    text: str,
+    paper_map: dict[int, object],
+    citation_style: str = "harvard",
+) -> tuple[str, dict[str, int]]:
+    """Replace [[REF_x]] placeholders using a pre-loaded paper map.
+
+    This variant doesn't need a DB session - useful when papers are already
+    loaded (e.g., in the PhD pipeline where papers are cached).
+
+    Args:
+        text: LLM-generated text with [[REF_x]] placeholders.
+        paper_map: Dict mapping paper_id -> Paper object (or dict with authors/year).
+        citation_style: Citation format style.
+
+    Returns:
+        Tuple of:
+        - resolved_text: Text with citations resolved
+        - citation_map: Dict mapping inline citation string -> paper_id
+    """
+    if not text:
+        return text, {}
+
+    formatter = ReferenceFormatterService()
+    # Resolve style string to CitationStyle enum
+    try:
+        style_enum = CitationStyle(citation_style) if isinstance(citation_style, str) else citation_style
+    except ValueError:
+        style_enum = CitationStyle.HARVARD
+    citation_map: dict[str, int] = {}
+
+    def replace_ref(match: re.Match) -> str:
+        paper_id = int(match.group(1))
+        paper = paper_map.get(paper_id)
+
+        if paper is None:
+            logger.warning(f"[[REF_{paper_id}]] not found in paper_map")
+            return f"[REF_{paper_id}_NOT_FOUND]"
+
+        inline = formatter.make_inline_citation(paper, style=style_enum)
+        citation_map[inline] = paper_id
+        return inline
+
+    resolved_text = REF_PATTERN.sub(replace_ref, text)
+    return resolved_text, citation_map
+
+
+def generate_reference_list(
+    cited_ids: list[int],
+    db: Session,
+    citation_style: str = "harvard",
+) -> str:
+    """Generate a formatted reference list for all cited papers.
+
+    Args:
+        cited_ids: List of paper IDs that were cited in the text.
+        db: SQLAlchemy database session.
+        citation_style: Citation format style.
+
+    Returns:
+        Formatted reference list as markdown string.
+    """
+    if not cited_ids:
+        return ""
+
+    papers = db.query(Paper).filter(Paper.id.in_(cited_ids)).all()
+
+    # Sort by first author surname, then year
+    def sort_key(p):
+        authors = p.authors or ""
+        first_author = authors.split(",")[0].split(";")[0].strip()
+        # Extract surname (last word)
+        surname = first_author.split()[-1] if first_author else ""
+        year = p.year or getattr(p, 'publication_year', 0) or 0
+        return (surname.lower(), year)
+
+    papers.sort(key=sort_key)
+
+    formatter = ReferenceFormatterService()
+    try:
+        style_enum = CitationStyle(citation_style) if isinstance(citation_style, str) else citation_style
+    except ValueError:
+        style_enum = CitationStyle.HARVARD
+    lines = ["## References\n"]
+
+    for idx, p in enumerate(papers, start=1):
+        ref_entry = formatter.format_one(p, style=style_enum, index=idx)
+        lines.append(f"- {ref_entry}")
+
+    return "\n".join(lines)
+
+
+def generate_reference_list_from_map(
+    paper_map: dict[int, object],
+    cited_ids: list[int],
+    citation_style: str = "harvard",
+) -> str:
+    """Generate reference list from pre-loaded paper map.
+
+    Args:
+        paper_map: Dict mapping paper_id -> Paper object.
+        cited_ids: List of paper IDs to include.
+        citation_style: Citation format style.
+
+    Returns:
+        Formatted reference list as markdown string.
+    """
+    if not cited_ids:
+        return ""
+
+    papers = [paper_map[pid] for pid in cited_ids if pid in paper_map]
+
+    def sort_key(p):
+        if isinstance(p, dict):
+            authors = p.get('authors', '')
+            year = p.get('year') or p.get('publication_year', 0) or 0
+        else:
+            authors = p.authors or ""
+            year = p.year or getattr(p, 'publication_year', 0) or 0
+        first_author = authors.split(",")[0].split(";")[0].strip()
+        surname = first_author.split()[-1] if first_author else ""
+        return (surname.lower(), year)
+
+    papers.sort(key=sort_key)
+
+    formatter = ReferenceFormatterService()
+    try:
+        style_enum = CitationStyle(citation_style) if isinstance(citation_style, str) else citation_style
+    except ValueError:
+        style_enum = CitationStyle.HARVARD
+    lines = ["## References\n"]
+
+    for idx, p in enumerate(papers, start=1):
+        ref_entry = formatter.format_one(p, style=style_enum, index=idx)
+        lines.append(f"- {ref_entry}")
+
+    return "\n".join(lines)

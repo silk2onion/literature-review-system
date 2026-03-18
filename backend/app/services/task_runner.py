@@ -41,7 +41,7 @@ class StepLog:
         self.started_at: Optional[float] = None
         self.finished_at: Optional[float] = None
         self.attempt = 1
-        self.max_attempts = 3
+        self.max_attempts = 5
 
     def elapsed(self) -> Optional[float]:
         if self.started_at is None:
@@ -74,6 +74,7 @@ class TaskState:
         self.created_at = datetime.now().isoformat()
         self.finished_at: Optional[str] = None
         self.error: Optional[str] = None
+        self.logs: List[str] = [] # Detailed execution logs
 
         # intermediate results (stored for final assembly)
         self.framework: Optional[Dict] = None
@@ -101,6 +102,15 @@ class TaskState:
             StepLog("assemble",     "组装完整综述 + 参考文献"),
         ]
 
+    def add_log(self, message: str):
+        """Append a timestamped log message."""
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{ts}] {message}"
+        self.logs.append(log_entry)
+        # Keep logs reasonable size
+        if len(self.logs) > 500:
+            self.logs = self.logs[-500:]
+
     def get_step(self, step_key: str) -> Optional[StepLog]:
         return next((s for s in self.steps if s.step == step_key), None)
 
@@ -125,6 +135,7 @@ class TaskState:
             "checkpoint_data": self.checkpoint_data,
             "last_completed_step": self.last_completed_step,
             "steps": [s.to_dict() for s in self.steps],
+            "logs": self.logs,
         }
 
     @classmethod
@@ -163,8 +174,10 @@ class TaskState:
                 step.status = s.get("status", "pending")
                 step.message = s.get("message", "")
                 step.attempt = s.get("attempt", 1)
-                step.max_attempts = s.get("max_attempts", 3)
+                step.max_attempts = s.get("max_attempts", 5)
                 t.steps.append(step)
+        
+        t.logs = data.get("logs", [])
                 
         return t
 
@@ -314,7 +327,7 @@ async def resume_task(task_id: str, db: Session) -> TaskState:
 # Retry helper
 # ────────────────────────────────────────────────────────────
 
-async def with_retry(coro_fn, max_attempts: int = 5, initial_delay: float = 3.0, step_log: Optional[StepLog] = None):
+async def with_retry(coro_fn, max_attempts: int = 10, initial_delay: float = 3.0, step_log: Optional[StepLog] = None, task: Optional[TaskState] = None):
     """
     Run an async function with exponential backoff retry.
     Catches common Gemini API errors and retries up to max_attempts times.
@@ -341,6 +354,9 @@ async def with_retry(coro_fn, max_attempts: int = 5, initial_delay: float = 3.0,
 
             delay = initial_delay * (2 ** (attempt - 1))  # 3s, 6s, 12s, 24s
             logger.warning(f"[Retry] attempt {attempt}/{max_attempts} failed: {e}. Retrying in {delay}s...")
+            
+            if task:
+                task.add_log(f"API attempt {attempt} failed: {str(e)[:200]}. Retrying in {delay}s...")
 
             if step_log:
                 step_log.status = "retrying"
@@ -362,6 +378,11 @@ class PipelineTaskRunner:
     def __init__(self, task: TaskState, db: Session):
         self.task = task
         self.db = db
+
+    def _log(self, message: str):
+        """Add a log entry and persist state immediately."""
+        self.task.add_log(message)
+        self._emit("log", {"message": message, "task_id": self.task.task_id})
 
     def _emit(self, event_type: str, data: Any):
         """Push an SSE event to the task's event queue and persist state."""
@@ -473,7 +494,13 @@ class PipelineTaskRunner:
         # Restore claim_table with evidence (needed by step 5+)
         if "evidence" in cp:
             from app.schemas.review import SectionClaimTable
-            self._claim_table = SectionClaimTable.model_validate(cp["evidence"]["claim_table"])
+            # Ensure section_id and section_title are strings to avoid Pydantic validation errors
+            raw_table = cp["evidence"]["claim_table"]
+            if raw_table.get("section_id") is None:
+                raw_table["section_id"] = "1"
+            if raw_table.get("section_title") is None:
+                raw_table["section_title"] = "Section 1"
+            self._claim_table = SectionClaimTable.model_validate(raw_table)
 
         # Restore rendered sections (needed by step 6)
         if "render" in cp:
@@ -574,7 +601,8 @@ class PipelineTaskRunner:
             return raw
 
         try:
-            raw = await with_retry(_call, max_attempts=3, step_log=step)
+            self._log(f"Starting framework generation for topic: {self.task.topic}")
+            raw = await with_retry(_call, max_attempts=5, step_log=step, task=self.task)
             # Parse JSON
             json_text = raw.strip()
             for marker in ["```json", "```"]:
@@ -585,6 +613,7 @@ class PipelineTaskRunner:
             framework = json.loads(json_text)
             self.task.framework = framework
             sections_count = len(framework.get("sections", []))
+            self._log(f"Framework generated successfully with {sections_count} sections.")
             self._step_done(step_key, f"框架生成完成：{sections_count} 个章节")
             self._save_checkpoint("framework", {"framework": self.task.framework})
         except Exception as e:
@@ -599,6 +628,7 @@ class PipelineTaskRunner:
 
         step_key = "auto_search"
         sections = (self.task.framework or {}).get("sections", [])
+        self._log(f"Starting automated paper search for {len(sections)} sections.")
         self._step_start(step_key, f"开始为 {len(sections)} 个章节搜索文献...")
 
         step = self.task.get_step(step_key)
@@ -693,6 +723,7 @@ class PipelineTaskRunner:
                 except Exception as e:
                     logger.warning(f"[Task {self.task.task_id}] Auto-search failed for section {i+1} tier {tier_idx+1}: {e}")
 
+        self._log(f"Search results: {total_new} new papers found in retrieval stage.")
         self._step_done(step_key, f"检索完成：共获取约 {total_new} 篇新文献")
 
         # --- AI Relevance Filtering & Auto-Promotion ---
@@ -749,6 +780,7 @@ class PipelineTaskRunner:
                 if reviewed_count % 5 == 0:
                     self._step_start(step_key, f"已审查 {reviewed_count} 篇文献，采纳 {len(accepted_papers)} 篇...")
 
+            self._log(f"AI Review finished: Reviewed {reviewed_count} papers, accepted {len(accepted_papers)} into library.")
             self._step_done(step_key, f"审查完成：总共发现 {reviewed_count} 篇文献，AI 采纳了 {len(accepted_papers)} 篇符合课题方向的文献。")
             self._save_checkpoint("auto_search", {"paper_ids": self.task.paper_ids})
 
@@ -790,8 +822,10 @@ class PipelineTaskRunner:
             return table
 
         try:
-            self._claim_table = await with_retry(_call, max_attempts=3, step_log=step)
+            self._log(f"Generating claims for {len(self.task.framework.get('sections', []))} sections.")
+            self._claim_table = await with_retry(_call, max_attempts=5, step_log=step, task=self.task)
             claims_count = len(self._claim_table.claims)
+            self._log(f"Generated {claims_count} total claims.")
             self._step_done(step_key, f"生成了 {claims_count} 条论点")
             self._save_checkpoint("claims", {
                 "claim_table": self._claim_table.model_dump(),
@@ -824,8 +858,10 @@ class PipelineTaskRunner:
             )
 
         try:
-            self._claim_table = await with_retry(_call, max_attempts=3, step_log=step)
+            self._log(f"Attaching evidence for {len(self._claim_table.claims)} claims...")
+            self._claim_table = await with_retry(_call, max_attempts=5, step_log=step, task=self.task)
             papers_found = sum(len(c.support_papers or []) for c in self._claim_table.claims)
+            self._log(f"Evidence attachment complete. Found {papers_found} references across claims.")
             self._step_done(step_key, f"为 {len(self._claim_table.claims)} 条论点关联了约 {papers_found} 篇文献")
             self._save_checkpoint("evidence", {
                 "claim_table": self._claim_table.model_dump(),
@@ -850,8 +886,9 @@ class PipelineTaskRunner:
         # Group claims by section
         sections_map: Dict[str, List] = {}
         for claim in self._claim_table.claims:
-            sec_id = getattr(claim, "section_id", "1")
-            sections_map.setdefault(sec_id, []).append(claim)
+            # Fallback for section_id if it's missing or None
+            sec_id = getattr(claim, "section_id", None) or "1"
+            sections_map.setdefault(str(sec_id), []).append(claim)
 
         self._rendered_sections: List[Dict] = []
         self._all_citation_map: Dict = {}
@@ -866,10 +903,11 @@ class PipelineTaskRunner:
                 step.message = f"渲染第 {i+1}/{total_sections} 节..."
             self._emit("step_update", self.task.to_dict())
 
-            sec_title = claims[0].section_title if hasattr(claims[0], "section_title") else f"Section {i+1}"
+            # Fallback for section_title if it's missing or None
+            sec_title = getattr(claims[0], "section_title", None) or f"Section {i+1}"
             mini_table = SectionClaimTable(
-                section_id=sec_id,
-                section_title=sec_title,
+                section_id=str(sec_id),
+                section_title=str(sec_title),
                 claims=claims,
             )
 
@@ -881,7 +919,8 @@ class PipelineTaskRunner:
                 )
 
             try:
-                rendered = await with_retry(_call, max_attempts=3, step_log=step)
+                self._log(f"Rendering section {i+1}/{total_sections}: {sec_title}")
+                rendered = await with_retry(_call, max_attempts=5, step_log=step, task=self.task)
                 self._rendered_sections.append({
                     "section_id": sec_id,
                     "section_title": sec_title,
@@ -955,9 +994,26 @@ class PipelineTaskRunner:
 
         # Save to DB
         if self.task.review_id:
+            from app.models.review import ReviewPaper
             review = self.db.query(Review).filter(Review.id == self.task.review_id).first()
             if review:
                 review.content = full_md
+                review.paper_count = len(cited_papers)
+                review.word_count = len(full_md)
+                
+                # Link cited papers
+                # 1. Clear existing links to avoid duplicates on resume
+                self.db.query(ReviewPaper).filter(ReviewPaper.review_id == review.id).delete()
+                
+                # 2. Add new links
+                for i, paper in enumerate(cited_papers):
+                    rp = ReviewPaper(
+                        review_id=review.id,
+                        paper_id=paper.id,
+                        order_index=i
+                    )
+                    self.db.add(rp)
+                
                 self.db.commit()
 
         self.task.full_markdown = full_md

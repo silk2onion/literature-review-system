@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # 基础通用配置（从 .env 读取）
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
-    OPENAI_MODEL: str = "gpt-4"
+    OPENAI_MODEL: str = "「team」gpt-5.4"
 
     # Embedding 模型配置（默认使用 OpenAI 兼容的 embedding 模型）
     EMBEDDING_MODEL: str = "text-embedding-3-small"
@@ -51,6 +51,8 @@ class Settings(BaseSettings):
         "gpt-3.5-turbo",
         "qwen-turbo",
         "llama-3-70b",
+        "gpt-5.4",
+        "「team」gpt-5.4",
     ]
 
     SUPPORTED_EMBEDDING_MODELS: List[str] = [

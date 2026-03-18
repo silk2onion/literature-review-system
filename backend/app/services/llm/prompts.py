@@ -35,7 +35,7 @@ DEFAULT_LIT_REVIEW_PROMPT_CONFIG = PromptConfig(
         "   - 研究空白与未来方向：指出尚未充分研究的问题与潜在突破点\n"
         "2. 行文要基于提供的文献，不要凭空捏造不存在的论文。\n"
         "3. 在涉及具体研究工作时，引用文献列表中的编号或标题片段以帮助读者定位。\n"
-        "4. **关注期刊质量**：如果文献信息中提供了期刊分区（Q1/Q2）、影响因子或收录情况（SCI/SSCI），请优先讨论高水平期刊的论文，并在文中适当提及（例如“发表于 Q1 期刊《...》的研究指出...”）。\n\n"
+        "4. **关注期刊质量**：如果文献信息中提供了期刊分区（Q1/Q2）、影响因子或收录情况（SCI/SSCI），请优先讨论高水平期刊的论文，并在文中适当提及（例如'发表于 Q1 期刊的研究指出...'）。\n\n"
         "在 Markdown 正文之后，请额外输出一个 JSON 代码块，格式示意如下（注意保持合法 JSON）：\n"
         "```json\n"
         "{\n"
@@ -54,102 +54,167 @@ DEFAULT_LIT_REVIEW_PROMPT_CONFIG = PromptConfig(
 )
 
 
-# ========== 章节级 PhD 管线：论点–证据 + RAG + 渲染 ==========
+# ========================================================================
+# 章节级 PhD 管线：论点–证据 + RAG + 渲染  (v2 — [[REF_x]] Anchoring)
+# ========================================================================
 
 GENERATE_SECTION_CLAIMS_PROMPT = """
-你是一位资深的城市设计领域学术研究者，擅长将章节草稿拆解为结构化的“论点–证据”表。
+你是一位资深学术研究者，擅长将综述框架拆解为结构化的"论点–证据"表。
 
 【任务】
-根据给定的“章节提纲”，生成一个 JSON 格式的“论点–证据”表（SectionClaimTable）。
+根据给定的"章节提纲"，为每个章节生成详尽的论点列表。每个论点将在后续被RAG系统匹配到具体文献支撑。
 
 【章节提纲】
 {section_outline}
 
 【输出要求】
 1.  严格按照以下 JSON 格式输出，不要添加任何额外说明。
-2.  `section_id` 和 `section_title` 直接从提纲中提取或生成。
-3.  `claims` 数组需要包含多条论点，每条论点都是对章节提纲中某个要点的细化。
+2.  如果提纲包含多个章节，请输出一个包含所有章节的**JSON数组**。
+3.  每个章节生成 **5-10 条论点**（不要少于5条），覆盖以下维度：
+    - 该领域的发展历史与里程碑
+    - 关键理论框架与概念模型
+    - 主要研究方法与技术路径
+    - 代表性研究成果与核心发现
+    - 研究局限与尚待解决的问题（research gap）
+    - 不同研究之间的关系（互补、矛盾、继承）
 4.  每条 `ClaimEvidence` 必须包含：
-    - `claim_id`: 从 1 开始的整数编号。
-    - `text`: 论点的自然语言陈述句。
-    - `rag_query`: 一个精确、简洁的关键词或短语，用于后续在文献数据库中进行向量检索（RAG），以寻找支持该论点的证据。
+    - `claim_id`: 从 1 开始的全局整数编号（跨章节递增）。
+    - `text`: 论点的自然语言陈述句，应具体、可验证、有学术深度。
+    - `rag_query`: 一个精确的英文学术检索短语（3-8个词），用于在文献数据库中进行向量检索（RAG）。
+    - `section_id`: 该论点所属的章节ID。
+    - `section_title`: 该论点所属的章节标题。
 
 【JSON 输出格式示例】
 ```json
-{{
-  "section_id": "2.1",
-  "section_title": "街道活力的度量方法演进",
-  "claims": [
-    {{
-      "claim_id": 1,
-      "text": "早期的街道活力研究主要依赖于现场观察和手动计数等传统方法。",
-      "rag_query": "street vitality traditional observation methods"
-    }},
-    {{
-      "claim_id": 2,
-      "text": "近年来，基于手机信令、社交媒体签到和街景图像分析等大数据技术，为街道活力研究提供了新的定量视角。",
-      "rag_query": "urban vitality big data analytics mobile phone data"
-    }},
-    {{
-      "claim_id": 3,
-      "text": "空间句法（Space Syntax）模型被广泛应用于分析街道网络结构与步行流量潜力的关系。",
-      "rag_query": "space syntax street network analysis pedestrian flow"
-    }}
-  ]
-}}
+[
+  {{
+    "section_id": "1",
+    "section_title": "引言：TOD研究的背景与演进",
+    "claims": [
+      {{
+        "claim_id": 1,
+        "text": "公交导向开发（TOD）的概念最早由Peter Calthorpe于1993年系统提出，其核心理念是围绕公共交通站点进行高密度、混合功能的社区规划。",
+        "rag_query": "Transit-Oriented Development Calthorpe origin concept",
+        "section_id": "1",
+        "section_title": "引言：TOD研究的背景与演进"
+      }},
+      {{
+        "claim_id": 2,
+        "text": "随着全球城市化进程加速和气候变化议题升温，TOD被视为实现可持续城市交通与土地利用的关键策略。",
+        "rag_query": "TOD sustainable urban development climate change",
+        "section_id": "1",
+        "section_title": "引言：TOD研究的背景与演进"
+      }}
+    ]
+  }},
+  {{
+    "section_id": "2",
+    "section_title": "TOD评估方法与指标体系",
+    "claims": [
+      {{
+        "claim_id": 3,
+        "text": "Cervero和Kockelman提出的3D模型（Density, Diversity, Design）是TOD效能评估的经典框架。",
+        "rag_query": "Cervero Kockelman 3D density diversity design TOD",
+        "section_id": "2",
+        "section_title": "TOD评估方法与指标体系"
+      }}
+    ]
+  }}
+]
 ```
 """
 
 RENDER_SECTION_FROM_CLAIMS_PROMPT_ZH = """
-你是一位精通城市设计领域的学术写作者，擅长将结构化的“论点–证据”材料组织成流畅、连贯的学术长文段落。
+你是一位精通学术写作的资深研究者，擅长将结构化的"论点–证据"材料转化为高质量的学术综述章节。
 
 【任务】
-根据给定的“论点–证据”表（包含每条论点及其支撑文献片段），撰写一段详实、深度的完整章节正文。
+根据给定的"论点–证据"表（包含每条论点及其支撑文献），撰写一段**完整、深度、专业**的学术综述章节正文。
 
-【写作要求（非常重要）】
-1.  **深度与长度**：请将这一章写成一篇**深度的学术短文**（约 500-800 字），包含 3-5 个逻辑延展的自然段。不要只是简单地罗列论点。
-2.  **连贯的学术叙事（Connecting Sentences）**：**绝对不要**像列清单一样把论点生硬地拼凑在一起。你必须使用优秀的学术语言，在不同的论点之间加入**不需要引用的连接句、过渡句和背景解释句**，让整篇文章读起来气势连贯、逻辑严密、像一篇真正由人类学者精心雕琢的顶会论文。
-3.  **引用格式**：使用 (Author, Year) 格式嵌入引用。每条论据后已标注了对应的引用标记，请在正文中原样使用。
-    - 例如: (Smith, 2020) 或 (Smith and Jones, 2020) 或 (Smith et al., 2020)
-    - 同一处多篇引用用分号: (Smith, 2020; Jones, 2021)
-4.  **零幻觉引用**：你绝对不能捏造不存在的引用。只能使用论点后附带的引用标记。如果某个论点没有引用标记，你可以作为一般性陈述写出，但不要乱加 (Author, Year)。
-5.  **输出格式**：请严格返回一个 JSON 对象，不要包含其他解释文本。格式如下：
+【写作规范（极其重要，必须严格遵守）】
+
+**1. 篇幅要求**
+- 每个章节必须写 **800-1500 字**（中文），包含 **4-8 个**逻辑延展的自然段。
+- 绝不接受少于 600 字的章节输出。如果论点较少，应通过深入展开讨论来填充篇幅。
+
+**2. 学术叙事结构（最核心要求）**
+- **绝对禁止**把论点像条目清单一样罗列。你必须写出连贯的学术叙事文。
+- 每段应有明确的主题句（Topic Sentence），随后展开论证和文献支撑。
+- 段落之间必须有**过渡句**（Transitional Sentences），建立逻辑桥接：
+  - 时间递进型："在此基础上，后续研究进一步..."、"进入21世纪后..."
+  - 对比转折型："然而，并非所有学者都持相同观点。"、"与此不同的是..."
+  - 因果推进型："这一发现促使研究者重新审视..."、"正因如此..."
+  - 总分展开型："具体而言，上述框架可从以下三个维度展开讨论..."
+- 每段的**最后一句**应自然引出下一段的主题。
+- **鼓励综合论述**：将多篇文献的发现放在同一个观点下讨论，而不是每篇文献独占一段。
+
+**3. 引用格式 — [[REF_x]] 锚定系统**
+- 每条论据已标注了 `[[REF_x]]` 格式的引用占位符（x 为数据库中文献的内部ID）。
+- 在正文中必须**原样使用**这些占位符，示例：
+  - 句尾引用："...的研究指出了这一趋势 [[REF_42]]。"
+  - 多篇引用："多项研究证实了这一发现 [[REF_42]] [[REF_78]] [[REF_103]]。"
+  - 叙述性引用："[[REF_42]] 的研究首次提出了该框架，随后 [[REF_78]] 对其进行了拓展。"
+- **零幻觉规则**：绝不捏造不存在的引用。只使用论据中附带的 [[REF_x]] 标记。如果某个论点没有引用标记，你可以作为一般性学术陈述写出，但不要凭空添加任何 [[REF_x]]。
+
+**4. 输出格式**
+请严格返回一个 JSON 对象，不要包含其他解释文本。格式如下：
 ```json
 {{
-  "text": "你的正文内容，注意换行使用 \\n",
+  "text": "你的正文内容，段落之间使用 \\n\\n 分隔",
   "citation_map": {{
-    "(Huston et al., 2012)": "(Huston et al., 2012)"
+    "[[REF_42]]": 42,
+    "[[REF_78]]": 78
   }}
 }}
 ```
-注意：citation_map 只需要原样包含你真正在正文里使用到的引用标记，Key 和 Value 都可以是你插入的 "(Author, Year)" 字符串。由于后端会自动映射，你不需要返回文献的数字 ID。
+注意：citation_map 中 Key 是你在正文里使用的 `[[REF_x]]` 标记，Value 是对应的文献数据库 ID（整数）。只包含你**实际在正文中使用**的引用。
 
 【论点与证据材料】
 {claims_payload}
 """
 
 RENDER_SECTION_FROM_CLAIMS_PROMPT_EN = """
-You are an expert academic writer in the field of urban design, skilled at organizing structured "claim-evidence" materials into fluent and coherent academic paragraphs.
+You are an expert academic writer skilled at transforming structured "claim-evidence" materials into high-quality literature review sections.
 
 【Task】
-Write a complete, detailed, and in-depth section text based on the provided "claim-evidence" table.
+Write a **complete, in-depth, and professional** academic review section based on the provided "claim-evidence" table.
 
-【Writing Requirements (CRITICAL)】
-1.  **Depth and Length**: Write this section as an **in-depth academic essay** (approx. 500-800 words), comprising 3-5 naturally flowing paragraphs. Do not just list the claims.
-2.  **Coherent Academic Narrative (Connecting Sentences)**: **DO NOT** just paste the claims together like a bulleted list. You MUST use sophisticated academic language to insert **connecting sentences, transitional phrases, and background elaboration (which do not require citations)** between the claims. The text must flow logically and read like a meticulously crafted paper by a human scholar.
-3.  **Citation Format**: Use (Author, Year) format for inline citations. Citation markers are attached to claims - use them exactly as provided.
-    - Example: (Smith, 2020) or (Smith and Jones, 2020) or (Smith et al., 2020)
-    - Multiple citations at one point: (Smith, 2020; Jones, 2021)
-4.  **Zero Hallucination**: You MUST NOT fabricate citations. Only use the citation markers provided. 
-5.  **Output Format**: You MUST return a strict JSON object with no additional text. Format:
+【Writing Standards (CRITICAL — must follow strictly)】
+
+**1. Length Requirements**
+- Each section MUST be **800-1500 words** (English), comprising **4-8** logically developed natural paragraphs.
+- Outputs shorter than 600 words are unacceptable. If claims are few, deepen the discussion to fill the length.
+
+**2. Academic Narrative Structure (Most Critical Requirement)**
+- **ABSOLUTELY FORBIDDEN** to list claims like bullet points. You MUST produce a connected academic narrative.
+- Each paragraph should have a clear Topic Sentence, followed by evidence and argumentation.
+- Paragraphs MUST be connected by **transitional sentences** that build logical bridges:
+  - Temporal progression: "Building upon this foundation, subsequent studies further..."
+  - Contrastive: "However, not all scholars share this perspective."
+  - Causal: "This finding prompted researchers to reconsider..."
+  - Elaborative: "Specifically, the aforementioned framework can be examined from three dimensions..."
+- The **last sentence** of each paragraph should naturally introduce the next paragraph's theme.
+- **Encourage synthesis**: Discuss findings from multiple papers under a single argument rather than giving each paper its own paragraph.
+
+**3. Citation Format — [[REF_x]] Anchoring System**
+- Each claim has `[[REF_x]]` citation placeholders attached (x = internal database paper ID).
+- You MUST use these placeholders **exactly as provided** in the body text:
+  - End-of-sentence: "...research identified this trend [[REF_42]]."
+  - Multiple: "Several studies confirmed this finding [[REF_42]] [[REF_78]] [[REF_103]]."
+  - Narrative: "[[REF_42]] first proposed this framework, which [[REF_78]] subsequently extended."
+- **Zero Hallucination Rule**: NEVER fabricate citations. Only use [[REF_x]] markers attached to the claims. If a claim has no citation markers, write it as a general academic statement without adding any [[REF_x]].
+
+**4. Output Format**
+Return a strict JSON object with no additional text:
 ```json
 {{
-  "text": "Your complete section text, use \\n for paragraphs",
+  "text": "Your complete section text, use \\n\\n between paragraphs",
   "citation_map": {{
-    "(Author, Year)": "(Author, Year)"
+    "[[REF_42]]": 42,
+    "[[REF_78]]": 78
   }}
 }}
 ```
+Note: citation_map keys are `[[REF_x]]` markers used in the text, values are integer paper database IDs. Only include citations **actually used** in the text.
 
 【Claims and Evidence Material】
 {claims_payload}
@@ -174,7 +239,7 @@ For EACH claim listed above, find the best supporting papers from the Available 
 [
   {{
     "claim_id": <int>,
-    "support_papers": [<int>, <int>] 
+    "support_papers": [<int>, <int>]
   }}
 ]
 ```
@@ -238,14 +303,15 @@ Provide ONLY a JSON object in this exact format:
 }}
 """
 
-# ========== 端到端编排管线 ==========
-
+# ========================================================================
+# 端到端编排管线 (v2 — 增强框架 + [[REF_x]] Anchoring)
+# ========================================================================
 
 ORCHESTRATE_FRAMEWORK_PROMPT = """
-You are a senior academic researcher skilled at planning structured literature review frameworks.
+You are a senior academic researcher skilled at planning structured literature review frameworks for PhD-level research.
 
 【Task】
-Based on the given research topic and keywords, generate a structured LITERATURE REVIEW outline.
+Based on the given research topic and keywords, generate a comprehensive LITERATURE REVIEW outline.
 IMPORTANT: This is a literature review paper outline, NOT a PhD research plan or project timeline.
 The outline should organize existing research into thematic sections for critical analysis.
 
@@ -259,32 +325,38 @@ The outline should organize existing research into thematic sections for critica
 
 【Output Requirements】
 1.  Output strictly in the JSON format below, with no additional text.
-2.  The framework should contain 3-6 sections covering: introduction/background, core topic literature themes, methods/techniques review, discussion and research gaps.
+2.  The framework MUST contain **4-7 sections** with the following structure:
+    - Section 1: **Introduction / Background** — Historical context, problem motivation, scope of review
+    - Sections 2-5: **Core thematic literature analysis** — Each section focuses on one major theme or research stream. Organize by THEME, not chronology.
+    - Second-to-last section: **Research Methods & Techniques Review** — Common methodologies, data sources, analytical frameworks used in the literature
+    - Last section: **Research Gaps, Limitations & Future Directions** — What remains unknown? What are the contradictions? Where should future research focus?
 3.  Each section must include:
-    - `id`: 章节编号，如 "1", "2.1"
-    - `title`: 章节标题
-    - `description`: 该章节应涵盖的内容简要描述
-    - `search_keywords`: 一个包含 2-5 个英文检索关键词的列表，用于在文献数据库中检索相关文献
-4.  search_keywords 应精准、简洁，适合学术数据库检索。
-5.  用 {language} 语言输出标题和描述。
+    - `id`: Section number, e.g. "1", "2", "3"
+    - `title`: Section title (descriptive, academic)
+    - `description`: A **detailed 3-5 sentence description** of what this section should cover, including: the specific subtopics, the expected analytical angle, and what kind of literature supports it. This description is critical because it guides the subsequent content generation.
+    - `search_keywords`: A list of **3-5 precise English search keywords/phrases** for academic database retrieval. These should be real academic terms that will find relevant papers on Semantic Scholar/Scopus/CrossRef.
+    - `expected_themes`: A list of **2-4 key themes or debates** that should be discussed in this section.
+4.  Use {language} for titles and descriptions.
 
-【JSON 输出格式】
+【JSON Output Format】
 ```json
 {{
-  "title": "综述标题",
-  "abstract_description": "综述摘要描述（2-3句话概括综述范围）",
+  "title": "综述标题 (should be specific and academic)",
+  "abstract_description": "综述摘要描述（3-5句话，概括综述范围、核心问题、预期贡献）",
   "sections": [
     {{
       "id": "1",
-      "title": "引言：...",
-      "description": "本章节介绍...",
-      "search_keywords": ["keyword1", "keyword2", "keyword3"]
+      "title": "引言：研究背景与问题界定",
+      "description": "本章节首先回顾XX领域的发展历程，从XX的提出到XX的演变。随后界定本综述的研究范围，明确核心研究问题。最后概述全文的章节组织结构。",
+      "search_keywords": ["keyword1 keyword2", "keyword3 keyword4", "keyword5"],
+      "expected_themes": ["theme1", "theme2"]
     }},
     {{
       "id": "2",
       "title": "...",
       "description": "...",
-      "search_keywords": ["keyword1", "keyword2"]
+      "search_keywords": ["keyword1", "keyword2"],
+      "expected_themes": ["theme1", "theme2", "theme3"]
     }}
   ]
 }}
@@ -292,7 +364,7 @@ The outline should organize existing research into thematic sections for critica
 """
 
 ORCHESTRATE_SECTION_PROMPT_ZH = """
-你是一位精通学术写作的研究者，擅长基于文献资料撰写连贯的学术综述章节。
+你是一位精通学术写作的资深研究者，擅长基于文献资料撰写深度的学术综述章节。你的任务是写出一篇可以直接放入PhD论文的高质量综述章节。
 
 【任务】
 根据给定的章节标题、描述和相关文献信息，撰写该章节的综述正文。
@@ -302,27 +374,45 @@ ORCHESTRATE_SECTION_PROMPT_ZH = """
 - 描述: {section_description}
 
 【可引用的文献列表】
+以下每篇文献都有一个唯一的 [[REF_x]] 标记（x为数据库ID），请在正文中使用这些标记进行引用。
 {papers_context}
 
-【引用规范（极其重要，务必严格遵守）】
-1.  使用 (第一作者姓氏, 年份) 格式嵌入引用标注，例如:
-    - 单作者: (Smith, 2020)
-    - 双作者: (Smith & Jones, 2020)
-    - 三人及以上: (Smith et al., 2020)
-2.  同一处多篇引用用分号分隔: (Smith, 2020; Jones, 2021)
-3.  你只能引用上方【可引用的文献列表】中存在的文献，绝不引用未提供的文献。
-4.  每个引用标记必须与文献列表中的某篇文献精确对应。
+【写作规范（极其重要，必须严格遵守）】
 
-【写作要求】
-1.  严格基于提供的文献信息撰写，不要虚构文献或信息。
-2.  行文应逻辑清晰、学术性强、段落之间自然过渡。
-3.  每段应引用至少 2-3 篇文献来支撑论述。
-4.  仅输出章节正文（Markdown 格式），不要输出章节标题、前言或额外说明。
-5.  综述长度应在 300-600 字之间（中文）。
+**1. 篇幅要求**
+- 本章节必须写 **800-1500 字**（中文），包含 **4-8 个**逻辑延展的自然段。
+- 绝不接受少于 600 字的章节输出。
+
+**2. 学术叙事结构**
+- **绝对禁止**把文献像条目清单一样罗列。你必须写出连贯的学术叙事文。
+- 每段应有明确的主题句（Topic Sentence），随后展开论证。
+- 段落之间必须有过渡句，建立逻辑桥接。
+- **鼓励综合论述**：将多篇文献的发现放在同一个论点下讨论，展示它们之间的关系（互补、矛盾、继承、发展）。
+- 最后一段应总结本节的关键发现，并指出研究空白或未解决的问题。
+
+**3. 内容深度要求**
+- 不要仅停留在"谁做了什么"的表面描述。要深入分析：
+  - 不同研究之间的方法论差异和各自的局限性
+  - 研究发现的一致性和矛盾之处
+  - 理论框架的演变脉络
+  - 研究空白（research gap）和潜在的未来方向
+
+**4. 引用格式 — [[REF_x]] 锚定系统**
+- 文献列表中每篇文献都标注了 `[[REF_x]]` 格式的引用占位符。
+- 在正文中必须**原样使用**这些占位符：
+  - 句尾引用："...的研究指出了这一趋势 [[REF_42]]。"
+  - 多篇引用："多项研究证实了这一发现 [[REF_42]] [[REF_78]]。"
+  - 叙述性引用："[[REF_42]] 首次提出了该框架。"
+- **零幻觉规则**：绝不捏造引用。只使用文献列表中存在的 [[REF_x]] 标记。
+- 每段应引用至少 2-3 篇文献。
+
+**5. 输出格式**
+- 仅输出章节正文（Markdown 格式），不要输出章节标题、前言或额外说明。
+- 正文就是纯粹的段落文本，直接开始写第一段。
 """
 
 ORCHESTRATE_SECTION_PROMPT_EN = """
-You are an expert academic researcher skilled at writing coherent literature review sections based on provided references.
+You are an expert academic researcher skilled at writing in-depth, PhD-quality literature review sections. Your task is to produce a section that could be directly inserted into a PhD thesis.
 
 【Task】
 Write a review section based on the given section title, description, and relevant literature.
@@ -332,21 +422,38 @@ Write a review section based on the given section title, description, and releva
 - Description: {section_description}
 
 【Available References】
+Each paper below has a unique [[REF_x]] marker (x = database ID). Use these markers for inline citations in your text.
 {papers_context}
 
-【Citation Rules (CRITICAL — must follow strictly)】
-1.  Use (First Author Surname, Year) format for inline citations, e.g.:
-    - Single author: (Smith, 2020)
-    - Two authors: (Smith & Jones, 2020)
-    - Three or more: (Smith et al., 2020)
-2.  Multiple citations at the same point: (Smith, 2020; Jones, 2021)
-3.  Only cite papers from the 【Available References】 list above. Never cite papers not provided.
-4.  Each citation must precisely correspond to a paper in the list.
+【Writing Standards (CRITICAL — must follow strictly)】
 
-【Writing Requirements】
-1.  Base your writing strictly on the provided literature. Do not fabricate references or information.
-2.  Write with clear logic, academic rigor, and natural transitions between paragraphs.
-3.  Each paragraph should cite at least 2-3 papers to support the discussion.
-4.  Output section body text only (Markdown format). Do not include section titles, preambles, or extra explanations.
-5.  The section should be 200-500 words in length (English).
+**1. Length Requirements**
+- This section MUST be **800-1500 words** (English), comprising **4-8** logically developed natural paragraphs.
+- Outputs shorter than 600 words are unacceptable.
+
+**2. Academic Narrative Structure**
+- **ABSOLUTELY FORBIDDEN** to list papers like bullet points. Produce a connected academic narrative.
+- Each paragraph: clear Topic Sentence → evidence and argumentation → transition to next paragraph.
+- **Encourage synthesis**: Discuss findings from multiple papers under one argument, showing their relationships (complementary, contradictory, evolutionary).
+- The final paragraph should summarize key findings and identify research gaps.
+
+**3. Content Depth**
+- Go beyond surface-level "who did what" descriptions. Analyze:
+  - Methodological differences and limitations across studies
+  - Consistencies and contradictions in findings
+  - Evolution of theoretical frameworks
+  - Research gaps and potential future directions
+
+**4. Citation Format — [[REF_x]] Anchoring System**
+- Each paper in the references list has a `[[REF_x]]` placeholder.
+- Use these placeholders **exactly as provided**:
+  - End-of-sentence: "...research identified this trend [[REF_42]]."
+  - Multiple: "Several studies confirmed this [[REF_42]] [[REF_78]]."
+  - Narrative: "[[REF_42]] first proposed this framework."
+- **Zero Hallucination Rule**: NEVER fabricate citations. Only use [[REF_x]] markers from the reference list.
+- Each paragraph should cite at least 2-3 papers.
+
+**5. Output Format**
+- Output section body text ONLY (Markdown format). No section titles, preambles, or extra explanations.
+- Start directly with the first paragraph of prose.
 """
