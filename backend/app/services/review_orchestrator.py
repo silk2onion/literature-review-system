@@ -25,6 +25,12 @@ from app.schemas.review import (
     ReviewStatus,
     SectionResult,
 )
+from app.services.citation_anchoring import (
+    build_paper_context_block,
+    extract_ref_ids,
+    generate_reference_list,
+    resolve_ref_placeholders,
+)
 from app.services.embedding_service import EmbeddingService, get_embedding_service
 from app.services.llm.openai_service import OpenAIService
 from app.services.llm.prompts import (
@@ -248,6 +254,7 @@ class ReviewOrchestrationService:
             try:
                 from app.services.crawler import search_across_sources
 
+                # search_across_sources returns List[Paper] (ORM objects, transient)
                 online_results = search_across_sources(
                     keywords=keywords,
                     sources=["semantic_scholar"],
@@ -256,35 +263,26 @@ class ReviewOrchestrationService:
                     year_to=year_to,
                 )
 
-                # 将在线结果保存到数据库
-                for item in online_results:
+                # Save online results to database (dedup by DOI or title)
+                for paper_obj in online_results:
                     existing = None
-                    if item.get("doi"):
+                    if paper_obj.doi:
                         existing = self.db.query(Paper).filter(
-                            Paper.doi == item["doi"]
+                            Paper.doi == paper_obj.doi
                         ).first()
 
-                    if not existing and item.get("title"):
+                    if not existing and paper_obj.title:
                         existing = self.db.query(Paper).filter(
-                            Paper.title == item["title"]
+                            Paper.title == paper_obj.title
                         ).first()
 
                     if existing:
                         papers.append(existing)
                     else:
-                        new_paper = Paper(
-                            title=item.get("title", ""),
-                            abstract=item.get("abstract", ""),
-                            authors=item.get("authors"),
-                            year=item.get("year"),
-                            journal=item.get("journal"),
-                            doi=item.get("doi"),
-                            url=item.get("url"),
-                            pdf_url=item.get("pdf_url"),
-                        )
-                        self.db.add(new_paper)
+                        # paper_obj is a transient Paper ORM instance from the crawler
+                        self.db.add(paper_obj)
                         self.db.flush()
-                        papers.append(new_paper)
+                        papers.append(paper_obj)
 
                 self.db.commit()
             except Exception as e:
@@ -327,52 +325,10 @@ class ReviewOrchestrationService:
         language: str = "zh-CN",
         citation_style: str = "harvard",
     ) -> SectionResult:
-        """为单个章节生成综述正文（带 Author,Year 引用）"""
+        """为单个章节生成综述正文（使用 [[REF_x]] 锚定引用系统）"""
 
-        # 构造文献上下文
-        papers_context_lines = []
-        paper_map: Dict[str, Any] = {}  # citation_key → paper
-
-        try:
-            style_enum = CitationStyle(citation_style)
-        except ValueError:
-            style_enum = CitationStyle.HARVARD
-
-        for i, paper in enumerate(papers):
-            citation_key = self.ref_formatter.make_inline_citation(paper, style=style_enum, index=i+1)
-
-            if isinstance(paper, Paper):
-                title = paper.title or ""
-                authors_raw = paper.authors
-                year = paper.year
-                abstract = (paper.abstract or "")[:300]
-            else:
-                title = paper.get("title", "")
-                authors_raw = paper.get("authors")
-                year = paper.get("year")
-                abstract = (paper.get("abstract") or "")[:300]
-
-            # 格式化作者字符串
-            if isinstance(authors_raw, list):
-                authors_str = "; ".join(str(a) for a in authors_raw[:5])
-                if len(authors_raw) > 5:
-                    authors_str += " et al."
-            elif isinstance(authors_raw, str):
-                authors_str = authors_raw
-            else:
-                authors_str = "Unknown"
-
-            line = (
-                f"[{i+1}] 引用标记: {citation_key}\n"
-                f"    标题: {title}\n"
-                f"    作者: {authors_str}\n"
-                f"    年份: {year or 'N/A'}\n"
-                f"    摘要: {abstract}...\n"
-            )
-            papers_context_lines.append(line)
-            paper_map[citation_key] = paper
-
-        papers_context = "\n".join(papers_context_lines)
+        # 使用 citation_anchoring 模块构建 [[REF_x]] 格式的文献上下文
+        papers_context = build_paper_context_block(papers, lang=language[:2])
 
         # 选择 prompt
         if language.lower().startswith("en"):
@@ -387,92 +343,49 @@ class ReviewOrchestrationService:
         )
 
         system_prompt = (
-            "你是一位精通学术写作的研究者，撰写的综述应具有高度的学术性，"
-            "并严格遵循引用格式规范。"
+            "你是一位精通学术写作的研究者，擅长撰写高质量的学术综述。"
+            "你必须使用提供的 [[REF_x]] 标记来引用文献，确保每个论点都有明确的文献支撑。"
+            "请写出深度、连贯、具有批判性分析的学术叙事，而不是简单的要点列表。"
             if language.startswith("zh") else
-            "You are an expert academic researcher who writes rigorous literature reviews "
-            "and strictly follows citation format guidelines."
+            "You are an expert academic researcher skilled at writing high-quality literature reviews. "
+            "You MUST use the provided [[REF_x]] markers to cite papers, ensuring every argument "
+            "is supported by specific references. Write deep, coherent, critically analytical "
+            "academic narratives, NOT simple bullet-point summaries."
         )
 
         try:
-            section_text = await self.llm.complete(
+            raw_text = await self.llm.complete(
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=0.4,
-                max_tokens=4000,
+                max_tokens=8000,
             )
         except Exception as e:
             logger.error(f"[Orchestrate] Failed to generate section {section.id}: {e}")
-            section_text = f"*（生成失败: {e}）*"
+            raw_text = f"*（生成失败: {e}）*"
 
-        # 从生成文本中提取实际被引用的文献
-        cited_paper_ids = self._extract_cited_paper_ids(section_text, paper_map, papers)
+        # 使用确定性的 [[REF_x]] 解析提取引用的文献 ID
+        cited_paper_ids = extract_ref_ids(raw_text)
+
+        # 后处理：将 [[REF_x]] 替换为真实的 (Author, Year) 引用
+        resolved_text, resolved_ids, missing_ids = resolve_ref_placeholders(
+            text=raw_text,
+            db=self.db,
+            citation_style=citation_style,
+        )
+
+        if missing_ids:
+            logger.warning(
+                f"[Orchestrate] Section '{section.title}': "
+                f"{len(missing_ids)} citation anchors referenced non-existent papers: {missing_ids}"
+            )
 
         return SectionResult(
             section_id=section.id,
             section_title=section.title,
-            text=section_text,
-            cited_paper_ids=cited_paper_ids,
+            text=resolved_text,
+            cited_paper_ids=resolved_ids,
         )
-
-    def _extract_cited_paper_ids(
-        self,
-        text: str,
-        paper_map: Dict[str, Any],
-        papers: List[Any],
-    ) -> List[int]:
-        """从生成文本中提取 (Author, Year) 引用对应的 paper IDs"""
-        cited_ids: Set[int] = set()
-
-        # 匹配 (Surname, Year), (Surname & Surname, Year), (Surname et al., Year) 等
-        pattern = r'\(([A-Za-z\u4e00-\u9fff]+(?:\s+(?:&|and)\s+[A-Za-z\u4e00-\u9fff]+)?\s*(?:et\s+al\.)?,\s*\d{4}[a-z]?(?:\s*;\s*[A-Za-z\u4e00-\u9fff]+(?:\s+(?:&|and)\s+[A-Za-z\u4e00-\u9fff]+)?\s*(?:et\s+al\.)?,\s*\d{4}[a-z]?)*)\)'
-        
-        matches = re.findall(pattern, text)
-
-        for match_group in matches:
-            # 可能是 "Smith, 2020; Jones, 2021" 形式
-            citations = match_group.split(";")
-            for citation in citations:
-                citation = citation.strip()
-                # 尝试在 paper_map 中匹配
-                for key, paper in paper_map.items():
-                    # 提取 key 中的姓氏和年份
-                    key_clean = key.strip("()")
-                    # 简单的包含匹配: 如果 citation 包含 key 中的核心内容
-                    if self._citation_matches_key(citation, key_clean):
-                        pid = paper.id if isinstance(paper, Paper) else paper.get("id")
-                        if pid:
-                            cited_ids.add(pid)
-                        break
-
-        # 如果正则提取不到，回退：将所有提供的文献视为被引用
-        if not cited_ids and papers:
-            for p in papers:
-                pid = p.id if isinstance(p, Paper) else p.get("id")
-                if pid:
-                    cited_ids.add(pid)
-
-        return list(cited_ids)
-
-    @staticmethod
-    def _citation_matches_key(citation_text: str, key_text: str) -> bool:
-        """检查 citation 文本是否匹配 citation key"""
-        # 提取年份
-        year_match = re.search(r'(\d{4})', citation_text)
-        key_year_match = re.search(r'(\d{4})', key_text)
-
-        if year_match and key_year_match:
-            if year_match.group(1) != key_year_match.group(1):
-                return False
-
-        # 提取第一个单词（姓氏）进行比较
-        citation_words = re.findall(r'[A-Za-z\u4e00-\u9fff]+', citation_text)
-        key_words = re.findall(r'[A-Za-z\u4e00-\u9fff]+', key_text)
-
-        if citation_words and key_words:
-            return citation_words[0].lower() == key_words[0].lower()
-
-        return False
 
     # ------------------------------------------------------------------
     # Step 5 & 6: 组装文档
