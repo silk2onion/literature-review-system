@@ -28,6 +28,11 @@ from app.schemas.review import (
     RenderedSection,
     SectionClaimTable,
 )
+from app.services.citation_anchoring import (
+    build_paper_context_block,
+    extract_ref_ids,
+    resolve_ref_placeholders,
+)
 from app.services.llm.prompts import (
     GENERATE_SECTION_CLAIMS_PROMPT,
     RENDER_SECTION_FROM_CLAIMS_PROMPT_EN,
@@ -236,28 +241,6 @@ class SectionReviewPipelineService:
 
         return table
 
-    def _make_citation_key(self, paper_id: int) -> str:
-        """Generate (Author, Year) citation key from paper_id"""
-        paper = self.db.query(PaperModel).filter(PaperModel.id == paper_id).first()
-        if not paper:
-            return "(Unknown, n.d.)"
-
-        authors = paper.authors or []
-        year = paper.year or "n.d."
-
-        if not authors:
-            surname = "Unknown"
-        elif len(authors) == 1:
-            surname = authors[0].split()[-1] if authors[0] else "Unknown"
-        elif len(authors) == 2:
-            s1 = authors[0].split()[-1] if authors[0] else "Unknown"
-            s2 = authors[1].split()[-1] if authors[1] else "Unknown"
-            surname = f"{s1} and {s2}"
-        else:
-            surname = (authors[0].split()[-1] if authors[0] else "Unknown") + " et al."
-
-        return f"({surname}, {year})"
-
     async def render_section_from_claims(
         self,
         table: SectionClaimTable,
@@ -267,101 +250,109 @@ class SectionReviewPipelineService:
     ) -> RenderedSection:
         """
         Render section text from claim-evidence table.
-        Uses (Author, Year) Harvard-style citations instead of [number].
+        Uses [[REF_x]] anchoring system for deterministic citation tracking.
         """
-        # 1. Collect unique paper_ids and build citation mapping
+        # 1. Collect unique paper_ids from all claims
         all_paper_ids = set()
         for claim in table.claims:
             all_paper_ids.update(claim.support_papers)
 
         sorted_paper_ids = sorted(list(all_paper_ids))
 
-        # Generate (Author, Year) citation keys
-        paper_to_citation_key = {
-            paper_id: self._make_citation_key(paper_id)
-            for paper_id in sorted_paper_ids
-        }
+        # 2. Load paper objects for context building
+        papers = self.db.query(PaperModel).filter(
+            PaperModel.id.in_(sorted_paper_ids)
+        ).all()
+        paper_map = {p.id: p for p in papers}
 
-        citation_map = {
-            paper_to_citation_key[paper_id]: paper_id
-            for paper_id in sorted_paper_ids
-        }
-
-        # 2. Build LLM payload with (Author, Year) markers
+        # 3. Build LLM payload with [[REF_x]] markers
         claims_payload_lines = []
         for claim in table.claims:
-            citation_keys = [
-                paper_to_citation_key[paper_id]
-                for paper_id in claim.support_papers
-                if paper_id in paper_to_citation_key
+            # Use [[REF_x]] markers for citations
+            ref_markers = [
+                f"[[REF_{pid}]]"
+                for pid in claim.support_papers
+                if pid in paper_map
             ]
 
             line = f"- Claim: {claim.text}"
-            if citation_keys:
-                line += f" (Citations: {'; '.join(citation_keys)})"
+            if ref_markers:
+                line += f" (Supported by: {', '.join(ref_markers)})"
 
             claims_payload_lines.append(line)
 
-            if claim.support_snippets:
-                claims_payload_lines.append("  - Literature snippets:")
-                for snippet in claim.support_snippets:
-                    claims_payload_lines.append(f"    - {snippet}")
+            # Add paper details as context for the LLM
+            if claim.support_papers:
+                claims_payload_lines.append("  Evidence papers:")
+                for pid in claim.support_papers:
+                    p = paper_map.get(pid)
+                    if p:
+                        abstract_snippet = (p.abstract or "")[:200]
+                        claims_payload_lines.append(
+                            f"    [[REF_{pid}]] {p.authors or 'Unknown'} ({p.year or 'N/A'}) "
+                            f"- \"{p.title or 'Untitled'}\": {abstract_snippet}..."
+                        )
 
         claims_payload = "\n".join(claims_payload_lines)
 
-        # 3. Select prompt and call LLM
+        # 4. Select prompt and call LLM
         if language.lower() == "en":
-            system_prompt = "You are an expert academic writer skilled at organizing structured 'claim-evidence' materials into fluent and coherent academic paragraphs."
+            system_prompt = (
+                "You are an expert academic writer. Organize the structured claim-evidence "
+                "materials into fluent, coherent academic paragraphs. Use the [[REF_x]] markers "
+                "to cite papers. Write deep analytical narratives, NOT bullet-point summaries."
+            )
             prompt_template = RENDER_SECTION_FROM_CLAIMS_PROMPT_EN
         else:
-            system_prompt = "You are an expert academic writer skilled at organizing structured claim-evidence materials into fluent, coherent academic paragraphs in Chinese."
+            system_prompt = (
+                "你是一位资深学术写作者。请将结构化的论点-证据材料组织成流畅、连贯的学术段落。"
+                "使用 [[REF_x]] 标记来引用文献。请写出深度的分析性叙事，而不是简单的要点列表。"
+            )
             prompt_template = RENDER_SECTION_FROM_CLAIMS_PROMPT_ZH
 
         prompt = prompt_template.format(claims_payload=claims_payload)
 
         try:
-            # Use complete_json to ensure valid structure
             result = await self.llm_service.complete_json(
                 prompt=prompt, system_prompt=system_prompt
             )
 
-            # Extract text and citation_map
-            # The LLM might return {"text": "...", "citation_map": {"(Author, Year)": "(Author, Year)"}}
+            # Extract text and citation_map from LLM response
             if isinstance(result, dict):
-                final_text = result.get("text", "")
+                raw_text = result.get("text", "")
                 llm_citation_map = result.get("citation_map", {})
             else:
-                # Fallback if it's not a dict
-                final_text = str(result)
+                raw_text = str(result)
                 llm_citation_map = {}
 
-            # Map the LLM's chosen citations back to actual paper_ids
-            # Reverse the paper_to_citation_key to get key -> id
-            citation_key_to_id = {v: k for k, v in paper_to_citation_key.items()}
-            
-            final_citation_map = {}
-            for key in llm_citation_map.keys():
-                if key in citation_key_to_id:
-                    final_citation_map[key] = citation_key_to_id[key]
-                else:
-                    # Look for partial matches if LLM slightly altered the string
-                    found = False
-                    for existing_key, paper_id in citation_key_to_id.items():
-                        if existing_key.strip("()") in key:
-                            final_citation_map[key] = paper_id
-                            found = True
-                            break
-                    if not found:
-                        logger.warning(f"Citation key '{key}' not found in provided references map")
+            if not raw_text and isinstance(result, str):
+                raw_text = result
 
-            # Final check: if the LLM completely ignored the JSON format and just returned text
-            if not final_text and isinstance(result, str):
-                final_text = result
-                # We still try to populate citation_map from provided sorted list as a safety fallback
-                final_citation_map = citation_map 
+            # 5. Post-process: resolve [[REF_x]] to (Author, Year) citations
+            resolved_text, resolved_ids, missing_ids = resolve_ref_placeholders(
+                text=raw_text,
+                db=self.db,
+                citation_style="harvard",
+            )
+
+            if missing_ids:
+                logger.warning(
+                    f"Section render: {len(missing_ids)} citation anchors "
+                    f"referenced non-existent papers: {missing_ids}"
+                )
+
+            # Build final citation_map: inline_citation_string -> paper_id (int)
+            from app.services.reference_formatter import ReferenceFormatterService
+            formatter = ReferenceFormatterService()
+            final_citation_map: dict[str, int] = {}
+            for pid in resolved_ids:
+                p = paper_map.get(pid)
+                if p:
+                    inline_key = formatter.make_inline_citation(p)
+                    final_citation_map[inline_key] = pid
 
             return RenderedSection(
-                text=final_text,
+                text=resolved_text,
                 citation_map=final_citation_map,
             )
         except Exception as e:

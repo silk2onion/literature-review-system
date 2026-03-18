@@ -19,7 +19,7 @@ class ReviewBase(BaseModel):
     """综述基础模型（通用字段）"""
     title: str = Field(..., description="综述标题")
     keywords: List[str] = Field(..., description="关键词列表", min_length=1)
-    framework: Optional[str] = Field(default=None, description="综述框架/大纲（整体大纲，Markdown 或结构化文本）")
+    framework: Optional[Any] = Field(default=None, description="综述框架/大纲（可为 Markdown 字符串或结构化 JSON）")
     content: Optional[str] = Field(default=None, description="完整综述内容（可为 Markdown）")
 
 
