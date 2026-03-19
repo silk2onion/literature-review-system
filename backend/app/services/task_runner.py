@@ -946,6 +946,10 @@ class PipelineTaskRunner:
         from app.services.reference_formatter import get_reference_formatter, CitationStyle
         from app.models.paper import Paper as PaperModel
         from app.models import Review
+        from app.services.llm.prompts import (
+            GENERATE_ABSTRACT_PROMPT_ZH, GENERATE_ABSTRACT_PROMPT_EN,
+            GENERATE_CONCLUSION_PROMPT_ZH, GENERATE_CONCLUSION_PROMPT_EN,
+        )
 
         step_key = "assemble"
         self._step_start(step_key, "组装完整文档 + 生成参考文献列表...")
@@ -980,28 +984,147 @@ class PipelineTaskRunner:
         refs_md = ref_formatter.format_reference_list(cited_papers, style=style_enum)
         title = (self.task.framework or {}).get("title") or self.task.topic or "Literature Review"
 
-        # Assemble markdown
+        # ── 6a: Assemble body text (for LLM context) ──
+        body_lines = []
+        for sec in self._rendered_sections:
+            body_lines.append(f"## {sec['section_title']}\n")
+            body_lines.append(sec.get("text", ""))
+        body_md = "\n".join(body_lines)
+
+        # ── 6b: Generate Abstract ──
+        step = self.task.get_step(step_key)
+        if step:
+            step.message = "正在生成摘要 (Abstract)..."
+        self._emit("step_update", self.task.to_dict())
+
+        abstract_text = ""
+        try:
+            from app.services.llm.openai_service import OpenAIService
+            from app.config import settings
+            llm = OpenAIService(settings=settings)
+
+            truncated_body = body_md[:8000] if len(body_md) > 8000 else body_md
+            if self.task.language.lower().startswith("en"):
+                abs_prompt = GENERATE_ABSTRACT_PROMPT_EN.format(review_content=truncated_body)
+            else:
+                abs_prompt = GENERATE_ABSTRACT_PROMPT_ZH.format(review_content=truncated_body)
+
+            abstract_text = await with_retry(
+                lambda: llm.complete(
+                    prompt=abs_prompt,
+                    system_prompt="You are an expert academic writer specializing in concise, high-quality abstracts.",
+                    temperature=0.3, max_tokens=1000,
+                ),
+                max_attempts=3, step_log=step, task=self.task,
+            )
+            abstract_text = abstract_text.strip()
+            self._log(f"Abstract generated: {len(abstract_text)} chars")
+        except Exception as e:
+            logger.warning(f"[Task {self.task.task_id}] Abstract generation failed: {e}")
+            self._log(f"Abstract generation failed (non-fatal): {e}")
+
+        # ── 6c: Generate Conclusion ──
+        if step:
+            step.message = "正在生成结论 (Conclusion)..."
+        self._emit("step_update", self.task.to_dict())
+
+        conclusion_text = ""
+        try:
+            truncated_body_c = body_md[:10000] if len(body_md) > 10000 else body_md
+            if self.task.language.lower().startswith("en"):
+                conc_prompt = GENERATE_CONCLUSION_PROMPT_EN.format(review_content=truncated_body_c)
+            else:
+                conc_prompt = GENERATE_CONCLUSION_PROMPT_ZH.format(review_content=truncated_body_c)
+
+            conclusion_text = await with_retry(
+                lambda: llm.complete(
+                    prompt=conc_prompt,
+                    system_prompt="You are an expert academic writer specializing in comprehensive, forward-looking conclusions.",
+                    temperature=0.4, max_tokens=2000,
+                ),
+                max_attempts=3, step_log=step, task=self.task,
+            )
+            conclusion_text = conclusion_text.strip()
+            self._log(f"Conclusion generated: {len(conclusion_text)} chars")
+        except Exception as e:
+            logger.warning(f"[Task {self.task.task_id}] Conclusion generation failed: {e}")
+            self._log(f"Conclusion generation failed (non-fatal): {e}")
+
+        # ── 6d: Assemble final markdown ──
+        if step:
+            step.message = "正在组装最终文档..."
+        self._emit("step_update", self.task.to_dict())
+
         md_lines = [f"# {title}\n"]
+
+        # Abstract
+        if abstract_text:
+            md_lines.append("\n## Abstract\n")
+            md_lines.append(abstract_text)
+
+        # Body sections
         for sec in self._rendered_sections:
             md_lines.append(f"\n## {sec['section_title']}\n")
             md_lines.append(sec.get("text", ""))
+
+        # Conclusion
+        if conclusion_text:
+            md_lines.append("\n## Conclusion\n")
+            md_lines.append(conclusion_text)
+
+        # References
         md_lines.append(f"\n## References\n")
         md_lines.append(refs_md)
         full_md = "\n".join(md_lines)
 
-        # Save to DB
+        # ── 6e: Build claim→papers mapping for analysis_json (Task 3.1) ──
+        claims_evidence_map = {}
+        if hasattr(self, "_claim_table") and self._claim_table:
+            for claim in self._claim_table.claims:
+                claim_text = getattr(claim, "claim", None) or getattr(claim, "text", "unknown")
+                support = getattr(claim, "support_papers", None) or []
+                claims_evidence_map[claim_text[:120]] = {
+                    "section_id": getattr(claim, "section_id", None),
+                    "section_title": getattr(claim, "section_title", None),
+                    "supporting_paper_ids": [
+                        sp.get("paper_id") if isinstance(sp, dict) else getattr(sp, "paper_id", None)
+                        for sp in support
+                    ],
+                    "evidence_count": len(support),
+                }
+
+        # ── 6f: Save to DB ──
         if self.task.review_id:
             from app.models.review import ReviewPaper
             review = self.db.query(Review).filter(Review.id == self.task.review_id).first()
             if review:
                 review.content = full_md
+                review.abstract = abstract_text or None
                 review.paper_count = len(cited_papers)
                 review.word_count = len(full_md)
-                
+
+                # Save analysis_json with claim→evidence mapping
+                existing_analysis = review.analysis_json or {}
+                if isinstance(existing_analysis, str):
+                    try:
+                        existing_analysis = json.loads(existing_analysis)
+                    except Exception:
+                        existing_analysis = {}
+                existing_analysis["citation_map"] = self._all_citation_map
+                existing_analysis["conclusion"] = conclusion_text or None
+                existing_analysis["claims_evidence"] = claims_evidence_map
+                existing_analysis["stats"] = {
+                    "total_cited_papers": len(cited_papers),
+                    "total_sections": len(self._rendered_sections),
+                    "abstract_length": len(abstract_text),
+                    "conclusion_length": len(conclusion_text),
+                }
+                review.analysis_json = existing_analysis
+
                 # Link cited papers
                 # 1. Clear existing links to avoid duplicates on resume
                 self.db.query(ReviewPaper).filter(ReviewPaper.review_id == review.id).delete()
-                
+
                 # 2. Add new links
                 for i, paper in enumerate(cited_papers):
                     rp = ReviewPaper(
@@ -1010,11 +1133,11 @@ class PipelineTaskRunner:
                         order_index=i
                     )
                     self.db.add(rp)
-                
+
                 self.db.commit()
 
         self.task.full_markdown = full_md
         self.task.references_markdown = refs_md
         self.task.total_cited_papers = len(cited_papers)
 
-        self._step_done(step_key, f"综述组装完成！共引用 {len(cited_papers)} 篇文献。")
+        self._step_done(step_key, f"综述组装完成！含 Abstract + Conclusion，共引用 {len(cited_papers)} 篇文献。")
