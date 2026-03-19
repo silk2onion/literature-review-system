@@ -1,246 +1,390 @@
-# 城市设计文献综述助手（爬虫 + LLM + RAG）
+# ScholarNative — 学术文献综述生成系统
 
-本项目是一个面向城市设计 / 城市规划研究者的端到端系统，从多源爬虫抓取文献、构建本地文献库，到调用大模型自动生成中文或英文的文献综述，并提供可视化的 RAG 语义检索与调试能力。
+> **面向城市设计 / 城市规划 PhD 研究者的端到端文献综述辅助系统**
+>
+> 多源爬虫采集 → 暂存库审核 → 正式文献库 → 语义检索 (RAG) → LLM 自动生成学术级综述 → `[[REF_x]]` 确定性引用追踪
 
-当前代码已经可以在本地端到端跑通：关键词检索 → 多源抓取 → 暂存库审核 → 正式文献库 → LLM 生成综述 → RAG 语义检索调试。本文档用于快速了解目前有哪些功能、如何使用，以及 RAG 子系统的设计与使用说明。
+---
 
-## 1. 项目结构与角色
+## 目录
 
-- 后端服务：基于 FastAPI + SQLite，负责
-  - 文献抓取与入库
-  - 本地文献检索与管理
-  - LLM 综述生成
-  - 向量 embedding 与语义检索（RAG）
-  - 各类调试 / 管理 API
-- 前端应用：基于 React + TypeScript + Vite，提供
-  - 综述助手页（关键词检索 + 一键生成综述）
-  - 文献库页面（筛选、分页浏览文献）
-  - 暂存库页面（审核抓取结果，提升到正式库）
-  - 抓取任务列表页（查看任务状态、重试、暂停等）
-  - RAG 可视化调试面板（实时查看语义检索结果与激活语义组）
-- 数据与模型层：
-  - Paper / StagingPaper：正式文献库与暂存库
-  - Review：每一篇综述的框架、正文与结构化分析数据
-  - CrawlJob：批量抓取任务
-  - Tag / TagGroup / PaperTag：标签与标签组
-  - PaperCitation：文献引用关系
-  - RecallLog：记录每次综述生成时的文献召回情况
+- [系统概览](#系统概览)
+- [核心特性](#核心特性)
+- [技术架构](#技术架构)
+- [快速启动](#快速启动)
+- [功能详解](#功能详解)
+- [API 参考](#api-参考)
+- [数据模型](#数据模型)
+- [前端页面](#前端页面)
+- [配置说明](#配置说明)
+- [Docker 部署](#docker-部署)
+- [开发路线](#开发路线)
 
-## 2. 功能总览
+---
 
-### 2.1 文献抓取与本地库管理
+## 系统概览
 
-- 支持按关键词、年份范围、数据源组合（如 arxiv、scholar_serpapi、scopus）发起批量抓取任务。
-- 统一通过抓取任务（CrawlJob）执行多轮分页抓取，并在后台持续入库。
-- 所有抓取结果先写入暂存库（StagingPaper），经过人工审核后再提升到正式文献库（Paper）。
-- Paper 中包含标题、作者、摘要、年份、来源、DOI 等元数据。
-- **期刊信息增强**：支持记录期刊名称、影响因子、分区（JCR/CAS）、收录平台（SCI/SSCI/EI）等信息。
-- **归档管理**：支持对文献进行软删除/归档（is_archived），并记录归档原因。
-- 暂存库与正式库查询接口支持按关键词、批次、状态等条件分页筛选。
+ScholarNative 是一个全栈学术辅助系统，覆盖从文献采集到综述写作的完整链路：
 
-### 2.2 LLM 文献综述生成
+```
+关键词 → 多源爬虫 → 暂存库审核 → 正式文献库 → Embedding 向量化
+                                                        ↓
+                                              语义检索 (RAG) ← 查询
+                                                        ↓
+                                              LLM 综述生成（含 [[REF_x]] 引用锚定）
+                                                        ↓
+                                              多格式导出 (Markdown)
+```
 
-- 支持通过“综述助手”页面输入主题关键词、年份范围、数据源与文献上限，系统会自动：
-  - 检索并召回一批候选文献；
-  - 调用 LLM 生成结构化的综述文本（默认一步式）；
-  - 将结果保存为 Review 记录，包含
-    - 综述正文（Markdown）
-    - 结构化分析数据（时间轴、主题聚类等）写入 analysis_json
-    - 与使用到的文献的关联关系（Review 与 Paper 的多对多关系）
-- **PhD 级多阶段综述管线**（核心功能）：
-  - 支持“生成框架 → 优化框架 → 生成正文”的多阶段写作流程。
-  - 提供“仅生成框架”模式，方便先打磨章节结构与写作计划。
-  - **综述导出**：支持将生成的综述导出为 Markdown 格式，包含完整的文献引用列表。
-- 后续会在此基础上接入“章节级 RAG + 引用管线”，提高引用的准确性与可追溯性。
+**当前状态**：系统已完成端到端验证，单次运行可生成 **7 章节、30+ 篇文献引用、22,000+ 词**的完整学术综述，支持 Harvard / APA / IEEE / Chicago / Vancouver 五种引用格式。
 
-### 2.3 RAG 语义检索（当前能力）
+---
 
-- 对正式库中的每篇文献生成向量 embedding（基于标题与摘要），存入数据库。
-- 提供语义检索 API：输入自然语言查询与筛选条件，返回 top K 相似文献以及相似度分数。
-- 提供 RAG WebSocket 调试接口：以流式方式推送语义检索过程中的中间结果（partial_result、done、error）。
-- 前端提供“RAG 可视化调试”面板：
-  - 实时查看检索到的文献列表、相似度、激活的语义组标签等信息。
-  - 支持多次查询 / 会话，便于对比不同检索参数的效果。
+## 核心特性
 
-## 3. 环境准备与启动方式
+### 📚 多源文献采集
 
-### 3.1 依赖环境
+- **5 大学术数据源**：Arxiv、Google Scholar (SerpAPI)、Scopus、CrossRef、Semantic Scholar
+- **两阶段入库**：爬取结果先进暂存库 (StagingPaper)，人工审核后提升至正式库 (Paper)
+- **批量任务管理**：支持分页抓取、暂停/恢复/重试、实时日志
 
-- 操作系统：macOS / Linux / Windows（开发环境已在 macOS 上验证）。
-- 必需组件：
-  - Python 3.10+（推荐使用虚拟环境）
-  - Node.js 18+ 与 npm 或 pnpm
-  - 一个兼容 OpenAI 的大模型服务（可为官方 OpenAI，也可为自建兼容服务），并配置好 API Key 与模型名称。
+### 🔍 语义检索 (RAG)
 
-### 3.2 启动后端服务
+- **向量化索引**：基于标题+摘要的 Embedding 生成（支持 Google Gemini Embedding 等模型，3072 维）
+- **混合召回**：语义相似度 + 标签增强 + 关键词扩展
+- **WebSocket 实时调试**：流式推送检索中间结果，可视化相似度分布与激活语义组
 
-1. 进入 [backend 目录](backend/)，安装依赖：
+### 📝 智能综述生成
 
-   ```bash
-   cd backend
-   pip install -r requirements.txt
-   ```
+- **一键综述 (Orchestrate)**：输入主题 → 自动生成框架 → 逐章节语义检索 → LLM 生成 800-1500 词/章的学术叙事
+- **PhD 多阶段管线**：框架生成 → 论点提取 → 证据匹配 → 章节渲染 → 全文组装（6 步异步管线，支持断点续跑）
+- **`[[REF_x]]` 引用锚定系统**：LLM 输出确定性占位符 → 后处理器通过 DB 查表解析为真实引文 `(Author, Year)`，彻底消除 LLM 引用幻觉
+- **多引用格式**：Harvard / APA / IEEE / Chicago / Vancouver，由 `ReferenceFormatterService` 统一渲染
 
-2. 配置环境变量：
-   - 在 [backend 目录](backend/)下创建 [.env](backend/.env) 文件，配置：
-     - 数据库路径（若不配置则使用默认 SQLite 文件）
-     - LLM 服务的 API 地址与 Key
-     - 默认使用的 LLM 模型与 embedding 模型名称
+### 📊 引文分析
 
-3. 启动 FastAPI 应用（开发模式）：
+- **引用图谱**：自动采集引用/被引关系，构建 ego-graph 可视化
+- **期刊信息增强**：自动查询影响因子、JCR 分区、收录平台 (SCI/SSCI/EI)
 
-   ```bash
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 5444
-   ```
+### 🤖 AI 助手
 
-启动成功后，后端 API 默认监听在 http://localhost:5444 。
+- **Agent Chat**：内置对话式 AI 助手，支持自然语言交互与任务执行
+- **主动心跳**：Agent 定期推送系统状态通知
 
-### 3.3 启动前端应用
+---
 
-1. 进入 [frontend 目录](frontend/)并安装依赖：
+## 技术架构
 
-   ```bash
-   cd frontend
-   npm install
-   ```
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Frontend                              │
+│  React 18 + TypeScript + Vite                                │
+│  10 个功能页面 + Agent Chat 侧边栏                            │
+│  Port: 5173 (dev) / 80 (nginx)                               │
+├─────────────────────────────────────────────────────────────┤
+│                        Backend                               │
+│  FastAPI + SQLAlchemy + SQLite                               │
+│  Port: 5444                                                  │
+│                                                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐           │
+│  │ 12 API   │  │ Services │  │ LLM Integration  │           │
+│  │ Routers  │  │ Layer    │  │ (OpenAI Compat.) │           │
+│  └──────────┘  └──────────┘  └──────────────────┘           │
+│                                                              │
+│  ┌──────────────────────────────────────────────┐            │
+│  │ Crawler Layer (5 sources)                     │            │
+│  │ arxiv / scholar_serpapi / scopus /             │            │
+│  │ crossref / semantic_scholar                   │            │
+│  └──────────────────────────────────────────────┘            │
+│                                                              │
+│  ┌──────────────────────────────────────────────┐            │
+│  │ Citation Anchoring ([[REF_x]] system)         │            │
+│  │ citation_anchoring.py + reference_formatter   │            │
+│  └──────────────────────────────────────────────┘            │
+├─────────────────────────────────────────────────────────────┤
+│  SQLite Database                                             │
+│  15 tables / 11 core models                                  │
+└─────────────────────────────────────────────────────────────┘
+```
 
-2. 启动开发服务器：
+---
 
-   ```bash
-   npm run dev
-   ```
+## 快速启动
 
-3. 在浏览器中访问 Vite 输出的本地地址（通常是 http://localhost:5173），即可看到前端界面。
+### 环境要求
 
-### 3.4 Docker 容器化部署（推荐）
+| 组件    | 版本要求                          |
+| ------- | --------------------------------- |
+| Python  | 3.10+                             |
+| Node.js | 18+                               |
+| LLM API | OpenAI 兼容接口（需配置 API Key） |
 
-本项目提供了完整的 Docker 支持，可一键启动后端与前端服务。
+### 启动后端
 
-1. 确保已安装 Docker 与 Docker Compose。
-2. 在项目根目录下运行：
+```bash
+cd backend
+pip install -r requirements.txt
 
-   ```bash
-   docker-compose up -d
-   ```
+# 配置 .env 文件（见"配置说明"章节）
+# 或直接修改 app/config.py 中的默认值
 
-3. 访问 http://localhost 即可使用系统（前端 Nginx 会自动代理 API 请求到后端）。
-   - 后端 API 文档位于：http://localhost/api/docs
+python run.py
+# 后端监听 http://localhost:5444
+# API 文档 http://localhost:5444/api/docs
+```
 
-## 4. 使用指南
+### 启动前端
 
-### 4.1 从关键词到第一篇综述
+```bash
+cd frontend
+npm install
+npm run dev
+# 前端监听 http://localhost:5173
+```
 
-1. 打开前端首页，进入“综述助手”视图。
-2. 在顶部输入栏中填写：
-   - 主题关键词（例如：transit oriented development，或中文城市设计主题）
-   - 起止年份与文献上限
-   - 勾选需要使用的数据源（如 arxiv、scholar_serpapi、scopus）。
-3. 点击检索按钮，系统会拉取并展示候选文献列表。
-4. 确认文献列表大致符合预期后，点击“基于以上文献生成综述”按钮：
-   - 默认模式：一步式生成完整综述。
-   - 启用 PhD 管线：先生成大纲，再生成完整正文。
-   - 仅框架模式：只生成大纲，用于设计章节结构与写作计划。
-5. 生成完成后，左侧对话流中会出现一条包含综述内容的消息，并在预览区域显示 Markdown 格式文本与结构化分析结果。
+### 验证
 
-### 4.2 文献库与暂存库管理
+1. 访问 `http://localhost:5173`，应看到系统主界面
+2. 进入"设置"配置 LLM API Key 和模型
+3. 前往"文献检索"页面，输入关键词开始采集文献
 
-- “暂存库”页面：
-  - 查看最近各个抓取任务的原始结果；
-  - 根据关键词、批次、状态筛选文献；
-  - 将确认无误的文献一键提升为正式库文献（StagingPaper → Paper）。
-- “文献库”页面：
-  - 按关键词、年份、来源、是否同行评议等条件组合查询；
-  - 支持分页浏览与后续扩展的批量操作（如加入分组、归档等）。
+---
 
-在提升到正式库时，系统会自动为新文献生成或更新 embedding，保持向量检索与元数据同步。
+## 功能详解
 
-### 4.3 抓取任务管理
+### 1. 文献采集与入库
 
-- “抓取任务”页面展示已有 CrawlJob 列表：
-  - 每个任务的关键词、数据源、时间范围、抓取数量、失败数量与当前状态；
-  - 支持查看任务日志、失败原因，后续可支持暂停与重试；
-- 顶部全局状态条会轮询最新任务进度，并在任务完成或失败时给出提示。
+**流程**：关键词 + 年份范围 + 数据源 → CrawlJob 批量任务 → 暂存库 → 人工审核 → 正式库
 
-### 4.4 RAG 可视化调试面板
+```
+用户输入关键词
+    ↓
+CrawlJob 创建（可选多个数据源并行）
+    ↓
+爬虫分页抓取（支持暂停/恢复/重试）
+    ↓
+结果写入 StagingPaper（暂存库）
+    ↓
+用户在暂存库页面审核 → 提升(Promote) / 拒绝(Reject) / 删除
+    ↓
+提升时自动生成 Embedding → 写入 Paper（正式库）
+```
 
-当前 RAG 调试面板主要用于研究与调参，典型使用方式：
+**数据源能力**：
 
-1. 在前端打开“RAG 调试”视图。
-2. 输入一个自然语言检索语句（如“紧凑城市形态对步行性和公共空间活力的影响”），并选择是否启用语义组扩展。
-3. 发送查询后，面板会通过 WebSocket 接收流式结果：
-   - 分批展示检索到的文献条目及其相似度；
-   - 显示哪些语义组被激活；
-4. 用于观察当前 embedding 模型与语义组配置下的召回质量，为后续改进提供依据。
+| 数据源                   | 全文元数据 | 摘要 | 引用数 | PDF链接 |
+| ------------------------ | ---------- | ---- | ------ | ------- |
+| Arxiv                    | ✅         | ✅   | ❌     | ✅      |
+| Google Scholar (SerpAPI) | ✅         | ✅   | ✅     | 部分    |
+| Scopus                   | ✅         | ✅   | ✅     | ✅      |
+| CrossRef                 | ✅         | 部分 | ✅     | ❌      |
+| Semantic Scholar         | ✅         | ✅   | ✅     | 部分    |
 
-## 5. RAG 系统手册
+### 2. 一键综述生成 (Orchestrate)
 
-### 5.1 设计目标
+**入口**：综述编排页面 → 输入主题、关键词、语言、引用格式
 
-- 将“关键词检索 + 传统过滤”升级为“语义检索 + 标签 / 引用增强”的混合召回方案。
-- 在综述生成前，为每个章节或问题召回一组高相关文献，作为 LLM 的“证据上下文”。
-- 为后续的“引用可靠性控制”打基础：每一个引用都能追溯到一组具体文献或文本片段。
+**管线流程**：
 
-### 5.2 当前实现能力
+1. **框架生成**：LLM 根据主题生成 5-8 章节的结构化大纲（含 title / description / research_gap / search_keywords）
+2. **逐章节文献检索**：对每个章节的 search_keywords 进行语义检索，召回 top-K 相关文献
+3. **逐章节内容生成**：将召回文献注入 `[[REF_x]]` 映射表 → LLM 生成 800-1500 词学术叙事 → 后处理器解析引用
+4. **全文组装**：合并所有章节 + 生成参考文献列表 → 存入 Review 记录
 
-1. 向量生成与存储：
-   - 为正式库中的每篇文献生成 embedding，并存入数据库。
-   - 统一封装向量生成服务，确保新文献入库时自动补齐 embedding。
-2. 语义检索 API：
-   - 提供 HTTP 接口，接受查询文本与筛选条件，返回 top K 相似文献与相关调试信息。
-3. RAG WebSocket 调试接口：
-   - 按会话 ID 分批推送检索结果，支持多轮查询与调试。
-4. 前端 RAG 调试面板：
-   - 显示每次查询的检索结果、相似度与激活语义组；
-   - 未来可扩展为与综述助手联动，在生成综述前先直观看到“证据文献池”。
+**端到端验证结果**（2026-03-18）：
 
-### 5.3 未来扩展：章节级 RAG + 引用管线（设计阶段）
+- 7 个章节，每章 800-1200 词的批判性学术叙事
+- 30 篇文献被引用，Harvard 格式 `(Author, Year)`
+- 总字数 22,236 词
+- 完整的 `citation_map`、`references_markdown`、`full_markdown`
 
-目前已经完成方案设计，尚未进入实现阶段，核心思路如下：
+### 3. PhD 多阶段管线
 
-1. 按章节 / 问题粒度构造查询：
-   - 对每个章节标题与问题描述生成 RAG 查询；
-   - 在向量空间中检索一批最相关的文献卡片（标题、作者、摘要、年份等）。
-2. LLM 在“文献卡片集合”内生成章节文本并嵌入引用：
-   - 严格要求只引用这批卡片对应的文献；
-   - 使用统一的数字编号格式，例如 [1]、[2,5]，避免编造新文献。
-3. 系统负责编号映射与参考文献列表：
-   - 将编号映射回数据库中的 paper_id；
-   - 由系统根据元数据渲染参考文献条目，而不是由 LLM 自己写参考文献列表。
-4. 进一步扩展为“文本片段级 RAG”：
-   - 在接入 PDF 解析后，将论文分段做 embedding；
-   - 对于需要“直接引用”的结论或数据，先 RAG 找到对应文本片段，再让 LLM 生成带页码的引文句子。
+**入口**：综述书架 → "从文献库生成" / PhD 管线页面
 
-该设计将作为后续 PhD 级多阶段综述管线的重要组成部分，用于提升引用的准确性与可追溯性。
+**6 步管线**（支持 SSE 流式进度推送 + 断点续跑）：
 
-## 6. 已完成功能概览（简要）
+| 步骤     | 名称     | 说明                                |
+| -------- | -------- | ----------------------------------- |
+| Step 0   | 框架生成 | LLM 生成结构化大纲                  |
+| Step 0.5 | 自动检索 | 按章节关键词自动抓取/检索文献       |
+| Step 1   | 论点提取 | 从文献中提取 claims                 |
+| Step 2   | 证据匹配 | 为每个 claim 匹配 supporting papers |
+| Step 3   | 章节渲染 | 从 claims + evidence → 完整章节文本 |
+| Step 4   | 全文组装 | 合并章节 + 参考文献列表             |
 
-- 后端基础：
-  - FastAPI 服务与基础路由（健康检查、版本信息）。
-  - SQLite 数据库与核心数据模型（Paper、Review、CrawlJob、StagingPaper、Tag 等）。
-- 多源爬虫与抓取任务：
-  - Arxiv / ScholarSerpAPI / Scopus 等多源抓取封装。
-  - CrawlJob 批量抓取任务与任务列表页面。
-- 文献库：
-  - 暂存库 + 正式库的两阶段入库与审核流程。
-  - 本地文献检索与分页展示。
-- LLM 综述：
-  - 一步式结构化综述生成（含 timeline / topics）。
-  - PhD 级多阶段管线入口（框架优先 + 框架 + 正文）。
-- 向量检索与 RAG：
-  - 文献 embedding 生成与存储。
-  - 向量检索服务、HTTP API 与 WebSocket 调试接口。
-  - 前端 RAG 可视化调试面板。
+### 4. `[[REF_x]]` 引用锚定系统
 
-## 7. 后续开发方向（与本 README 相关的部分）
+**核心设计**：用确定性 ID 替代 LLM 自由格式引用，彻底消除引用幻觉。
 
-- 在综述生成流程中接入章节级 RAG：
-  - 每个章节生成前先用 RAG 召回若干文献卡片；
-  - LLM 只在这些文献范围内写作并嵌入引用编号。
-- 建立“论点–证据”结构：
-  - Review 的 analysis_json 中保存每个论点与 supporting_papers 列表；
-  - 前端支持从结论反查支撑它的文献。
-- 引用校验工具：
-  - 自动解析综述中的引用编号；
-  - 校验是否都能映射到真实文献，标记潜在异常。
+```
+Step 1: 构建映射表
+  paper_id=42 → [[REF_1]], paper_id=17 → [[REF_2]], ...
 
-这些工作完成后，本系统将从“自动写综述”进一步升级为“证据可追溯、引用可审计”的学术辅助工具，更适合博士论文与高质量综述写作场景。
+Step 2: 注入提示词
+  "Paper: Transit-Oriented Development... [[REF_1]]"
+
+Step 3: LLM 输出
+  "...as demonstrated by [[REF_1]] and [[REF_2]]..."
+
+Step 4: 后处理器解析
+  [[REF_1]] → DB查询 paper_id=42 → (Chen, 2023)
+  [[REF_2]] → DB查询 paper_id=17 → (Wang and Li, 2024)
+```
+
+**实现文件**：`backend/app/services/citation_anchoring.py`（~355 行）
+
+### 5. 语义检索 (RAG)
+
+- **HTTP API**：`POST /api/semantic-search/search` — 输入查询文本，返回 top-K 相似文献
+- **WebSocket 调试**：`/api/semantic-search/ws` — 流式推送检索过程
+- **前端调试面板**：实时可视化相似度分布、激活语义组、扩展关键词
+
+### 6. 引文分析
+
+- **Ego-Graph**：`GET /api/citations/ego-graph/{paper_id}` — 获取单篇文献的引用网络
+- **批量同步**：`POST /api/citations/sync-batch` — 批量采集引用关系
+- **网络分析**：`POST /api/citation-analysis/analyze` — 计算引用网络指标
+
+---
+
+## API 参考
+
+后端提供 **12 个 API 路由模块**，完整文档见 `http://localhost:5444/api/docs`（Swagger UI）。
+
+| 路由前缀                 | 模块     | 核心端点                                      |
+| ------------------------ | -------- | --------------------------------------------- |
+| `/api/papers`            | 文献管理 | CRUD、本地搜索、PDF 上传/下载、Embedding 回填 |
+| `/api/staging-papers`    | 暂存库   | 搜索、审核、提升(Promote)、拒绝、删除         |
+| `/api/reviews`           | 综述管理 | 一键综述、PhD管线（6步）、SSE进度流、导出     |
+| `/api/crawl`             | 爬虫任务 | 创建任务、分页抓取、暂停/恢复/重试            |
+| `/api/semantic-search`   | 语义检索 | HTTP搜索、WebSocket调试、Embedding回填        |
+| `/api/citations`         | 引文关系 | Ego-graph、单篇同步、批量同步                 |
+| `/api/citation-analysis` | 引文分析 | 网络指标计算                                  |
+| `/api/groups`            | 文献分组 | CRUD、文献关联管理                            |
+| `/api/journal-info`      | 期刊信息 | 期刊查询、文献信息增强                        |
+| `/api/recall-logs`       | 召回日志 | 记录检索交互行为                              |
+| `/api/agent`             | AI 助手  | 对话 API、WebSocket 通知                      |
+| `/api/settings`          | 系统设置 | 数据源配置、模型选择、系统提示词、Agent配置   |
+
+---
+
+## 数据模型
+
+系统包含 **15 张数据表**、**11 个核心 ORM 模型**：
+
+| 模型               | 说明        | 关键字段                                                            |
+| ------------------ | ----------- | ------------------------------------------------------------------- |
+| `Paper`            | 正式文献库  | title, authors, abstract, year, doi, embedding, journal_quartile    |
+| `StagingPaper`     | 暂存文献    | 同 Paper + batch_id, status (pending/promoted/rejected)             |
+| `Review`           | 综述记录    | title, framework(JSON), content(Markdown), citation_map, word_count |
+| `CrawlJob`         | 爬虫任务    | keywords, sources, status, fetched_count, log                       |
+| `PipelineTask`     | PhD管线任务 | task_id, status, state_data(checkpoint JSON), steps                 |
+| `Citation`         | 引文关系    | citing_paper_id, cited_paper_id, source                             |
+| `Tag` / `TagGroup` | 标签体系    | 文献标签与标签分组                                                  |
+| `PaperChunk`       | 文本片段    | paper_id, chunk_text, chunk_embedding (PDF分段)                     |
+| `RecallLog`        | 召回日志    | query_keywords, paper_id, rank, score                               |
+| `Group`            | 文献分组    | name, description, paper associations                               |
+| `SystemSetting`    | 系统配置    | key-value 键值对存储                                                |
+
+---
+
+## 前端页面
+
+系统包含 **10 个功能页面** + 1 个侧边栏 Agent Chat：
+
+| 页面       | 组件文件                                            | 功能                                            |
+| ---------- | --------------------------------------------------- | ----------------------------------------------- |
+| 文献检索   | `CrawlerSearchPage.tsx`                             | 关键词输入 → 多源爬取 → 任务管理                |
+| 文献库     | `LibraryPage.tsx`                                   | 正式库浏览、筛选、排序、PDF管理、引文分析、分组 |
+| 暂存库     | `StagingPapersPage.tsx`                             | 暂存文献审核：提升/拒绝/删除                    |
+| 综述编排   | `ReviewOrchestratePage.tsx`                         | 一键综述入口（主题→框架→全文）                  |
+| 综述书架   | `ReviewListPage.tsx`                                | 已生成综述列表、导出                            |
+| 从库生成   | `ReviewGenerateFromLibraryPage.tsx`                 | 从已有文献库选文 → 生成综述                     |
+| PhD 管线   | `PhdPipelinePage.tsx`                               | 6步管线交互界面                                 |
+| RAG 调试   | `RagDebugPage.tsx` + `SemanticSearchDebugPanel.tsx` | 语义检索可视化调试                              |
+| 任务监控   | `MonitoringDashboard.tsx`                           | PhD任务 + 爬虫任务实时状态                      |
+| 设置       | `SettingsModal.tsx`                                 | API配置、模型选择、数据源设置                   |
+| Agent Chat | `AgentChatPanel.tsx`                                | 侧边栏 AI 助手对话                              |
+
+---
+
+## 配置说明
+
+### 后端配置
+
+在 `backend/` 目录下创建 `.env` 文件：
+
+```env
+# LLM 服务（OpenAI 兼容接口）
+LLM_API_KEY=sk-your-api-key
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o
+
+# Embedding 模型
+EMBEDDING_MODEL=text-embedding-3-large
+
+# 数据库（默认使用 SQLite）
+DATABASE_URL=sqlite:///./data/literature.db
+
+# 爬虫 API Keys（按需配置）
+SERPAPI_KEY=your-serpapi-key
+SCOPUS_API_KEY=your-scopus-key
+```
+
+也可在前端"设置"页面动态配置 LLM 模型、Embedding 模型和数据源参数。
+
+### 前端配置
+
+前端通过 `vite.config.ts` 中的 proxy 配置自动代理 API 请求到后端 `localhost:5444`，无需额外配置。
+
+---
+
+## Docker 部署
+
+```bash
+# 项目根目录
+docker-compose -f deployment/docker-compose.yml up -d
+
+# 访问
+# 前端: http://localhost (nginx 反代)
+# API 文档: http://localhost/api/docs
+```
+
+配置文件位于 `deployment/` 目录：
+
+- `docker-compose.yml` — 服务编排
+- `Dockerfile.backend` — 后端镜像
+- `Dockerfile.frontend` — 前端镜像
+- `nginx.conf` — Nginx 反代配置
+
+---
+
+## 开发路线
+
+### ✅ 已完成
+
+- [x] 多源爬虫采集（5 个数据源）+ 两阶段入库
+- [x] 语义检索 RAG（Embedding + 余弦相似度 + 标签增强）
+- [x] 一键综述生成（Orchestrate 管线 + 框架 → 逐章生成）
+- [x] `[[REF_x]]` 确定性引用锚定系统
+- [x] PhD 6 步多阶段管线（SSE 进度推送 + 断点续跑）
+- [x] 5 种引用格式（Harvard / APA / IEEE / Chicago / Vancouver）
+- [x] 引文图谱 + 期刊信息增强
+- [x] AI Agent Chat 助手
+- [x] 前端 10 个功能页面
+
+### 🔄 进行中 / 计划
+
+- [ ] 文本片段级 RAG（PDF 分段 Embedding + 带页码引用）
+- [ ] Citation Anchoring 增强（章节级 RAG 独立召回 → LLM 仅在召回范围内写作）
+- [ ] Abstract / Conclusion 自动生成
+- [ ] 综述导出为 DOCX / PDF 格式
+- [ ] 论点-证据结构化存储（`analysis_json` 中保存 claim → supporting_papers 映射）
+- [ ] 引用校验工具（自动检测综述中的引用异常）
+
+---
+
+## 许可
+
+本项目为个人学术研究工具，仅供学习和研究使用。
