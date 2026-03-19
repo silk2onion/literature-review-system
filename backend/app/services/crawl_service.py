@@ -9,6 +9,7 @@ from app.schemas import CrawlJobCreate, LatestJobStatusResponse
 from app.services.crawler import search_across_sources
 from app.services.crawler.multi_source_orchestrator import MultiSourceOrchestrator
 from app.services.crawler.source_models import SourcePaper
+from app.services.crawler.query_parser import parse_boolean_query
 from app.services.paper_ingest import (
     insert_or_update_staging_from_sources,
     paper_to_source_paper,
@@ -130,6 +131,21 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         keywords: List[str] = job.keywords or []
         sources_all: List[str] = job.sources or []
 
+        # ━━━ 布尔查询解析 ━━━
+        # 将关键词列表拼接为一个查询字符串，然后通过 QueryParser 解析布尔表达式
+        # 例如 ["TOD OR transit oriented development AND qingdao"]
+        #   → 子查询: ["TOD qingdao", "transit oriented development qingdao"]
+        raw_query = " ".join(kw.strip() for kw in keywords if kw and kw.strip())
+        sub_queries = parse_boolean_query(raw_query) if raw_query else [raw_query or ""]
+
+        if len(sub_queries) > 1:
+            job.append_log({
+                "ts": datetime.utcnow().isoformat(),
+                "level": "info",
+                "msg": f"布尔查询解析: 拆分为 {len(sub_queries)} 个子查询",
+                "sub_queries": sub_queries,
+            })
+
         # 将原有 sources 分为两类：
         # - legacy_sources: 仍然走旧的 search_across_sources (arxiv / crossref)
         # - multi_sources: 走新的 MultiSourceOrchestrator + paper_ingest 管线
@@ -147,29 +163,34 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         total_new_count = 0
         all_source_papers: List[SourcePaper] = []
 
-        # 1) 旧管线：使用 search_across_sources 返回 Paper，再转换为 SourcePaper，统一写入 StagingPaper
-        if legacy_sources:
-            legacy_papers: List[Paper] = search_across_sources(
-                keywords=keywords,
-                sources=legacy_sources,
-                limit=limit_this_round,
-                year_from=job.year_from,
-                year_to=job.year_to,
-            )
-            for p in legacy_papers:
-                sp = paper_to_source_paper(p)
-                all_source_papers.append(sp)
+        # ━━━ 对每个子查询分别搜索，合并结果 ━━━
+        per_query_limit = max(limit_this_round // len(sub_queries), 10) if sub_queries else limit_this_round
 
-        # 2) 新多源管线：返回 SourcePaper 的爬虫（SerpAPI / Scopus）
-        if multi_sources:
-            query = " ".join(kw.strip() for kw in keywords if kw and kw.strip()) or "urban design"
-            multi_results = orchestrator.search_all(
-                query=query,
-                sources=multi_sources,
-                max_results_per_source=limit_this_round,
-            )
-            for _, items in multi_results.items():
-                all_source_papers.extend(items)
+        for sq_idx, sub_query in enumerate(sub_queries):
+            sq_keywords = [sub_query]  # 将子查询作为单个关键词传入
+
+            # 1) 旧管线：使用 search_across_sources 返回 Paper，再转换为 SourcePaper
+            if legacy_sources:
+                legacy_papers: List[Paper] = search_across_sources(
+                    keywords=sq_keywords,
+                    sources=legacy_sources,
+                    limit=per_query_limit,
+                    year_from=job.year_from,
+                    year_to=job.year_to,
+                )
+                for p in legacy_papers:
+                    sp = paper_to_source_paper(p)
+                    all_source_papers.append(sp)
+
+            # 2) 新多源管线：返回 SourcePaper 的爬虫（SerpAPI / Scopus）
+            if multi_sources:
+                multi_results = orchestrator.search_all(
+                    query=sub_query,
+                    sources=multi_sources,
+                    max_results_per_source=per_query_limit,
+                )
+                for _, items in multi_results.items():
+                    all_source_papers.extend(items)
 
         if all_source_papers:
             # 将多源抓取结果统一写入 StagingPaper 暂存库，由后续审核/提升流程决定是否进入正式库
