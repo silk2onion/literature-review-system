@@ -37,6 +37,7 @@ from app.services.llm.prompts import (
     GENERATE_SECTION_CLAIMS_PROMPT,
     RENDER_SECTION_FROM_CLAIMS_PROMPT_EN,
     RENDER_SECTION_FROM_CLAIMS_PROMPT_ZH,
+    get_claims_system_prompt,
 )
 from app.services.semantic_search import SemanticSearchService, get_semantic_search_service
 from app.services.llm.openai_service import OpenAIService
@@ -74,7 +75,7 @@ class SectionReviewPipelineService:
         if not review:
             raise HTTPException(status_code=404, detail=f"Review with id {review_id} not found")
 
-        system_prompt = "你是一位资深的城市设计领域学术研究者，擅长将章节草稿拆解为结构化的“论点–证据”表。"
+        system_prompt = get_claims_system_prompt(self.db)
         prompt = GENERATE_SECTION_CLAIMS_PROMPT.format(section_outline=section_outline)
 
         try:
@@ -698,6 +699,7 @@ async def generate_review(
             framework_md = await llm_service.generate_review_framework(
                 keywords=payload.keywords,
                 papers=papers,
+                db=db,
             )
 
             # 如果只需要框架，则直接保存框架并返回
@@ -748,6 +750,7 @@ async def generate_review(
             content_md = await llm_service.generate_review_content(
                 framework=framework_md,
                 papers=papers,
+                db=db,
             )
 
             summary_stats = {
@@ -774,6 +777,7 @@ async def generate_review(
                 custom_prompt=payload.custom_prompt,
                 year_from=payload.year_from,
                 year_to=payload.year_to,
+                db=db,
             )
 
             framework_md = None

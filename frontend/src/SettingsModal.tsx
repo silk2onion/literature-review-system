@@ -58,6 +58,18 @@ type SearchConfig = {
   use_graph_propagation: boolean;
 };
 
+type DisciplineProfileConfig = {
+  field_name: string;
+  researcher_identity: string;
+  review_system_prompt: string;
+  review_user_template: string;
+  example_timeline_topics: string[];
+  example_theme_labels: string[];
+  claims_system_prompt: string;
+  framework_system_prompt: string;
+  section_system_prompt: string;
+};
+
 type DebugResult = {
   [source: string]: {
     enabled: boolean;
@@ -150,6 +162,27 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [searchSaving, setSearchSaving] = useState(false);
   const [searchSaved, setSearchSaved] = useState(false);
 
+  // 学科配置
+  const [disciplineProfile, setDisciplineProfile] =
+    useState<DisciplineProfileConfig>({
+      field_name: "",
+      researcher_identity: "",
+      review_system_prompt: "",
+      review_user_template: "",
+      example_timeline_topics: [],
+      example_theme_labels: [],
+      claims_system_prompt: "",
+      framework_system_prompt: "",
+      section_system_prompt: "",
+    });
+  const [disciplineSaving, setDisciplineSaving] = useState(false);
+  const [disciplineSaved, setDisciplineSaved] = useState(false);
+  const [disciplineAdvanced, setDisciplineAdvanced] = useState(false);
+  const [disciplinePresets, setDisciplinePresets] = useState<string[]>([]);
+  const [presetName, setPresetName] = useState("");
+  const [presetSaving, setPresetSaving] = useState(false);
+  const [presetLoading, setPresetLoading] = useState(false);
+
   // 打开弹窗时加载当前配置
   useEffect(() => {
     if (!open) return;
@@ -232,11 +265,24 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
       .then((data: SearchConfig) => setSearchConfig(data))
       .catch((err) => console.error("加载语义检索配置失败", err));
 
+    // 加载学科配置
+    fetch(`${API_BASE_URL}/api/settings/discipline-profile`)
+      .then((res) => res.json())
+      .then((data: DisciplineProfileConfig) => setDisciplineProfile(data))
+      .catch((err) => console.error("加载学科配置失败", err));
+
+    // 加载预设列表
+    fetch(`${API_BASE_URL}/api/settings/discipline-presets`)
+      .then((res) => res.json())
+      .then((data: string[]) => setDisciplinePresets(data))
+      .catch((err) => console.error("加载学科预设失败", err));
+
     setSystemPromptSaved(false);
     setLlmConnSaved(false);
     setReviewDefaultsSaved(false);
     setCrawlerSaved(false);
     setSearchSaved(false);
+    setDisciplineSaved(false);
   }, [open]);
 
   const handleChange = (
@@ -705,7 +751,8 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
               <section className="settings-section">
                 <h3>🔗 LLM 连接</h3>
                 <p className="settings-description">
-                  配置 OpenAI 兼容 API 的密钥和 Base URL。修改后立即热生效，无需重启后端。
+                  配置 OpenAI 兼容 API 的密钥和 Base
+                  URL。修改后立即热生效，无需重启后端。
                 </p>
                 <label className="settings-row">
                   <span>API Key</span>
@@ -713,7 +760,10 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     type="password"
                     value={llmConnection.api_key}
                     onChange={(e) =>
-                      setLLMConnection((prev) => ({ ...prev, api_key: e.target.value }))
+                      setLLMConnection((prev) => ({
+                        ...prev,
+                        api_key: e.target.value,
+                      }))
                     }
                     placeholder="sk-..."
                     style={{ flex: 1 }}
@@ -725,7 +775,10 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     type="text"
                     value={llmConnection.base_url}
                     onChange={(e) =>
-                      setLLMConnection((prev) => ({ ...prev, base_url: e.target.value }))
+                      setLLMConnection((prev) => ({
+                        ...prev,
+                        base_url: e.target.value,
+                      }))
                     }
                     placeholder="https://api.openai.com/v1"
                     style={{ flex: 1 }}
@@ -737,11 +790,14 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     onClick={async () => {
                       setLlmConnSaving(true);
                       try {
-                        const res = await fetch(`${API_BASE_URL}/api/settings/llm-connection`, {
-                          method: "PUT",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify(llmConnection),
-                        });
+                        const res = await fetch(
+                          `${API_BASE_URL}/api/settings/llm-connection`,
+                          {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(llmConnection),
+                          },
+                        );
                         if (!res.ok) throw new Error("保存失败");
                         setLlmConnSaved(true);
                       } catch (err) {
@@ -753,7 +809,11 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     }}
                     disabled={llmConnSaving}
                   >
-                    {llmConnSaving ? "保存中..." : llmConnSaved ? "✓ 已保存" : "保存连接配置"}
+                    {llmConnSaving
+                      ? "保存中..."
+                      : llmConnSaved
+                        ? "✓ 已保存"
+                        : "保存连接配置"}
                   </button>
                 </div>
               </section>
@@ -769,7 +829,10 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <select
                     value={reviewDefaults.citation_style}
                     onChange={(e) =>
-                      setReviewDefaults((prev) => ({ ...prev, citation_style: e.target.value }))
+                      setReviewDefaults((prev) => ({
+                        ...prev,
+                        citation_style: e.target.value,
+                      }))
                     }
                   >
                     <option value="harvard">Harvard</option>
@@ -783,7 +846,10 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <select
                     value={reviewDefaults.language}
                     onChange={(e) =>
-                      setReviewDefaults((prev) => ({ ...prev, language: e.target.value }))
+                      setReviewDefaults((prev) => ({
+                        ...prev,
+                        language: e.target.value,
+                      }))
                     }
                   >
                     <option value="zh-CN">中文</option>
@@ -792,7 +858,13 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </label>
                 <label className="settings-row">
                   <span>文献数量上限</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="5"
@@ -807,12 +879,20 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: "40px" }}>{reviewDefaults.paper_limit}</span>
+                    <span style={{ minWidth: "40px" }}>
+                      {reviewDefaults.paper_limit}
+                    </span>
                   </div>
                 </label>
                 <label className="settings-row">
                   <span>章节 Temperature</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="0"
@@ -827,12 +907,20 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: "40px" }}>{reviewDefaults.section_temperature}</span>
+                    <span style={{ minWidth: "40px" }}>
+                      {reviewDefaults.section_temperature}
+                    </span>
                   </div>
                 </label>
                 <label className="settings-row">
                   <span>框架 Temperature</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="0"
@@ -847,12 +935,20 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: "40px" }}>{reviewDefaults.framework_temperature}</span>
+                    <span style={{ minWidth: "40px" }}>
+                      {reviewDefaults.framework_temperature}
+                    </span>
                   </div>
                 </label>
                 <label className="settings-row">
                   <span>章节 Max Tokens</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="1000"
@@ -867,7 +963,9 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: "50px" }}>{reviewDefaults.section_max_tokens}</span>
+                    <span style={{ minWidth: "50px" }}>
+                      {reviewDefaults.section_max_tokens}
+                    </span>
                   </div>
                 </label>
                 <div className="settings-row" style={{ marginTop: "8px" }}>
@@ -876,11 +974,14 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     onClick={async () => {
                       setReviewDefaultsSaving(true);
                       try {
-                        const res = await fetch(`${API_BASE_URL}/api/settings/review-defaults`, {
-                          method: "PUT",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify(reviewDefaults),
-                        });
+                        const res = await fetch(
+                          `${API_BASE_URL}/api/settings/review-defaults`,
+                          {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(reviewDefaults),
+                          },
+                        );
                         if (!res.ok) throw new Error("保存失败");
                         setReviewDefaultsSaved(true);
                       } catch (err) {
@@ -909,7 +1010,13 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </p>
                 <label className="settings-row">
                   <span>最小延迟 (秒)</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="0.5"
@@ -924,12 +1031,20 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: "40px" }}>{crawlerConfig.delay_min}s</span>
+                    <span style={{ minWidth: "40px" }}>
+                      {crawlerConfig.delay_min}s
+                    </span>
                   </div>
                 </label>
                 <label className="settings-row">
                   <span>最大延迟 (秒)</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="1"
@@ -944,12 +1059,20 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: "40px" }}>{crawlerConfig.delay_max}s</span>
+                    <span style={{ minWidth: "40px" }}>
+                      {crawlerConfig.delay_max}s
+                    </span>
                   </div>
                 </label>
                 <label className="settings-row">
                   <span>最大重试次数</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="1"
@@ -964,12 +1087,20 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: "40px" }}>{crawlerConfig.max_retries}</span>
+                    <span style={{ minWidth: "40px" }}>
+                      {crawlerConfig.max_retries}
+                    </span>
                   </div>
                 </label>
                 <label className="settings-row">
                   <span>请求超时 (秒)</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="10"
@@ -984,7 +1115,9 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: "40px" }}>{crawlerConfig.timeout}s</span>
+                    <span style={{ minWidth: "40px" }}>
+                      {crawlerConfig.timeout}s
+                    </span>
                   </div>
                 </label>
                 <div className="settings-row" style={{ marginTop: "8px" }}>
@@ -993,11 +1126,14 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     onClick={async () => {
                       setCrawlerSaving(true);
                       try {
-                        const res = await fetch(`${API_BASE_URL}/api/settings/crawler`, {
-                          method: "PUT",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify(crawlerConfig),
-                        });
+                        const res = await fetch(
+                          `${API_BASE_URL}/api/settings/crawler`,
+                          {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(crawlerConfig),
+                          },
+                        );
                         if (!res.ok) throw new Error("保存失败");
                         setCrawlerSaved(true);
                       } catch (err) {
@@ -1009,7 +1145,11 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     }}
                     disabled={crawlerSaving}
                   >
-                    {crawlerSaving ? "保存中..." : crawlerSaved ? "✓ 已保存" : "保存爬虫配置"}
+                    {crawlerSaving
+                      ? "保存中..."
+                      : crawlerSaved
+                        ? "✓ 已保存"
+                        : "保存爬虫配置"}
                   </button>
                 </div>
               </section>
@@ -1018,11 +1158,18 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
               <section className="settings-section">
                 <h3>🔍 语义检索</h3>
                 <p className="settings-description">
-                  调整向量检索的 Top-K、混合检索权重 (alpha)、文本截断长度及引用图谱传播。
+                  调整向量检索的 Top-K、混合检索权重
+                  (alpha)、文本截断长度及引用图谱传播。
                 </p>
                 <label className="settings-row">
                   <span>Default Top-K</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="5"
@@ -1037,12 +1184,20 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: "40px" }}>{searchConfig.default_top_k}</span>
+                    <span style={{ minWidth: "40px" }}>
+                      {searchConfig.default_top_k}
+                    </span>
                   </div>
                 </label>
                 <label className="settings-row">
                   <span>Recall Alpha (向量 vs 关键词)</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="0"
@@ -1057,12 +1212,20 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: "40px" }}>{searchConfig.recall_alpha}</span>
+                    <span style={{ minWidth: "40px" }}>
+                      {searchConfig.recall_alpha}
+                    </span>
                   </div>
                 </label>
                 <label className="settings-row">
                   <span>Embedding 文本截断长度</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="1000"
@@ -1101,11 +1264,14 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     onClick={async () => {
                       setSearchSaving(true);
                       try {
-                        const res = await fetch(`${API_BASE_URL}/api/settings/search`, {
-                          method: "PUT",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify(searchConfig),
-                        });
+                        const res = await fetch(
+                          `${API_BASE_URL}/api/settings/search`,
+                          {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(searchConfig),
+                          },
+                        );
                         if (!res.ok) throw new Error("保存失败");
                         setSearchSaved(true);
                       } catch (err) {
@@ -1117,10 +1283,368 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     }}
                     disabled={searchSaving}
                   >
-                    {searchSaving ? "保存中..." : searchSaved ? "✓ 已保存" : "保存检索配置"}
+                    {searchSaving
+                      ? "保存中..."
+                      : searchSaved
+                        ? "✓ 已保存"
+                        : "保存检索配置"}
                   </button>
                 </div>
               </section>
+              {/* ── 🎓 学科配置 ── */}
+              <section className="settings-section">
+                <h3>🎓 学科 / 研究领域配置</h3>
+                <p className="settings-description">
+                  配置综述生成系统的学科身份。所有 LLM
+                  提示词将根据此配置动态调整。 也可在 Agent
+                  聊天中输入「配置学科：XX学」让 AI 自动生成。
+                </p>
+
+                {/* 预设选择 */}
+                <label className="settings-row">
+                  <span>加载预设</span>
+                  <div style={{ display: "flex", gap: "8px", flex: 1 }}>
+                    <select
+                      value=""
+                      onChange={async (e) => {
+                        const name = e.target.value;
+                        if (!name) return;
+                        setPresetLoading(true);
+                        try {
+                          const res = await fetch(
+                            `${API_BASE_URL}/api/settings/discipline-presets/${encodeURIComponent(name)}/load`,
+                            { method: "POST" },
+                          );
+                          if (!res.ok) throw new Error("加载预设失败");
+                          const data: DisciplineProfileConfig = await res.json();
+                          setDisciplineProfile(data);
+                          setDisciplineSaved(false);
+                        } catch (err) {
+                          console.error(err);
+                          setError("加载学科预设失败");
+                        } finally {
+                          setPresetLoading(false);
+                        }
+                      }}
+                      disabled={presetLoading}
+                      style={{ flex: 1 }}
+                    >
+                      <option value="">
+                        {presetLoading ? "加载中..." : "-- 选择预设 --"}
+                      </option>
+                      {disciplinePresets.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </label>
+
+                {/* 基本字段 */}
+                <label className="settings-row">
+                  <span>学科名称</span>
+                  <input
+                    type="text"
+                    value={disciplineProfile.field_name}
+                    onChange={(e) => {
+                      setDisciplineProfile((prev) => ({
+                        ...prev,
+                        field_name: e.target.value,
+                      }));
+                      setDisciplineSaved(false);
+                    }}
+                    placeholder="例如：计算机视觉、建筑学、分子生物学"
+                    style={{ flex: 1 }}
+                  />
+                </label>
+
+                <label className="settings-row">
+                  <span>研究者身份</span>
+                  <input
+                    type="text"
+                    value={disciplineProfile.researcher_identity}
+                    onChange={(e) => {
+                      setDisciplineProfile((prev) => ({
+                        ...prev,
+                        researcher_identity: e.target.value,
+                      }));
+                      setDisciplineSaved(false);
+                    }}
+                    placeholder="例如：你是一位资深的XX领域学术研究者"
+                    style={{ flex: 1 }}
+                  />
+                </label>
+
+                <label className="settings-row">
+                  <span>示例时间线主题</span>
+                  <input
+                    type="text"
+                    value={disciplineProfile.example_timeline_topics.join(", ")}
+                    onChange={(e) => {
+                      setDisciplineProfile((prev) => ({
+                        ...prev,
+                        example_timeline_topics: e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      }));
+                      setDisciplineSaved(false);
+                    }}
+                    placeholder="用逗号分隔，例如：早期探索, 方法论突破, 深度学习时代"
+                    style={{ flex: 1 }}
+                  />
+                </label>
+
+                <label className="settings-row">
+                  <span>示例主题标签</span>
+                  <input
+                    type="text"
+                    value={disciplineProfile.example_theme_labels.join(", ")}
+                    onChange={(e) => {
+                      setDisciplineProfile((prev) => ({
+                        ...prev,
+                        example_theme_labels: e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      }));
+                      setDisciplineSaved(false);
+                    }}
+                    placeholder="用逗号分隔，例如：目标检测, 图像分割, 语义理解"
+                    style={{ flex: 1 }}
+                  />
+                </label>
+
+                {/* 高级展开 */}
+                <div
+                  style={{
+                    marginTop: "12px",
+                    cursor: "pointer",
+                    color: "#60a5fa",
+                    fontSize: "13px",
+                    userSelect: "none",
+                  }}
+                  onClick={() => setDisciplineAdvanced((prev) => !prev)}
+                >
+                  {disciplineAdvanced ? "▼" : "▶"} 高级：系统提示词模板（通常由
+                  AI 自动生成）
+                </div>
+
+                {disciplineAdvanced && (
+                  <div
+                    style={{
+                      marginTop: "8px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "10px",
+                    }}
+                  >
+                    {[
+                      {
+                        label: "综述 System Prompt",
+                        key: "review_system_prompt" as const,
+                      },
+                      {
+                        label:
+                          "综述 User Prompt 模板（必须含 {keywords}, {year_range}, {paper_summaries}）",
+                        key: "review_user_template" as const,
+                        rows: 4,
+                      },
+                      {
+                        label: "论点提取 System Prompt",
+                        key: "claims_system_prompt" as const,
+                      },
+                      {
+                        label: "框架生成 System Prompt",
+                        key: "framework_system_prompt" as const,
+                      },
+                      {
+                        label: "章节撰写 System Prompt",
+                        key: "section_system_prompt" as const,
+                      },
+                    ].map((item) => (
+                      <label
+                        key={item.key}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "4px",
+                        }}
+                      >
+                        <span style={{ fontSize: "12px", color: "#94a3b8" }}>
+                          {item.label}
+                        </span>
+                        <textarea
+                          value={disciplineProfile[item.key]}
+                          onChange={(e) => {
+                            setDisciplineProfile((prev) => ({
+                              ...prev,
+                              [item.key]: e.target.value,
+                            }));
+                            setDisciplineSaved(false);
+                          }}
+                          rows={item.rows || 3}
+                          style={{
+                            width: "100%",
+                            boxSizing: "border-box",
+                            padding: "8px",
+                            borderRadius: "6px",
+                            border: "1px solid #334155",
+                            backgroundColor: "#1e293b",
+                            color: "#e2e8f0",
+                            fontSize: "12px",
+                            fontFamily: "monospace",
+                            resize: "vertical",
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                {/* 保存 + 另存为预设 */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "8px",
+                    marginTop: "12px",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <button
+                    className="settings-secondary"
+                    onClick={async () => {
+                      setDisciplineSaving(true);
+                      try {
+                        const res = await fetch(
+                          `${API_BASE_URL}/api/settings/discipline-profile`,
+                          {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(disciplineProfile),
+                          },
+                        );
+                        if (!res.ok) throw new Error("保存失败");
+                        setDisciplineSaved(true);
+                      } catch (err) {
+                        console.error(err);
+                        setError("保存学科配置失败");
+                      } finally {
+                        setDisciplineSaving(false);
+                      }
+                    }}
+                    disabled={disciplineSaving}
+                  >
+                    {disciplineSaving
+                      ? "保存中..."
+                      : disciplineSaved
+                        ? "✓ 已保存"
+                        : "保存学科配置"}
+                  </button>
+
+                  <span style={{ color: "#475569", fontSize: "13px" }}>|</span>
+
+                  <input
+                    type="text"
+                    value={presetName}
+                    onChange={(e) => setPresetName(e.target.value)}
+                    placeholder="预设名称"
+                    style={{
+                      width: "140px",
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #334155",
+                      backgroundColor: "#1e293b",
+                      color: "#e2e8f0",
+                      fontSize: "13px",
+                    }}
+                  />
+                  <button
+                    className="settings-secondary"
+                    onClick={async () => {
+                      if (!presetName.trim()) {
+                        setError("请输入预设名称");
+                        return;
+                      }
+                      setPresetSaving(true);
+                      try {
+                        const res = await fetch(
+                          `${API_BASE_URL}/api/settings/discipline-presets`,
+                          {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              name: presetName.trim(),
+                              profile: disciplineProfile,
+                            }),
+                          },
+                        );
+                        if (!res.ok) throw new Error("保存预设失败");
+                        // 刷新预设列表
+                        const listRes = await fetch(
+                          `${API_BASE_URL}/api/settings/discipline-presets`,
+                        );
+                        if (listRes.ok) {
+                          const list: string[] = await listRes.json();
+                          setDisciplinePresets(list);
+                        }
+                        setPresetName("");
+                      } catch (err) {
+                        console.error(err);
+                        setError("保存学科预设失败");
+                      } finally {
+                        setPresetSaving(false);
+                      }
+                    }}
+                    disabled={presetSaving || !presetName.trim()}
+                  >
+                    {presetSaving ? "保存中..." : "另存为预设"}
+                  </button>
+
+                  {/* 删除预设 */}
+                  {disciplinePresets.length > 0 && (
+                    <select
+                      value=""
+                      onChange={async (e) => {
+                        const name = e.target.value;
+                        if (!name) return;
+                        if (!confirm(`确定删除预设「${name}」？`)) return;
+                        try {
+                          const res = await fetch(
+                            `${API_BASE_URL}/api/settings/discipline-presets/${encodeURIComponent(name)}`,
+                            { method: "DELETE" },
+                          );
+                          if (!res.ok) throw new Error("删除失败");
+                          setDisciplinePresets((prev) =>
+                            prev.filter((p) => p !== name),
+                          );
+                        } catch (err) {
+                          console.error(err);
+                          setError("删除学科预设失败");
+                        }
+                      }}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid #334155",
+                        backgroundColor: "#1e293b",
+                        color: "#e2e8f0",
+                        fontSize: "13px",
+                      }}
+                    >
+                      <option value="">🗑️ 删除预设...</option>
+                      {disciplinePresets.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </section>
+
 
               {debugResult && (
                 <section className="settings-section">
