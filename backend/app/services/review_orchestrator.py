@@ -37,6 +37,8 @@ from app.services.llm.prompts import (
     ORCHESTRATE_FRAMEWORK_PROMPT,
     ORCHESTRATE_SECTION_PROMPT_EN,
     ORCHESTRATE_SECTION_PROMPT_ZH,
+    get_framework_system_prompt,
+    get_section_system_prompt,
 )
 from app.services.reference_formatter import (
     CitationStyle,
@@ -205,7 +207,7 @@ class ReviewOrchestrationService:
             language=lang_label,
         )
 
-        system_prompt = "你是一位资深的学术研究者，擅长规划文献综述框架。请严格按 JSON 格式输出。"
+        system_prompt = get_framework_system_prompt(self.db)
 
         result = await self.llm.complete_json(
             prompt=prompt,
@@ -342,16 +344,21 @@ class ReviewOrchestrationService:
             papers_context=papers_context,
         )
 
-        system_prompt = (
-            "你是一位精通学术写作的研究者，擅长撰写高质量的学术综述。"
+        # 从学科配置获取基础 system_prompt，再追加 [[REF_x]] 引用指令
+        base_section_prompt = get_section_system_prompt(self.db)
+        ref_instruction_zh = (
             "你必须使用提供的 [[REF_x]] 标记来引用文献，确保每个论点都有明确的文献支撑。"
             "请写出深度、连贯、具有批判性分析的学术叙事，而不是简单的要点列表。"
-            if language.startswith("zh") else
-            "You are an expert academic researcher skilled at writing high-quality literature reviews. "
+        )
+        ref_instruction_en = (
             "You MUST use the provided [[REF_x]] markers to cite papers, ensuring every argument "
             "is supported by specific references. Write deep, coherent, critically analytical "
             "academic narratives, NOT simple bullet-point summaries."
         )
+        if language.startswith("zh"):
+            system_prompt = f"{base_section_prompt}{ref_instruction_zh}"
+        else:
+            system_prompt = f"{base_section_prompt} {ref_instruction_en}"
 
         try:
             raw_text = await self.llm.complete(
