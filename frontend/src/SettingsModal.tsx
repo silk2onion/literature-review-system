@@ -274,7 +274,12 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
     // 加载预设列表
     fetch(`${API_BASE_URL}/api/settings/discipline-presets`)
       .then((res) => res.json())
-      .then((data: string[]) => setDisciplinePresets(data))
+      .then((data: { presets: { name: string; field_name: string }[] }) => {
+        const names = Array.isArray(data?.presets)
+          ? data.presets.map((p) => p.name)
+          : [];
+        setDisciplinePresets(names);
+      })
       .catch((err) => console.error("加载学科预设失败", err));
 
     setSystemPromptSaved(false);
@@ -1316,8 +1321,11 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                             { method: "POST" },
                           );
                           if (!res.ok) throw new Error("加载预设失败");
-                          const data: DisciplineProfileConfig = await res.json();
-                          setDisciplineProfile(data);
+                          const data = await res.json();
+                          // 后端返回 {success, message, profile: {...}}，提取 profile
+                          const profile: DisciplineProfileConfig =
+                            data.profile || data;
+                          setDisciplineProfile(profile);
                           setDisciplineSaved(false);
                         } catch (err) {
                           console.error(err);
@@ -1587,8 +1595,13 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                           `${API_BASE_URL}/api/settings/discipline-presets`,
                         );
                         if (listRes.ok) {
-                          const list: string[] = await listRes.json();
-                          setDisciplinePresets(list);
+                          const listData: {
+                            presets: { name: string; field_name: string }[];
+                          } = await listRes.json();
+                          const names = Array.isArray(listData?.presets)
+                            ? listData.presets.map((p) => p.name)
+                            : [];
+                          setDisciplinePresets(names);
                         }
                         setPresetName("");
                       } catch (err) {
@@ -1644,7 +1657,6 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                   )}
                 </div>
               </section>
-
 
               {debugResult && (
                 <section className="settings-section">

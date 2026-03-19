@@ -887,6 +887,50 @@ async def generate_review(payload: ReviewGenerate, db: Session = Depends(get_db)
         )
 
 
+@router.get(
+    "/{review_id}/export/docx",
+    summary="导出综述为 DOCX (Word) 格式",
+)
+def export_review_docx(
+    review_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    将综述导出为 Microsoft Word (.docx) 格式。
+    返回二进制文件流，可直接下载。
+    """
+    from app.services.export_service import export_review_to_docx
+    from fastapi.responses import Response
+
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    content = review.content
+    if not content:
+        raise HTTPException(status_code=400, detail="Review has no content to export")
+
+    title = review.title or "Literature Review"
+
+    try:
+        docx_bytes = export_review_to_docx(content, title)
+    except Exception as e:
+        logger.error(f"DOCX export failed for review {review_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"DOCX 导出失败: {e}")
+
+    # Sanitize filename
+    safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:60]
+    filename = f"{safe_title}.docx" if safe_title else f"review_{review_id}.docx"
+
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
 @router.get("/{review_id}/export/full", response_model=ReviewFullExport)
 def export_review_full(review_id: int, db: Session = Depends(get_db)):
     """
@@ -952,6 +996,230 @@ def export_review_full(review_id: int, db: Session = Depends(get_db)):
         papers=paper_infos,
         markdown=str(framework_value),
     )
+
+
+# ============================================================
+# Abstract / Conclusion / Claims-Evidence / Citation Validation
+# ============================================================
+
+@router.post(
+    "/{review_id}/generate-abstract",
+    summary="为已有综述生成 Abstract（摘要）",
+)
+async def generate_abstract(
+    review_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    基于综述正文内容，调用 LLM 自动生成学术摘要，并更新到 Review.abstract 字段。
+    """
+    from app.services.review_orchestrator import ReviewOrchestrationService
+
+    try:
+        abstract = await ReviewOrchestrationService.generate_abstract_for_review(db, review_id)
+        return {
+            "success": True,
+            "review_id": review_id,
+            "abstract": abstract,
+            "message": "摘要生成成功" if abstract else "摘要生成为空",
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Generate abstract failed for review {review_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"摘要生成失败: {e}")
+
+
+@router.post(
+    "/{review_id}/generate-conclusion",
+    summary="为已有综述生成 Conclusion（结论）",
+)
+async def generate_conclusion(
+    review_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    基于综述正文内容，调用 LLM 自动生成学术结论章节，
+    并追加到综述内容中（在 References 之前），同时保存到 analysis_json.conclusion。
+    """
+    from app.services.review_orchestrator import ReviewOrchestrationService
+
+    try:
+        conclusion = await ReviewOrchestrationService.generate_conclusion_for_review(db, review_id)
+        return {
+            "success": True,
+            "review_id": review_id,
+            "conclusion": conclusion,
+            "message": "结论生成成功" if conclusion else "结论生成为空",
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Generate conclusion failed for review {review_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"结论生成失败: {e}")
+
+
+@router.get(
+    "/{review_id}/claims-evidence",
+    summary="查询综述的论点-证据结构化数据",
+)
+def get_claims_evidence(
+    review_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    返回综述的 claim→supporting_papers 映射数据。
+    数据来源: Review.analysis_json.claims_evidence
+    """
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    analysis = review.analysis_json or {}
+    if isinstance(analysis, str):
+        try:
+            analysis = json.loads(analysis)
+        except Exception:
+            analysis = {}
+
+    claims_evidence = analysis.get("claims_evidence", {})
+
+    return {
+        "review_id": review_id,
+        "claims_evidence": claims_evidence,
+        "total_claims": len(claims_evidence),
+    }
+
+
+@router.post(
+    "/{review_id}/validate-citations",
+    summary="校验综述中的引用完整性",
+)
+def validate_citations(
+    review_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    自动检测综述中的引用异常：
+    1. 正文中引用但参考文献列表中缺失的文献
+    2. 参考文献列表中存在但正文未引用的文献
+    3. 引用格式异常（如括号不匹配）
+    4. 重复引用检测
+    """
+    from app.models.review import ReviewPaper
+    from app.models.paper import Paper as PaperModel
+    import re
+
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    content = review.content or ""
+    issues = []
+
+    # 1. Extract all inline citations from content: (Author, Year) or (Author & Author, Year) patterns
+    inline_citation_pattern = r'\(([A-Z][a-z]+(?:\s+(?:et\s+al\.|&\s+[A-Z][a-z]+))?(?:,?\s*\d{4}))\)'
+    inline_citations = re.findall(inline_citation_pattern, content)
+
+    # 2. Extract [[REF_x]] style citations still present (unresolved)
+    unresolved_refs = re.findall(r'\[\[REF_\d+\]\]', content)
+    for ref in unresolved_refs:
+        issues.append({
+            "type": "unresolved_reference",
+            "severity": "error",
+            "message": f"未解析的引用占位符: {ref}",
+            "location": ref,
+        })
+
+    # 3. Get linked papers from DB
+    review_papers = db.query(ReviewPaper).filter(ReviewPaper.review_id == review_id).all()
+    linked_paper_ids = {rp.paper_id for rp in review_papers}
+
+    linked_papers = []
+    if linked_paper_ids:
+        linked_papers = db.query(PaperModel).filter(PaperModel.id.in_(list(linked_paper_ids))).all()
+
+    # 4. Check for papers in reference list but not cited in body
+    for paper in linked_papers:
+        # Build author surname for matching
+        author_surname = ""
+        if paper.authors and len(paper.authors) > 0:
+            first_author = paper.authors[0] if isinstance(paper.authors, list) else str(paper.authors).split(",")[0]
+            parts = first_author.strip().split()
+            author_surname = parts[-1] if parts else ""
+
+        if author_surname and author_surname not in content:
+            issues.append({
+                "type": "uncited_reference",
+                "severity": "warning",
+                "message": f"参考文献中存在但正文未引用: {paper.title[:80]}",
+                "paper_id": paper.id,
+                "author": author_surname,
+            })
+
+    # 5. Check for mismatched parentheses in citations
+    open_parens = content.count('(')
+    close_parens = content.count(')')
+    if open_parens != close_parens:
+        issues.append({
+            "type": "bracket_mismatch",
+            "severity": "warning",
+            "message": f"括号不匹配：开括号 {open_parens} 个，闭括号 {close_parens} 个",
+        })
+
+    # 6. Check analysis_json for citation_map integrity
+    analysis = review.analysis_json or {}
+    if isinstance(analysis, str):
+        try:
+            analysis = json.loads(analysis)
+        except Exception:
+            analysis = {}
+
+    citation_map = analysis.get("citation_map", {})
+    for ref_key, paper_id in citation_map.items():
+        if isinstance(paper_id, int) and paper_id not in linked_paper_ids:
+            issues.append({
+                "type": "orphan_citation_map",
+                "severity": "error",
+                "message": f"citation_map 中的 {ref_key} 指向 paper_id={paper_id}，但该文献未关联到综述",
+                "ref_key": ref_key,
+                "paper_id": paper_id,
+            })
+
+    # 7. Duplicate detection (same author+year cited multiple times in same sentence)
+    sentences = re.split(r'[.。!！?？]', content)
+    for sentence in sentences:
+        sentence_citations = re.findall(inline_citation_pattern, sentence)
+        seen = set()
+        for cite in sentence_citations:
+            if cite in seen:
+                issues.append({
+                    "type": "duplicate_citation",
+                    "severity": "info",
+                    "message": f"同一句中重复引用: ({cite})",
+                    "location": sentence[:80],
+                })
+            seen.add(cite)
+
+    # Summary
+    error_count = sum(1 for i in issues if i["severity"] == "error")
+    warning_count = sum(1 for i in issues if i["severity"] == "warning")
+    info_count = sum(1 for i in issues if i["severity"] == "info")
+
+    return {
+        "review_id": review_id,
+        "valid": error_count == 0,
+        "total_issues": len(issues),
+        "errors": error_count,
+        "warnings": warning_count,
+        "info": info_count,
+        "issues": issues,
+        "stats": {
+            "inline_citations_found": len(inline_citations),
+            "linked_papers": len(linked_papers),
+            "unresolved_refs": len(unresolved_refs),
+        },
+    }
 
 
 @router.get("/{review_id}", response_model=ReviewResponse)

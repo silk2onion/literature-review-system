@@ -37,6 +37,10 @@ from app.services.llm.prompts import (
     ORCHESTRATE_FRAMEWORK_PROMPT,
     ORCHESTRATE_SECTION_PROMPT_EN,
     ORCHESTRATE_SECTION_PROMPT_ZH,
+    GENERATE_ABSTRACT_PROMPT_ZH,
+    GENERATE_ABSTRACT_PROMPT_EN,
+    GENERATE_CONCLUSION_PROMPT_ZH,
+    GENERATE_CONCLUSION_PROMPT_EN,
     get_framework_system_prompt,
     get_section_system_prompt,
 )
@@ -79,7 +83,8 @@ class ReviewOrchestrationService:
         3. 确保 embedding
         4. 按节生成综述（带 Author,Year 引用）
         5. 生成参考文献列表
-        6. 组装完整文档并落库
+        6. 生成 Abstract & Conclusion
+        7. 组装完整文档并落库
         """
         logger.info(f"[Orchestrate] Starting for topic='{request.topic}', keywords={request.keywords}")
 
@@ -155,10 +160,18 @@ class ReviewOrchestrationService:
         references_md = self.ref_formatter.format_reference_list(cited_papers, style=style_enum)
         citation_map = self.ref_formatter.build_citation_map(cited_papers, style=style_enum)
 
-        # --- Step 6: 组装完整 Markdown ---
-        full_md = self._assemble_document(framework, sections, references_md)
+        # --- Step 6: 生成 Abstract & Conclusion ---
+        # 先组装正文部分（不含 abstract/conclusion/references）用于 LLM 输入
+        body_md = self._assemble_body_only(framework, sections)
 
-        # --- Step 7: 保存到数据库 ---
+        abstract_text = await self._generate_abstract(body_md, request.language)
+        conclusion_text = await self._generate_conclusion(body_md, request.language)
+        logger.info(f"[Orchestrate] Abstract ({len(abstract_text)} chars) and Conclusion ({len(conclusion_text)} chars) generated")
+
+        # --- Step 7: 组装完整 Markdown ---
+        full_md = self._assemble_document(framework, sections, references_md, abstract_text, conclusion_text)
+
+        # --- Step 8: 保存到数据库 ---
         review_id = self._save_to_db(
             framework=framework,
             full_md=full_md,
@@ -166,6 +179,8 @@ class ReviewOrchestrationService:
             cited_papers=cited_papers,
             citation_map=citation_map,
             request=request,
+            abstract_text=abstract_text,
+            conclusion_text=conclusion_text,
             stats={
                 "total_papers_searched": len(all_papers),
                 "total_papers_cited": len(cited_papers),
@@ -395,26 +410,102 @@ class ReviewOrchestrationService:
         )
 
     # ------------------------------------------------------------------
-    # Step 5 & 6: 组装文档
+    # Step 5 & 6: Abstract / Conclusion 生成
     # ------------------------------------------------------------------
+
+    async def _generate_abstract(self, body_content: str, language: str = "zh-CN") -> str:
+        """基于综述正文生成学术摘要"""
+        # 截断过长的内容（取前 8000 字符作为上下文）
+        truncated = body_content[:8000] if len(body_content) > 8000 else body_content
+
+        if language.lower().startswith("en"):
+            prompt = GENERATE_ABSTRACT_PROMPT_EN.format(review_content=truncated)
+        else:
+            prompt = GENERATE_ABSTRACT_PROMPT_ZH.format(review_content=truncated)
+
+        try:
+            abstract = await self.llm.complete(
+                prompt=prompt,
+                system_prompt="You are an expert academic writer specializing in concise, high-quality abstracts.",
+                temperature=0.3,
+                max_tokens=1000,
+            )
+            return abstract.strip()
+        except Exception as e:
+            logger.error(f"[Orchestrate] Abstract generation failed: {e}")
+            return ""
+
+    async def _generate_conclusion(self, body_content: str, language: str = "zh-CN") -> str:
+        """基于综述正文生成结论章节"""
+        # 截断过长的内容（取前 10000 字符作为上下文）
+        truncated = body_content[:10000] if len(body_content) > 10000 else body_content
+
+        if language.lower().startswith("en"):
+            prompt = GENERATE_CONCLUSION_PROMPT_EN.format(review_content=truncated)
+        else:
+            prompt = GENERATE_CONCLUSION_PROMPT_ZH.format(review_content=truncated)
+
+        try:
+            conclusion = await self.llm.complete(
+                prompt=prompt,
+                system_prompt="You are an expert academic writer specializing in comprehensive, forward-looking conclusions.",
+                temperature=0.4,
+                max_tokens=2000,
+            )
+            return conclusion.strip()
+        except Exception as e:
+            logger.error(f"[Orchestrate] Conclusion generation failed: {e}")
+            return ""
+
+    # ------------------------------------------------------------------
+    # 组装文档
+    # ------------------------------------------------------------------
+
+    def _assemble_body_only(
+        self,
+        framework: ReviewFramework,
+        sections: List[SectionResult],
+    ) -> str:
+        """仅组装正文部分（不含标题/abstract/conclusion/references），用作 LLM 输入"""
+        parts = []
+        for section in sections:
+            parts.append(f"## {section.section_title}\n")
+            parts.append(section.text)
+            parts.append("")
+        return "\n".join(parts)
 
     def _assemble_document(
         self,
         framework: ReviewFramework,
         sections: List[SectionResult],
         references_md: str,
+        abstract_text: str = "",
+        conclusion_text: str = "",
     ) -> str:
         """组装完整的综述 Markdown 文档"""
         parts = [f"# {framework.title}\n"]
 
-        if framework.abstract_description:
+        # Abstract 区块
+        if abstract_text:
+            parts.append("## Abstract\n")
+            parts.append(abstract_text)
+            parts.append("")
+        elif framework.abstract_description:
             parts.append(f"> {framework.abstract_description}\n")
 
+        # 正文章节
         for section in sections:
             parts.append(f"## {section.section_title}\n")
             parts.append(section.text)
             parts.append("")  # blank line
 
+        # Conclusion 区块
+        if conclusion_text:
+            parts.append("## Conclusion\n")
+            parts.append(conclusion_text)
+            parts.append("")
+
+        # References
         if references_md:
             parts.append("\n---\n")
             parts.append(references_md)
@@ -422,7 +513,7 @@ class ReviewOrchestrationService:
         return "\n".join(parts)
 
     # ------------------------------------------------------------------
-    # Step 7: 保存到数据库
+    # 保存到数据库
     # ------------------------------------------------------------------
 
     def _save_to_db(
@@ -434,6 +525,8 @@ class ReviewOrchestrationService:
         citation_map: Dict[str, Any],
         request: OrchestrationRequest,
         stats: Dict[str, Any],
+        abstract_text: str = "",
+        conclusion_text: str = "",
     ) -> int:
         """将综述保存到 Review 表"""
         review = Review(
@@ -441,7 +534,7 @@ class ReviewOrchestrationService:
             keywords=request.keywords,
             framework=framework.model_dump(),
             content=full_md,
-            abstract=framework.abstract_description or None,
+            abstract=abstract_text or framework.abstract_description or None,
             status=ReviewStatus.COMPLETED.value,
             language=request.language,
             model_config=None,
@@ -451,6 +544,7 @@ class ReviewOrchestrationService:
                 "orchestration": True,
                 "citation_map": citation_map,
                 "stats": stats,
+                "conclusion": conclusion_text or None,
             },
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
@@ -484,3 +578,72 @@ class ReviewOrchestrationService:
         if not paper_ids:
             return []
         return self.db.query(Paper).filter(Paper.id.in_(paper_ids)).all()
+
+    # ------------------------------------------------------------------
+    # 独立 API: 为已有综述生成 Abstract / Conclusion
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def generate_abstract_for_review(db: Session, review_id: int) -> str:
+        """为已有综述独立生成 Abstract，并更新 DB"""
+        review = db.query(Review).filter(Review.id == review_id).first()
+        if not review:
+            raise ValueError(f"Review {review_id} not found")
+
+        content = review.content or ""
+        if not content:
+            raise ValueError("Review has no content to generate abstract from")
+
+        language = review.language or "zh-CN"
+        service = ReviewOrchestrationService(db=db)
+        abstract = await service._generate_abstract(content, language)
+
+        if abstract:
+            review.abstract = abstract
+            # 同时更新 content 中的 abstract（如果需要）
+            review.updated_at = datetime.utcnow()
+            db.commit()
+
+        return abstract
+
+    @staticmethod
+    async def generate_conclusion_for_review(db: Session, review_id: int) -> str:
+        """为已有综述独立生成 Conclusion，并更新 DB"""
+        review = db.query(Review).filter(Review.id == review_id).first()
+        if not review:
+            raise ValueError(f"Review {review_id} not found")
+
+        content = review.content or ""
+        if not content:
+            raise ValueError("Review has no content to generate conclusion from")
+
+        language = review.language or "zh-CN"
+        service = ReviewOrchestrationService(db=db)
+        conclusion = await service._generate_conclusion(content, language)
+
+        if conclusion:
+            # 保存到 analysis_json
+            analysis = review.analysis_json or {}
+            if isinstance(analysis, str):
+                import json as _json
+                try:
+                    analysis = _json.loads(analysis)
+                except Exception:
+                    analysis = {}
+            analysis["conclusion"] = conclusion
+            review.analysis_json = analysis
+
+            # 追加到 content 末尾（在 References 之前）
+            if review.content and "## References" in review.content:
+                review.content = review.content.replace(
+                    "## References",
+                    f"## Conclusion\n\n{conclusion}\n\n## References",
+                )
+            elif review.content:
+                review.content += f"\n\n## Conclusion\n\n{conclusion}"
+
+            review.word_count = len(review.content) if review.content else 0
+            review.updated_at = datetime.utcnow()
+            db.commit()
+
+        return conclusion
