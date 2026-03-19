@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import json
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 import requests
 
@@ -51,6 +51,46 @@ class ModelOptionsResponse(BaseModel):
     embedding_models: List[str]
     current_llm_model: str
     current_embedding_model: str
+
+
+# ---- LLM 连接配置 ----
+
+
+class LLMConnectionConfig(BaseModel):
+    api_key: str = Field(default="", description="OpenAI-compatible API Key")
+    base_url: str = Field(default="https://api.openai.com/v1", description="API Base URL")
+
+
+# ---- 综述生成默认值 ----
+
+
+class ReviewDefaultsConfig(BaseModel):
+    citation_style: str = Field(default="harvard", description="默认引用格式: harvard/apa/ieee/chicago/vancouver")
+    language: str = Field(default="zh-CN", description="默认语言: zh-CN / en")
+    paper_limit: int = Field(default=30, ge=5, le=100, description="每节最大检索文献数")
+    section_temperature: float = Field(default=0.4, ge=0.0, le=1.0, description="章节生成温度")
+    framework_temperature: float = Field(default=0.3, ge=0.0, le=1.0, description="框架生成温度")
+    section_max_tokens: int = Field(default=8000, ge=1000, le=32000, description="章节生成最大 token 数")
+
+
+# ---- 爬虫配置 ----
+
+
+class CrawlerConfig(BaseModel):
+    delay_min: int = Field(default=1, ge=0, le=30, description="请求间最小延迟(秒)")
+    delay_max: int = Field(default=3, ge=1, le=60, description="请求间最大延迟(秒)")
+    max_retries: int = Field(default=3, ge=0, le=10, description="最大重试次数")
+    timeout: int = Field(default=30, ge=5, le=120, description="请求超时(秒)")
+
+
+# ---- 语义检索配置 ----
+
+
+class SearchConfig(BaseModel):
+    default_top_k: int = Field(default=20, ge=5, le=200, description="默认检索结果数")
+    recall_alpha: float = Field(default=0.3, ge=0.0, le=1.0, description="标签/图信号融合权重 alpha")
+    embedding_text_max_length: int = Field(default=6000, ge=500, le=20000, description="Embedding 输入文本最大字符数")
+    use_graph_propagation: bool = Field(default=True, description="是否启用引用图传播增强")
 
 
 # ---- 数据库辅助函数 ----
@@ -361,4 +401,109 @@ def get_agent_config(db: Session = Depends(get_db)):
 def save_agent_config(payload: AgentConfig, db: Session = Depends(get_db)):
     """保存 Agent 的主动交互配置"""
     _set_setting(db, "agent_config", payload.model_dump())
-    return payload
+    return payload
+
+
+# ---- LLM 连接配置 ----
+
+
+@router.get("/settings/llm-connection", response_model=LLMConnectionConfig)
+def get_llm_connection(db: Session = Depends(get_db)):
+    """获取 LLM API 连接配置（Key + Base URL）"""
+    saved = _get_setting(db, "llm_connection_config", {})
+    default = LLMConnectionConfig(
+        api_key=getattr(settings, "OPENAI_API_KEY", "") or "",
+        base_url=getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com/v1") or "https://api.openai.com/v1",
+    )
+    if saved and isinstance(saved, dict):
+        # 合并：DB 优先
+        return LLMConnectionConfig(
+            api_key=saved.get("api_key", default.api_key),
+            base_url=saved.get("base_url", default.base_url),
+        )
+    return default
+
+
+@router.put("/settings/llm-connection", response_model=LLMConnectionConfig)
+def save_llm_connection(payload: LLMConnectionConfig, db: Session = Depends(get_db)):
+    """保存 LLM API 连接配置，运行时立即生效"""
+    _set_setting(db, "llm_connection_config", payload.model_dump())
+    # 运行时热更新
+    if payload.api_key:
+        setattr(settings, "OPENAI_API_KEY", payload.api_key)
+    if payload.base_url:
+        setattr(settings, "OPENAI_BASE_URL", payload.base_url)
+    return payload
+
+
+# ---- 综述生成默认值 ----
+
+
+@router.get("/settings/review-defaults", response_model=ReviewDefaultsConfig)
+def get_review_defaults(db: Session = Depends(get_db)):
+    """获取综述生成的默认参数"""
+    saved = _get_setting(db, "review_defaults_config", {})
+    if saved and isinstance(saved, dict):
+        return ReviewDefaultsConfig(**saved)
+    return ReviewDefaultsConfig()
+
+
+@router.put("/settings/review-defaults", response_model=ReviewDefaultsConfig)
+def save_review_defaults(payload: ReviewDefaultsConfig, db: Session = Depends(get_db)):
+    """保存综述生成的默认参数"""
+    _set_setting(db, "review_defaults_config", payload.model_dump())
+    return payload
+
+
+# ---- 爬虫配置 ----
+
+
+@router.get("/settings/crawler", response_model=CrawlerConfig)
+def get_crawler_config(db: Session = Depends(get_db)):
+    """获取爬虫配置"""
+    saved = _get_setting(db, "crawler_config", {})
+    default = CrawlerConfig(
+        delay_min=getattr(settings, "CRAWLER_DELAY_MIN", 1),
+        delay_max=getattr(settings, "CRAWLER_DELAY_MAX", 3),
+        max_retries=getattr(settings, "CRAWLER_MAX_RETRIES", 3),
+        timeout=getattr(settings, "CRAWLER_TIMEOUT", 30),
+    )
+    if saved and isinstance(saved, dict):
+        return CrawlerConfig(
+            delay_min=saved.get("delay_min", default.delay_min),
+            delay_max=saved.get("delay_max", default.delay_max),
+            max_retries=saved.get("max_retries", default.max_retries),
+            timeout=saved.get("timeout", default.timeout),
+        )
+    return default
+
+
+@router.put("/settings/crawler", response_model=CrawlerConfig)
+def save_crawler_config(payload: CrawlerConfig, db: Session = Depends(get_db)):
+    """保存爬虫配置，运行时立即生效"""
+    _set_setting(db, "crawler_config", payload.model_dump())
+    # 运行时热更新
+    setattr(settings, "CRAWLER_DELAY_MIN", payload.delay_min)
+    setattr(settings, "CRAWLER_DELAY_MAX", payload.delay_max)
+    setattr(settings, "CRAWLER_MAX_RETRIES", payload.max_retries)
+    setattr(settings, "CRAWLER_TIMEOUT", payload.timeout)
+    return payload
+
+
+# ---- 语义检索配置 ----
+
+
+@router.get("/settings/search", response_model=SearchConfig)
+def get_search_config(db: Session = Depends(get_db)):
+    """获取语义检索配置"""
+    saved = _get_setting(db, "search_config", {})
+    if saved and isinstance(saved, dict):
+        return SearchConfig(**saved)
+    return SearchConfig()
+
+
+@router.put("/settings/search", response_model=SearchConfig)
+def save_search_config(payload: SearchConfig, db: Session = Depends(get_db)):
+    """保存语义检索配置"""
+    _set_setting(db, "search_config", payload.model_dump())
+    return payload
