@@ -128,8 +128,13 @@ export default function CrawlerSearchPage() {
 
             const keywordList = keywords.split(/[,，]/).map((k) => k.trim()).filter(Boolean);
 
+            // 如果只有一个关键词且包含布尔运算符（OR/AND），保持为单个元素传递
+            // 后端的 query_parser 会解析布尔表达式
+            const finalKeywords = keywordList.length === 1 ? keywordList :
+                (keywords.match(/\b(OR|AND)\b/i) ? [keywords.trim()] : keywordList);
+
             const payload: CrawlJobPayload = {
-                keywords: keywordList,
+                keywords: finalKeywords,
                 sources: selectedSources,
                 year_from: yearFrom ? Number(yearFrom) : null,
                 year_to: yearTo ? Number(yearTo) : null,
@@ -310,14 +315,31 @@ export default function CrawlerSearchPage() {
                             {/* Keywords */}
                             <div>
                                 <label style={labelStyle}>
-                                    关键词 <span style={{ fontWeight: 400, color: '#9ca3af' }}>(逗号分隔)</span>
+                                    关键词 <span style={{ fontWeight: 400, color: '#9ca3af' }}>(支持 OR / AND 布尔语法，逗号分隔多组)</span>
                                 </label>
                                 <textarea
                                     value={keywords}
                                     onChange={(e) => setKeywords(e.target.value)}
-                                    placeholder="例如: large language models, agent, planning..."
+                                    placeholder={"例如: TOD OR \"transit oriented development\" AND qingdao"}
                                     style={{ ...inputStyle, minHeight: '100px', resize: 'vertical' }}
                                 />
+                                <div style={{
+                                    marginTop: '8px',
+                                    padding: '10px 14px',
+                                    backgroundColor: '#f0f9ff',
+                                    border: '1px solid #bae6fd',
+                                    borderRadius: '6px',
+                                    fontSize: '12px',
+                                    color: '#0369a1',
+                                    lineHeight: '1.6',
+                                }}>
+                                    <strong>💡 布尔语法：</strong>
+                                    <code style={{ backgroundColor: '#e0f2fe', padding: '1px 4px', borderRadius: '3px' }}>OR</code> 表示"或"（拆分为多次搜索合并），
+                                    <code style={{ backgroundColor: '#e0f2fe', padding: '1px 4px', borderRadius: '3px' }}>AND</code> 表示"且"，
+                                    <code style={{ backgroundColor: '#e0f2fe', padding: '1px 4px', borderRadius: '3px' }}>"引号"</code> 保持短语完整。
+                                    <br />
+                                    示例：<code style={{ backgroundColor: '#e0f2fe', padding: '2px 6px', borderRadius: '3px' }}>TOD OR "transit oriented development" AND qingdao</code>
+                                </div>
                             </div>
 
                             {/* Sources */}
