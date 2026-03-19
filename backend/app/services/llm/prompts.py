@@ -593,3 +593,105 @@ Each paper below has a unique [[REF_x]] marker (x = database ID). Use these mark
 - Output section body text ONLY (Markdown format). No section titles, preambles, or extra explanations.
 - Start directly with the first paragraph of prose.
 """
+
+# ========================================================================
+# Abstract & Conclusion 自动生成 Prompts
+# ========================================================================
+
+GENERATE_ABSTRACT_PROMPT_ZH = """
+你是一位精通学术写作的资深研究者。
+
+【任务】
+基于以下完整的文献综述正文，撰写一篇结构化的学术摘要（Abstract）。
+
+【综述正文】
+{review_content}
+
+【写作规范】
+1. 摘要长度：**200-350 字**（中文），结构紧凑、信息密度高。
+2. 必须覆盖以下要素（按顺序）：
+   - **研究背景与动机**（1-2句）：该领域的核心问题是什么？为什么需要这篇综述？
+   - **综述范围与方法**（1句）：本综述覆盖了哪些方面？采用了什么分析视角？
+   - **核心发现**（2-3句）：综述揭示了哪些关键趋势、共识或争论？
+   - **研究空白与展望**（1-2句）：尚存哪些未解决的问题？未来方向是什么？
+3. 不要使用"本文"、"本综述"等第一人称表述，改用"该综述"或被动语态。
+4. 不要包含具体的文献引用标记（如 [[REF_x]] 或 (Author, Year)）。
+5. 语言精练、学术化，避免口语化表达。
+
+【输出格式】
+仅输出摘要正文，不要添加"摘要"标题或其他说明。
+"""
+
+GENERATE_ABSTRACT_PROMPT_EN = """
+You are an expert academic writer.
+
+【Task】
+Write a structured academic abstract based on the following complete literature review.
+
+【Review Content】
+{review_content}
+
+【Writing Standards】
+1. Abstract length: **200-350 words** (English), compact and information-dense.
+2. Must cover these elements (in order):
+   - **Background & Motivation** (1-2 sentences): What is the core problem? Why is this review needed?
+   - **Scope & Method** (1 sentence): What does this review cover? What analytical lens is used?
+   - **Key Findings** (2-3 sentences): What key trends, consensus, or debates does the review reveal?
+   - **Gaps & Future Directions** (1-2 sentences): What remains unresolved? Where should future research focus?
+3. Do NOT use first-person ("this paper", "we"). Use "this review" or passive voice.
+4. Do NOT include citation markers (e.g., [[REF_x]] or (Author, Year)).
+5. Language should be precise, academic, and free of colloquialisms.
+
+【Output Format】
+Output the abstract text ONLY. No "Abstract" heading or extra explanations.
+"""
+
+GENERATE_CONCLUSION_PROMPT_ZH = """
+你是一位精通学术写作的资深研究者。
+
+【任务】
+基于以下完整的文献综述正文，撰写一段全面的结论章节（Conclusion）。
+
+【综述正文】
+{review_content}
+
+【写作规范】
+1. 结论长度：**400-800 字**（中文），包含 **3-5 个**自然段。
+2. 必须覆盖以下要素：
+   - **第一段：综述总结**——概括本综述的核心研究问题、覆盖范围和主要分析维度。
+   - **第二段：关键发现提炼**——总结各章节的核心发现，提炼出最重要的 3-5 条结论性观点。注意是高度概括而非重复正文内容。
+   - **第三段：研究局限与反思**——指出本综述的方法论局限（如文献来源范围、时间跨度、语言偏差等），以及现有研究的共性不足。
+   - **第四段：未来研究方向**——基于文献中识别的研究空白，提出 3-5 个具体的、可操作的未来研究方向。每个方向应说明为什么重要以及可能的研究路径。
+   - **（可选）第五段：实践意义**——如果适用，讨论研究发现对实践或政策的启示。
+3. 段落之间使用过渡句衔接，保持逻辑连贯性。
+4. 不要使用具体的引用标记。结论应是对全文的高度概括性论述。
+5. 语言应当有总结性和前瞻性，体现学术深度。
+
+【输出格式】
+仅输出结论正文（Markdown 格式），不要输出"结论"标题或其他说明。段落之间使用 \\n\\n 分隔。
+"""
+
+GENERATE_CONCLUSION_PROMPT_EN = """
+You are an expert academic writer.
+
+【Task】
+Write a comprehensive conclusion section based on the following complete literature review.
+
+【Review Content】
+{review_content}
+
+【Writing Standards】
+1. Conclusion length: **400-800 words** (English), comprising **3-5** natural paragraphs.
+2. Must cover these elements:
+   - **Paragraph 1: Review Summary** — Recap the core research questions, scope, and main analytical dimensions.
+   - **Paragraph 2: Key Findings** — Synthesize the most important 3-5 conclusive insights from across all sections. Highly abstracted, not repetitive.
+   - **Paragraph 3: Limitations & Reflections** — Note methodological limitations of this review (scope, time range, language bias) and common shortcomings in existing research.
+   - **Paragraph 4: Future Research Directions** — Based on identified gaps, propose 3-5 specific, actionable future research directions. Explain why each matters and possible approaches.
+   - **(Optional) Paragraph 5: Practical Implications** — If applicable, discuss implications for practice or policy.
+3. Use transitional sentences between paragraphs to maintain logical coherence.
+4. Do NOT use specific citation markers. The conclusion should be a high-level synthesis.
+5. Language should be summative and forward-looking, demonstrating academic depth.
+
+【Output Format】
+Output conclusion body text ONLY (Markdown format). No "Conclusion" heading or extra explanations. Use \\n\\n between paragraphs.
+"""
