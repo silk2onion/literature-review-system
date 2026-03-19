@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   Search,
   BookOpen,
@@ -18,98 +18,28 @@ import StagingPapersPage from "./StagingPapersPage";
 import ReviewGenerateFromLibraryPage from "./ReviewGenerateFromLibraryPage";
 import RagDebugPage from "./RagDebugPage";
 import AgentChatPanel, { AgentToggleButton } from "./AgentChatPanel";
+import SettingsModal from "./SettingsModal";
 import "./App.css";
 import CrawlerSearchPage from "./CrawlerSearchPage";
 import ReviewOrchestratePage from "./ReviewOrchestratePage";
 import MonitoringDashboard from "./MonitoringDashboard";
 import ReviewListPage from "./ReviewListPage";
 
-
-const API_BASE_URL = "http://localhost:5444";
-
 function App() {
   // State
-  const [activeTab, setActiveTab] = useState<"search" | "library" | "staging" | "rag" | "draft" | "orchestrate" | "monitoring" | "reviews">("search");
+  const [activeTab, setActiveTab] = useState<
+    | "search"
+    | "library"
+    | "staging"
+    | "rag"
+    | "draft"
+    | "orchestrate"
+    | "monitoring"
+    | "reviews"
+  >("search");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
-
-  // Settings State
-  const [settingsData, setSettingsData] = useState({
-    serpapi_key: "",
-    scopus_key: "",
-    rag_enabled: false,
-    llm_model: "",
-    embedding_model: "",
-  });
-  const [modelOptions, setModelOptions] = useState<{ llm: string[]; embedding: string[] }>({
-    llm: [],
-    embedding: [],
-  });
-
-  // Fetch Settings
-  useEffect(() => {
-    if (showSettings) {
-      fetchSettings();
-    }
-  }, [showSettings]);
-
-  const fetchSettings = async () => {
-    try {
-      const [sourcesResp, modelsResp] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/settings/data-sources`),
-        fetch(`${API_BASE_URL}/api/settings/models`),
-      ]);
-
-      const sources = await sourcesResp.json();
-      const models = await modelsResp.json();
-
-      setSettingsData({
-        serpapi_key: sources.serpapi?.api_key || "",
-        scopus_key: sources.scopus?.api_key || "",
-        rag_enabled: sources.rag?.enabled || false,
-        llm_model: models.current_llm_model || "",
-        embedding_model: models.current_embedding_model || "",
-      });
-
-      setModelOptions({
-        llm: models.llm_models || [],
-        embedding: models.embedding_models || [],
-      });
-    } catch (error) {
-      console.error("Failed to fetch settings:", error);
-    }
-  };
-
-  const saveSettings = async () => {
-    try {
-      // Save Data Sources
-      await fetch(`${API_BASE_URL}/api/settings/data-sources`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          serpapi: { enabled: !!settingsData.serpapi_key, api_key: settingsData.serpapi_key },
-          scopus: { enabled: !!settingsData.scopus_key, api_key: settingsData.scopus_key },
-          rag: { enabled: settingsData.rag_enabled },
-        }),
-      });
-
-      // Save Models
-      await fetch(`${API_BASE_URL}/api/settings/models`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          llm_model: settingsData.llm_model,
-          embedding_model: settingsData.embedding_model,
-        }),
-      });
-
-      setShowSettings(false);
-    } catch (error) {
-      console.error("Failed to save settings:", error);
-      alert("保存设置失败");
-    }
-  };
 
   // Render content based on active tab
   const renderContent = () => {
@@ -211,7 +141,10 @@ function App() {
             </button>
 
             {/* Recent -> Kaomoji */}
-            <div className="sidebar-item" style={{ cursor: "default", opacity: 0.6 }}>
+            <div
+              className="sidebar-item"
+              style={{ cursor: "default", opacity: 0.6 }}
+            >
               <Smile size={16} className="sidebar-icon" />
               (｡•̀ᴗ-)✧
             </div>
@@ -286,20 +219,21 @@ function App() {
                 <Filter size={16} />
               </button>
             )}
-            <AgentToggleButton isOpen={agentOpen} onClick={() => setAgentOpen(!agentOpen)} />
+            <AgentToggleButton
+              isOpen={agentOpen}
+              onClick={() => setAgentOpen(!agentOpen)}
+            />
           </div>
         </div>
 
         {/* Page Content */}
-        <div className="page-viewport">
-          {renderContent()}
-        </div>
+        <div className="page-viewport">{renderContent()}</div>
       </div>
 
       {/* Agent Chat Panel */}
-      <AgentChatPanel 
-        isOpen={agentOpen} 
-        onClose={() => setAgentOpen(false)} 
+      <AgentChatPanel
+        isOpen={agentOpen}
+        onClose={() => setAgentOpen(false)}
         onNavigate={(tab) => {
           setActiveTab(tab);
           setAgentOpen(false);
@@ -307,74 +241,10 @@ function App() {
       />
 
       {/* Settings Modal */}
-      {showSettings && (
-        <div className="settings-backdrop" onClick={() => setShowSettings(false)}>
-          <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="settings-header">
-              <h2>Settings</h2>
-              <button className="settings-close" onClick={() => setShowSettings(false)}>×</button>
-            </div>
-            <div className="settings-body">
-              <div className="settings-section">
-                <h3>Data Sources</h3>
-                <div className="settings-row">
-                  <label>SerpApi Key</label>
-                  <input
-                    type="password"
-                    value={settingsData.serpapi_key}
-                    onChange={(e) => setSettingsData({ ...settingsData, serpapi_key: e.target.value })}
-                    placeholder="Enter SerpApi Key"
-                  />
-                </div>
-                <div className="settings-row">
-                  <label>Scopus Key</label>
-                  <input
-                    type="password"
-                    value={settingsData.scopus_key}
-                    onChange={(e) => setSettingsData({ ...settingsData, scopus_key: e.target.value })}
-                    placeholder="Enter Scopus Key"
-                  />
-                </div>
-                <div className="settings-row">
-                  <label>Enable RAG</label>
-                  <input
-                    type="checkbox"
-                    checked={settingsData.rag_enabled}
-                    onChange={(e) => setSettingsData({ ...settingsData, rag_enabled: e.target.checked })}
-                  />
-                </div>
-              </div>
-
-              <div className="settings-section">
-                <h3>Models</h3>
-                <div className="settings-row">
-                  <label>LLM Model</label>
-                  <select
-                    className="filter-select"
-                    value={settingsData.llm_model}
-                    onChange={(e) => setSettingsData({ ...settingsData, llm_model: e.target.value })}
-                  >
-                    {modelOptions.llm.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div className="settings-row">
-                  <label>Embedding Model</label>
-                  <select
-                    className="filter-select"
-                    value={settingsData.embedding_model}
-                    onChange={(e) => setSettingsData({ ...settingsData, embedding_model: e.target.value })}
-                  >
-                    {modelOptions.embedding.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div className="settings-footer">
-              <button className="settings-primary" onClick={saveSettings}>Done</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SettingsModal
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
     </div>
   );
 }

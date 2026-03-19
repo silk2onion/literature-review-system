@@ -1,296 +1,405 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from "react";
 
-const API_BASE_URL = 'http://localhost:5444'
+const API_BASE_URL = "http://localhost:5444";
 
 type SingleSourceConfig = {
-  enabled: boolean
-  api_key: string
-  engine?: string | null
-}
+  enabled: boolean;
+  api_key: string;
+  engine?: string | null;
+};
 
 type RagConfig = {
-  enabled: boolean
-}
+  enabled: boolean;
+};
 
 type DataSourcesConfig = {
-  serpapi: SingleSourceConfig
-  scopus: SingleSourceConfig
-  rag: RagConfig
-}
+  serpapi: SingleSourceConfig;
+  scopus: SingleSourceConfig;
+  rag: RagConfig;
+};
 
 type ModelOptions = {
-  llm_models: string[]
-  embedding_models: string[]
-  current_embedding_model: string
-}
+  llm_models: string[];
+  embedding_models: string[];
+  current_llm_model: string;
+  current_embedding_model: string;
+};
 
 type AgentConfig = {
-  proactive_enabled: boolean
-  heartbeat_interval: number
-}
+  proactive_enabled: boolean;
+  heartbeat_interval: number;
+};
+
+type LLMConnectionConfig = {
+  api_key: string;
+  base_url: string;
+};
+
+type ReviewDefaultsConfig = {
+  citation_style: string;
+  language: string;
+  paper_limit: number;
+  section_temperature: number;
+  framework_temperature: number;
+  section_max_tokens: number;
+};
+
+type CrawlerConfig = {
+  delay_min: number;
+  delay_max: number;
+  max_retries: number;
+  timeout: number;
+};
+
+type SearchConfig = {
+  default_top_k: number;
+  recall_alpha: number;
+  embedding_text_max_length: number;
+  use_graph_propagation: boolean;
+};
 
 type DebugResult = {
   [source: string]: {
-    enabled: boolean
-    count: number
-  }
-}
+    enabled: boolean;
+    count: number;
+  };
+};
 
 type SettingsModalProps = {
-  open: boolean
-  onClose: () => void
-}
+  open: boolean;
+  onClose: () => void;
+};
 
 const defaultConfig: DataSourcesConfig = {
   serpapi: {
     enabled: false,
-    api_key: '',
-    engine: '',
+    api_key: "",
+    engine: "",
   },
   scopus: {
     enabled: false,
-    api_key: '',
-    engine: '',
+    api_key: "",
+    engine: "",
   },
   rag: {
     enabled: false,
   },
-}
+};
 
 function SettingsModal({ open, onClose }: SettingsModalProps) {
-  const [config, setConfig] = useState<DataSourcesConfig>(defaultConfig)
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [debugResult, setDebugResult] = useState<DebugResult | null>(null)
+  const [config, setConfig] = useState<DataSourcesConfig>(defaultConfig);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [debugResult, setDebugResult] = useState<DebugResult | null>(null);
 
-  const [modelOptions, setModelOptions] = useState<ModelOptions | null>(null)
-  const [modelsLoading, setModelsLoading] = useState(false)
-  const [modelsSaving, setModelsSaving] = useState(false)
+  const [modelOptions, setModelOptions] = useState<ModelOptions | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsSaving, setModelsSaving] = useState(false);
 
-  const [systemPromptSaved, setSystemPromptSaved] = useState(false)
+  // System Prompt
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [systemPromptSaving, setSystemPromptSaving] = useState(false);
+  const [systemPromptSaved, setSystemPromptSaved] = useState(false);
 
   // Agent 主动模式配置
-  const [agentConfig, setAgentConfig] = useState<AgentConfig>({ proactive_enabled: true, heartbeat_interval: 60 })
-  const [agentLoading, setAgentLoading] = useState(false)
-  const [agentSaving, setAgentSaving] = useState(false)
+  const [agentConfig, setAgentConfig] = useState<AgentConfig>({
+    proactive_enabled: true,
+    heartbeat_interval: 60,
+  });
+  const [agentSaving, setAgentSaving] = useState(false);
+
+  // LLM 连接配置
+  const [llmConnection, setLLMConnection] = useState<LLMConnectionConfig>({
+    api_key: "",
+    base_url: "https://api.openai.com/v1",
+  });
+  const [llmConnSaving, setLlmConnSaving] = useState(false);
+  const [llmConnSaved, setLlmConnSaved] = useState(false);
+
+  // 综述生成默认值
+  const [reviewDefaults, setReviewDefaults] = useState<ReviewDefaultsConfig>({
+    citation_style: "harvard",
+    language: "zh-CN",
+    paper_limit: 30,
+    section_temperature: 0.4,
+    framework_temperature: 0.3,
+    section_max_tokens: 8000,
+  });
+  const [reviewDefaultsSaving, setReviewDefaultsSaving] = useState(false);
+  const [reviewDefaultsSaved, setReviewDefaultsSaved] = useState(false);
+
+  // 爬虫配置
+  const [crawlerConfig, setCrawlerConfig] = useState<CrawlerConfig>({
+    delay_min: 1,
+    delay_max: 3,
+    max_retries: 3,
+    timeout: 30,
+  });
+  const [crawlerSaving, setCrawlerSaving] = useState(false);
+  const [crawlerSaved, setCrawlerSaved] = useState(false);
+
+  // 语义检索配置
+  const [searchConfig, setSearchConfig] = useState<SearchConfig>({
+    default_top_k: 20,
+    recall_alpha: 0.3,
+    embedding_text_max_length: 6000,
+    use_graph_propagation: true,
+  });
+  const [searchSaving, setSearchSaving] = useState(false);
+  const [searchSaved, setSearchSaved] = useState(false);
 
   // 打开弹窗时加载当前配置
   useEffect(() => {
-    if (!open) return
+    if (!open) return;
 
-    setError(null)
-    setDebugResult(null)
-    setLoading(true)
-    setModelsLoading(true)
-    setModelOptions(null)
+    setError(null);
+    setDebugResult(null);
+    setLoading(true);
+    setModelsLoading(true);
+    setModelOptions(null);
 
     fetch(`${API_BASE_URL}/api/settings/data-sources`)
-      .then(async res => {
+      .then(async (res) => {
         if (!res.ok) {
-          throw new Error(`加载失败: ${res.status}`)
+          throw new Error(`加载失败: ${res.status}`);
         }
-        return res.json()
+        return res.json();
       })
       .then((data: DataSourcesConfig) => {
-        setConfig(data)
+        setConfig(data);
       })
-      .catch(err => {
-        console.error('加载数据源配置失败', err)
-        setError(err.message || '加载配置失败')
+      .catch((err) => {
+        console.error("加载数据源配置失败", err);
+        setError(err.message || "加载配置失败");
       })
       .finally(() => {
-        setLoading(false)
-      })
+        setLoading(false);
+      });
 
     fetch(`${API_BASE_URL}/api/settings/models`)
-      .then(async res => {
+      .then(async (res) => {
         if (!res.ok) {
-          throw new Error(`加载模型列表失败: ${res.status}`)
+          throw new Error(`加载模型列表失败: ${res.status}`);
         }
-        return res.json()
+        return res.json();
       })
       .then((data: ModelOptions) => {
-        setModelOptions(data)
+        setModelOptions(data);
       })
-      .catch(err => {
-        console.error('加载模型配置失败', err)
+      .catch((err) => {
+        console.error("加载模型配置失败", err);
         // 这里不单独设置 error，避免覆盖数据源错误；仅记录日志
       })
       .finally(() => {
-        setModelsLoading(false)
-      })
+        setModelsLoading(false);
+      });
 
     // 加载 Agent 配置
-    setAgentLoading(true)
     fetch(`${API_BASE_URL}/api/settings/agent`)
-      .then(res => res.json())
-      .then((data: AgentConfig) => {
-        setAgentConfig(data)
-      })
-      .catch(err => console.error('加载 Agent 配置失败', err))
-      .finally(() => setAgentLoading(false))
+      .then((res) => res.json())
+      .then((data: AgentConfig) => setAgentConfig(data))
+      .catch((err) => console.error("加载 Agent 配置失败", err));
 
-    setSystemPromptSaved(false)
-  }, [open])
+    // 加载系统提示词
+    fetch(`${API_BASE_URL}/api/settings/system-prompt`)
+      .then((res) => res.json())
+      .then((data: { content: string }) => setSystemPrompt(data.content || ""))
+      .catch((err) => console.error("加载系统提示词失败", err));
+
+    // 加载 LLM 连接配置
+    fetch(`${API_BASE_URL}/api/settings/llm-connection`)
+      .then((res) => res.json())
+      .then((data: LLMConnectionConfig) => setLLMConnection(data))
+      .catch((err) => console.error("加载 LLM 连接配置失败", err));
+
+    // 加载综述默认值
+    fetch(`${API_BASE_URL}/api/settings/review-defaults`)
+      .then((res) => res.json())
+      .then((data: ReviewDefaultsConfig) => setReviewDefaults(data))
+      .catch((err) => console.error("加载综述默认值失败", err));
+
+    // 加载爬虫配置
+    fetch(`${API_BASE_URL}/api/settings/crawler`)
+      .then((res) => res.json())
+      .then((data: CrawlerConfig) => setCrawlerConfig(data))
+      .catch((err) => console.error("加载爬虫配置失败", err));
+
+    // 加载语义检索配置
+    fetch(`${API_BASE_URL}/api/settings/search`)
+      .then((res) => res.json())
+      .then((data: SearchConfig) => setSearchConfig(data))
+      .catch((err) => console.error("加载语义检索配置失败", err));
+
+    setSystemPromptSaved(false);
+    setLlmConnSaved(false);
+    setReviewDefaultsSaved(false);
+    setCrawlerSaved(false);
+    setSearchSaved(false);
+  }, [open]);
 
   const handleChange = (
     section: keyof DataSourcesConfig,
     field: keyof SingleSourceConfig,
     value: string | boolean,
   ) => {
-    setConfig(prev => ({
+    setConfig((prev) => ({
       ...prev,
       [section]: {
         ...prev[section],
         [field]: value,
       },
-    }))
-  }
+    }));
+  };
 
   const handleSave = () => {
-    setSaving(true)
-    setError(null)
-    setDebugResult(null)
+    setSaving(true);
+    setError(null);
+    setDebugResult(null);
 
     fetch(`${API_BASE_URL}/api/settings/data-sources`, {
-      method: 'PUT',
+      method: "PUT",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(config),
     })
-      .then(async res => {
+      .then(async (res) => {
         if (!res.ok) {
-          const text = await res.text()
-          throw new Error(text || `保存失败: ${res.status}`)
+          const text = await res.text();
+          throw new Error(text || `保存失败: ${res.status}`);
         }
-        return res.json()
+        return res.json();
       })
       .then((data: DataSourcesConfig) => {
-        setConfig(data)
+        setConfig(data);
       })
-      .catch(err => {
-        console.error('保存数据源配置失败', err)
-        setError(err.message || '保存配置失败')
+      .catch((err) => {
+        console.error("保存数据源配置失败", err);
+        setError(err.message || "保存配置失败");
       })
       .finally(() => {
-        setSaving(false)
-      })
-  }
+        setSaving(false);
+      });
+  };
 
-  const handleModelSelectChange = (field: 'llm' | 'embedding', value: string) => {
-    setModelOptions(prev =>
+  const handleModelSelectChange = (
+    field: "llm" | "embedding",
+    value: string,
+  ) => {
+    setModelOptions((prev) =>
       prev
         ? {
             ...prev,
-            current_llm_model: field === 'llm' ? value : prev.current_llm_model,
+            current_llm_model: field === "llm" ? value : prev.current_llm_model,
             current_embedding_model:
-              field === 'embedding' ? value : prev.current_embedding_model,
+              field === "embedding" ? value : prev.current_embedding_model,
           }
         : prev,
-    )
-  }
+    );
+  };
 
   const handleSaveModels = () => {
-    if (!modelOptions) return
+    if (!modelOptions) return;
 
-    setModelsSaving(true)
-    setError(null)
+    setModelsSaving(true);
+    setError(null);
 
     const payload = {
       llm_model: modelOptions.current_llm_model,
       embedding_model: modelOptions.current_embedding_model,
-    }
+    };
 
     fetch(`${API_BASE_URL}/api/settings/models`, {
-      method: 'PUT',
+      method: "PUT",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
     })
-      .then(async res => {
+      .then(async (res) => {
         if (!res.ok) {
-          const text = await res.text()
-          throw new Error(text || `保存模型配置失败: ${res.status}`)
+          const text = await res.text();
+          throw new Error(text || `保存模型配置失败: ${res.status}`);
         }
-        return res.json()
+        return res.json();
       })
       .then((data: ModelOptions) => {
-        setModelOptions(data)
+        setModelOptions(data);
       })
-      .catch(err => {
-        console.error('保存模型配置失败', err)
-        setError(err.message || '保存模型配置失败')
+      .catch((err) => {
+        console.error("保存模型配置失败", err);
+        setError(err.message || "保存模型配置失败");
       })
       .finally(() => {
-        setModelsSaving(false)
-      })
-  }
+        setModelsSaving(false);
+      });
+  };
 
   const handleReloadModels = () => {
-    setModelsLoading(true)
-    setModelOptions(null)
+    setModelsLoading(true);
+    setModelOptions(null);
 
     fetch(`${API_BASE_URL}/api/settings/models`)
-      .then(async res => {
+      .then(async (res) => {
         if (!res.ok) {
-          const text = await res.text()
-          throw new Error(text || `刷新模型列表失败: ${res.status}`)
+          const text = await res.text();
+          throw new Error(text || `刷新模型列表失败: ${res.status}`);
         }
-        return res.json()
+        return res.json();
       })
       .then((data: ModelOptions) => {
-        setModelOptions(data)
+        setModelOptions(data);
       })
-      .catch(err => {
-        console.error('刷新模型列表失败', err)
-        setError(err.message || '刷新模型列表失败')
+      .catch((err) => {
+        console.error("刷新模型列表失败", err);
+        setError(err.message || "刷新模型列表失败");
       })
       .finally(() => {
-        setModelsLoading(false)
-      })
-  }
+        setModelsLoading(false);
+      });
+  };
 
   const handleTest = () => {
-    setTesting(true)
-    setError(null)
-    setDebugResult(null)
+    setTesting(true);
+    setError(null);
+    setDebugResult(null);
 
     const params = new URLSearchParams({
-      query: 'urban design',
-      max_results: '3',
-    })
+      query: "urban design",
+      max_results: "3",
+    });
 
-    fetch(`${API_BASE_URL}/api/debug/external-sources/test?${params.toString()}`)
-      .then(async res => {
+    fetch(
+      `${API_BASE_URL}/api/debug/external-sources/test?${params.toString()}`,
+    )
+      .then(async (res) => {
         if (!res.ok) {
-          const text = await res.text()
-          throw new Error(text || `测试失败: ${res.status}`)
+          const text = await res.text();
+          throw new Error(text || `测试失败: ${res.status}`);
         }
-        return res.json()
+        return res.json();
       })
       .then((data: DebugResult) => {
-        setDebugResult(data)
+        setDebugResult(data);
       })
-      .catch(err => {
-        console.error('测试外部数据源失败', err)
-        setError(err.message || '测试失败')
+      .catch((err) => {
+        console.error("测试外部数据源失败", err);
+        setError(err.message || "测试失败");
       })
       .finally(() => {
-        setTesting(false)
-      })
-  }
+        setTesting(false);
+      });
+  };
 
-  if (!open) return null
+  if (!open) return null;
 
   return (
     <div className="settings-backdrop">
       <div className="settings-modal">
         <div className="settings-header">
-          <h2>数据源设置</h2>
+          <h2>系统设置</h2>
           <button className="settings-close" onClick={onClose}>
             ×
           </button>
@@ -310,7 +419,9 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <input
                     type="checkbox"
                     checked={config.serpapi.enabled}
-                    onChange={e => handleChange('serpapi', 'enabled', e.target.checked)}
+                    onChange={(e) =>
+                      handleChange("serpapi", "enabled", e.target.checked)
+                    }
                   />
                 </label>
 
@@ -318,8 +429,10 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <span>API Key</span>
                   <input
                     type="text"
-                    value={config.serpapi.api_key || ''}
-                    onChange={e => handleChange('serpapi', 'api_key', e.target.value)}
+                    value={config.serpapi.api_key || ""}
+                    onChange={(e) =>
+                      handleChange("serpapi", "api_key", e.target.value)
+                    }
                     placeholder="SERPAPI_API_KEY"
                   />
                 </label>
@@ -328,8 +441,10 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <span>Engine</span>
                   <input
                     type="text"
-                    value={config.serpapi.engine || ''}
-                    onChange={e => handleChange('serpapi', 'engine', e.target.value)}
+                    value={config.serpapi.engine || ""}
+                    onChange={(e) =>
+                      handleChange("serpapi", "engine", e.target.value)
+                    }
                     placeholder="例如 scholar"
                   />
                 </label>
@@ -342,7 +457,9 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <input
                     type="checkbox"
                     checked={config.scopus.enabled}
-                    onChange={e => handleChange('scopus', 'enabled', e.target.checked)}
+                    onChange={(e) =>
+                      handleChange("scopus", "enabled", e.target.checked)
+                    }
                   />
                 </label>
 
@@ -350,8 +467,10 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <span>API Key</span>
                   <input
                     type="text"
-                    value={config.scopus.api_key || ''}
-                    onChange={e => handleChange('scopus', 'api_key', e.target.value)}
+                    value={config.scopus.api_key || ""}
+                    onChange={(e) =>
+                      handleChange("scopus", "api_key", e.target.value)
+                    }
                     placeholder="SCOPUS_API_KEY"
                   />
                 </label>
@@ -367,7 +486,9 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <input
                     type="checkbox"
                     checked={config.rag?.enabled ?? false}
-                    onChange={e => handleChange('rag', 'enabled', e.target.checked)}
+                    onChange={(e) =>
+                      handleChange("rag", "enabled", e.target.checked)
+                    }
                   />
                 </label>
               </section>
@@ -375,7 +496,8 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
               <section className="settings-section">
                 <h3>LLM 与 Embedding 模型</h3>
                 <p className="settings-description">
-                  从上游模型服务中选择主对话模型与 Embedding 模型。当前仅在运行时生效，不会写回 .env。
+                  从上游模型服务中选择主对话模型与 Embedding
+                  模型。当前仅在运行时生效，不会写回 .env。
                 </p>
 
                 <div className="settings-row">
@@ -385,7 +507,7 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                     onClick={handleReloadModels}
                     disabled={modelsLoading}
                   >
-                    {modelsLoading ? '刷新中...' : '刷新模型列表'}
+                    {modelsLoading ? "刷新中..." : "刷新模型列表"}
                   </button>
                 </div>
 
@@ -397,9 +519,11 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       <span>主 LLM 模型</span>
                       <select
                         value={modelOptions.current_llm_model}
-                        onChange={e => handleModelSelectChange('llm', e.target.value)}
+                        onChange={(e) =>
+                          handleModelSelectChange("llm", e.target.value)
+                        }
                       >
-                        {modelOptions.llm_models.map(m => (
+                        {modelOptions.llm_models.map((m) => (
                           <option key={m} value={m}>
                             {m}
                           </option>
@@ -411,11 +535,11 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                       <span>Embedding 模型</span>
                       <select
                         value={modelOptions.current_embedding_model}
-                        onChange={e =>
-                          handleModelSelectChange('embedding', e.target.value)
+                        onChange={(e) =>
+                          handleModelSelectChange("embedding", e.target.value)
                         }
                       >
-                        {modelOptions.embedding_models.map(m => (
+                        {modelOptions.embedding_models.map((m) => (
                           <option key={m} value={m}>
                             {m}
                           </option>
@@ -429,7 +553,7 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                         onClick={handleSaveModels}
                         disabled={modelsSaving}
                       >
-                        {modelsSaving ? '保存模型中...' : '保存模型设置'}
+                        {modelsSaving ? "保存模型中..." : "保存模型设置"}
                       </button>
                     </div>
                   </>
@@ -443,53 +567,61 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
               <section className="settings-section">
                 <h3>Agent 系统提示词</h3>
                 <p className="settings-description">
-                  自定义 Agent 的系统提示词，将拼接在所有 AI 对话的开头。可用于注入 VCP 插件指令、角色设定等。
+                  自定义 Agent 的系统提示词，将拼接在所有 AI
+                  对话的开头。可用于注入 VCP 插件指令、角色设定等。
                 </p>
                 <textarea
                   value={systemPrompt}
-                  onChange={e => {
-                    setSystemPrompt(e.target.value)
-                    setSystemPromptSaved(false)
+                  onChange={(e) => {
+                    setSystemPrompt(e.target.value);
+                    setSystemPromptSaved(false);
                   }}
                   placeholder="输入自定义系统提示词...例如：你是一位城市设计领域的研究助手..."
                   rows={6}
                   style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    padding: '10px',
-                    borderRadius: '6px',
-                    border: '1px solid #334155',
-                    backgroundColor: '#1e293b',
-                    color: '#e2e8f0',
-                    fontSize: '13px',
-                    fontFamily: 'monospace',
-                    resize: 'vertical',
-                    minHeight: '100px',
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "10px",
+                    borderRadius: "6px",
+                    border: "1px solid #334155",
+                    backgroundColor: "#1e293b",
+                    color: "#e2e8f0",
+                    fontSize: "13px",
+                    fontFamily: "monospace",
+                    resize: "vertical",
+                    minHeight: "100px",
                   }}
                 />
-                <div className="settings-row" style={{ marginTop: '8px' }}>
+                <div className="settings-row" style={{ marginTop: "8px" }}>
                   <button
                     className="settings-secondary"
                     onClick={async () => {
-                      setSystemPromptSaving(true)
+                      setSystemPromptSaving(true);
                       try {
-                        const res = await fetch(`${API_BASE_URL}/api/settings/system-prompt`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ content: systemPrompt }),
-                        })
-                        if (!res.ok) throw new Error('保存失败')
-                        setSystemPromptSaved(true)
+                        const res = await fetch(
+                          `${API_BASE_URL}/api/settings/system-prompt`,
+                          {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ content: systemPrompt }),
+                          },
+                        );
+                        if (!res.ok) throw new Error("保存失败");
+                        setSystemPromptSaved(true);
                       } catch (err) {
-                        console.error(err)
-                        setError('保存系统提示词失败')
+                        console.error(err);
+                        setError("保存系统提示词失败");
                       } finally {
-                        setSystemPromptSaving(false)
+                        setSystemPromptSaving(false);
                       }
                     }}
                     disabled={systemPromptSaving}
                   >
-                    {systemPromptSaving ? '保存中...' : systemPromptSaved ? '✓ 已保存' : '保存提示词'}
+                    {systemPromptSaving
+                      ? "保存中..."
+                      : systemPromptSaved
+                        ? "✓ 已保存"
+                        : "保存提示词"}
                   </button>
                 </div>
               </section>
@@ -504,57 +636,499 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <input
                     type="checkbox"
                     checked={agentConfig.proactive_enabled}
-                    onChange={e => setAgentConfig(prev => ({ ...prev, proactive_enabled: e.target.checked }))}
+                    onChange={(e) =>
+                      setAgentConfig((prev) => ({
+                        ...prev,
+                        proactive_enabled: e.target.checked,
+                      }))
+                    }
                   />
                 </label>
                 <label className="settings-row">
                   <span>心跳检查频率 (秒)</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
+                  >
                     <input
                       type="range"
                       min="30"
                       max="300"
                       step="30"
                       value={agentConfig.heartbeat_interval}
-                      onChange={e => setAgentConfig(prev => ({ ...prev, heartbeat_interval: parseInt(e.target.value) }))}
+                      onChange={(e) =>
+                        setAgentConfig((prev) => ({
+                          ...prev,
+                          heartbeat_interval: parseInt(e.target.value),
+                        }))
+                      }
                       style={{ flex: 1 }}
                     />
-                    <span style={{ minWidth: '40px' }}>{agentConfig.heartbeat_interval}s</span>
+                    <span style={{ minWidth: "40px" }}>
+                      {agentConfig.heartbeat_interval}s
+                    </span>
                   </div>
                 </label>
                 <div className="settings-row">
                   <button
                     className="settings-secondary"
                     onClick={async () => {
-                      setAgentSaving(true)
+                      setAgentSaving(true);
                       try {
-                        const res = await fetch(`${API_BASE_URL}/api/settings/agent`, {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(agentConfig),
-                        })
-                        if (!res.ok) throw new Error('保存失败')
+                        const res = await fetch(
+                          `${API_BASE_URL}/api/settings/agent`,
+                          {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(agentConfig),
+                          },
+                        );
+                        if (!res.ok) throw new Error("保存失败");
                         // 保存成功后也可以提示
                       } catch (err) {
-                        console.error(err)
-                        setError('保存 Agent 配置失败')
+                        console.error(err);
+                        setError("保存 Agent 配置失败");
                       } finally {
-                        setAgentSaving(false)
+                        setAgentSaving(false);
                       }
                     }}
                     disabled={agentSaving}
                   >
-                    {agentSaving ? '保存中...' : '保存 Agent 设置'}
+                    {agentSaving ? "保存中..." : "保存 Agent 设置"}
                   </button>
                 </div>
               </section>
+              {/* ── LLM 连接配置 ── */}
+              <section className="settings-section">
+                <h3>🔗 LLM 连接</h3>
+                <p className="settings-description">
+                  配置 OpenAI 兼容 API 的密钥和 Base URL。修改后立即热生效，无需重启后端。
+                </p>
+                <label className="settings-row">
+                  <span>API Key</span>
+                  <input
+                    type="password"
+                    value={llmConnection.api_key}
+                    onChange={(e) =>
+                      setLLMConnection((prev) => ({ ...prev, api_key: e.target.value }))
+                    }
+                    placeholder="sk-..."
+                    style={{ flex: 1 }}
+                  />
+                </label>
+                <label className="settings-row">
+                  <span>Base URL</span>
+                  <input
+                    type="text"
+                    value={llmConnection.base_url}
+                    onChange={(e) =>
+                      setLLMConnection((prev) => ({ ...prev, base_url: e.target.value }))
+                    }
+                    placeholder="https://api.openai.com/v1"
+                    style={{ flex: 1 }}
+                  />
+                </label>
+                <div className="settings-row" style={{ marginTop: "8px" }}>
+                  <button
+                    className="settings-secondary"
+                    onClick={async () => {
+                      setLlmConnSaving(true);
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/api/settings/llm-connection`, {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(llmConnection),
+                        });
+                        if (!res.ok) throw new Error("保存失败");
+                        setLlmConnSaved(true);
+                      } catch (err) {
+                        console.error(err);
+                        setError("保存 LLM 连接配置失败");
+                      } finally {
+                        setLlmConnSaving(false);
+                      }
+                    }}
+                    disabled={llmConnSaving}
+                  >
+                    {llmConnSaving ? "保存中..." : llmConnSaved ? "✓ 已保存" : "保存连接配置"}
+                  </button>
+                </div>
+              </section>
+
+              {/* ── 综述生成默认值 ── */}
+              <section className="settings-section">
+                <h3>📝 综述生成默认值</h3>
+                <p className="settings-description">
+                  一键生成(Orchestrate)与 PhD Pipeline 使用的默认参数。
+                </p>
+                <label className="settings-row">
+                  <span>引用格式</span>
+                  <select
+                    value={reviewDefaults.citation_style}
+                    onChange={(e) =>
+                      setReviewDefaults((prev) => ({ ...prev, citation_style: e.target.value }))
+                    }
+                  >
+                    <option value="harvard">Harvard</option>
+                    <option value="apa">APA</option>
+                    <option value="ieee">IEEE</option>
+                    <option value="chicago">Chicago</option>
+                  </select>
+                </label>
+                <label className="settings-row">
+                  <span>语言</span>
+                  <select
+                    value={reviewDefaults.language}
+                    onChange={(e) =>
+                      setReviewDefaults((prev) => ({ ...prev, language: e.target.value }))
+                    }
+                  >
+                    <option value="zh-CN">中文</option>
+                    <option value="en">English</option>
+                  </select>
+                </label>
+                <label className="settings-row">
+                  <span>文献数量上限</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="5"
+                      max="100"
+                      step="5"
+                      value={reviewDefaults.paper_limit}
+                      onChange={(e) =>
+                        setReviewDefaults((prev) => ({
+                          ...prev,
+                          paper_limit: parseInt(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "40px" }}>{reviewDefaults.paper_limit}</span>
+                  </div>
+                </label>
+                <label className="settings-row">
+                  <span>章节 Temperature</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={reviewDefaults.section_temperature}
+                      onChange={(e) =>
+                        setReviewDefaults((prev) => ({
+                          ...prev,
+                          section_temperature: parseFloat(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "40px" }}>{reviewDefaults.section_temperature}</span>
+                  </div>
+                </label>
+                <label className="settings-row">
+                  <span>框架 Temperature</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={reviewDefaults.framework_temperature}
+                      onChange={(e) =>
+                        setReviewDefaults((prev) => ({
+                          ...prev,
+                          framework_temperature: parseFloat(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "40px" }}>{reviewDefaults.framework_temperature}</span>
+                  </div>
+                </label>
+                <label className="settings-row">
+                  <span>章节 Max Tokens</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="1000"
+                      max="32000"
+                      step="1000"
+                      value={reviewDefaults.section_max_tokens}
+                      onChange={(e) =>
+                        setReviewDefaults((prev) => ({
+                          ...prev,
+                          section_max_tokens: parseInt(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "50px" }}>{reviewDefaults.section_max_tokens}</span>
+                  </div>
+                </label>
+                <div className="settings-row" style={{ marginTop: "8px" }}>
+                  <button
+                    className="settings-secondary"
+                    onClick={async () => {
+                      setReviewDefaultsSaving(true);
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/api/settings/review-defaults`, {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(reviewDefaults),
+                        });
+                        if (!res.ok) throw new Error("保存失败");
+                        setReviewDefaultsSaved(true);
+                      } catch (err) {
+                        console.error(err);
+                        setError("保存综述默认值失败");
+                      } finally {
+                        setReviewDefaultsSaving(false);
+                      }
+                    }}
+                    disabled={reviewDefaultsSaving}
+                  >
+                    {reviewDefaultsSaving
+                      ? "保存中..."
+                      : reviewDefaultsSaved
+                        ? "✓ 已保存"
+                        : "保存综述默认值"}
+                  </button>
+                </div>
+              </section>
+
+              {/* ── 爬虫配置 ── */}
+              <section className="settings-section">
+                <h3>🕷️ 爬虫配置</h3>
+                <p className="settings-description">
+                  控制学术爬虫的请求速率、超时和重试策略。修改后立即热生效。
+                </p>
+                <label className="settings-row">
+                  <span>最小延迟 (秒)</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="10"
+                      step="0.5"
+                      value={crawlerConfig.delay_min}
+                      onChange={(e) =>
+                        setCrawlerConfig((prev) => ({
+                          ...prev,
+                          delay_min: parseFloat(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "40px" }}>{crawlerConfig.delay_min}s</span>
+                  </div>
+                </label>
+                <label className="settings-row">
+                  <span>最大延迟 (秒)</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="1"
+                      max="30"
+                      step="1"
+                      value={crawlerConfig.delay_max}
+                      onChange={(e) =>
+                        setCrawlerConfig((prev) => ({
+                          ...prev,
+                          delay_max: parseFloat(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "40px" }}>{crawlerConfig.delay_max}s</span>
+                  </div>
+                </label>
+                <label className="settings-row">
+                  <span>最大重试次数</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
+                      value={crawlerConfig.max_retries}
+                      onChange={(e) =>
+                        setCrawlerConfig((prev) => ({
+                          ...prev,
+                          max_retries: parseInt(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "40px" }}>{crawlerConfig.max_retries}</span>
+                  </div>
+                </label>
+                <label className="settings-row">
+                  <span>请求超时 (秒)</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="10"
+                      max="120"
+                      step="5"
+                      value={crawlerConfig.timeout}
+                      onChange={(e) =>
+                        setCrawlerConfig((prev) => ({
+                          ...prev,
+                          timeout: parseInt(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "40px" }}>{crawlerConfig.timeout}s</span>
+                  </div>
+                </label>
+                <div className="settings-row" style={{ marginTop: "8px" }}>
+                  <button
+                    className="settings-secondary"
+                    onClick={async () => {
+                      setCrawlerSaving(true);
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/api/settings/crawler`, {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(crawlerConfig),
+                        });
+                        if (!res.ok) throw new Error("保存失败");
+                        setCrawlerSaved(true);
+                      } catch (err) {
+                        console.error(err);
+                        setError("保存爬虫配置失败");
+                      } finally {
+                        setCrawlerSaving(false);
+                      }
+                    }}
+                    disabled={crawlerSaving}
+                  >
+                    {crawlerSaving ? "保存中..." : crawlerSaved ? "✓ 已保存" : "保存爬虫配置"}
+                  </button>
+                </div>
+              </section>
+
+              {/* ── 语义检索配置 ── */}
+              <section className="settings-section">
+                <h3>🔍 语义检索</h3>
+                <p className="settings-description">
+                  调整向量检索的 Top-K、混合检索权重 (alpha)、文本截断长度及引用图谱传播。
+                </p>
+                <label className="settings-row">
+                  <span>Default Top-K</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="5"
+                      max="100"
+                      step="5"
+                      value={searchConfig.default_top_k}
+                      onChange={(e) =>
+                        setSearchConfig((prev) => ({
+                          ...prev,
+                          default_top_k: parseInt(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "40px" }}>{searchConfig.default_top_k}</span>
+                  </div>
+                </label>
+                <label className="settings-row">
+                  <span>Recall Alpha (向量 vs 关键词)</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={searchConfig.recall_alpha}
+                      onChange={(e) =>
+                        setSearchConfig((prev) => ({
+                          ...prev,
+                          recall_alpha: parseFloat(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "40px" }}>{searchConfig.recall_alpha}</span>
+                  </div>
+                </label>
+                <label className="settings-row">
+                  <span>Embedding 文本截断长度</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <input
+                      type="range"
+                      min="1000"
+                      max="20000"
+                      step="500"
+                      value={searchConfig.embedding_text_max_length}
+                      onChange={(e) =>
+                        setSearchConfig((prev) => ({
+                          ...prev,
+                          embedding_text_max_length: parseInt(e.target.value),
+                        }))
+                      }
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ minWidth: "50px" }}>
+                      {searchConfig.embedding_text_max_length}
+                    </span>
+                  </div>
+                </label>
+                <label className="settings-row">
+                  <span>启用引用图谱传播</span>
+                  <input
+                    type="checkbox"
+                    checked={searchConfig.use_graph_propagation}
+                    onChange={(e) =>
+                      setSearchConfig((prev) => ({
+                        ...prev,
+                        use_graph_propagation: e.target.checked,
+                      }))
+                    }
+                  />
+                </label>
+                <div className="settings-row" style={{ marginTop: "8px" }}>
+                  <button
+                    className="settings-secondary"
+                    onClick={async () => {
+                      setSearchSaving(true);
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/api/settings/search`, {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(searchConfig),
+                        });
+                        if (!res.ok) throw new Error("保存失败");
+                        setSearchSaved(true);
+                      } catch (err) {
+                        console.error(err);
+                        setError("保存语义检索配置失败");
+                      } finally {
+                        setSearchSaving(false);
+                      }
+                    }}
+                    disabled={searchSaving}
+                  >
+                    {searchSaving ? "保存中..." : searchSaved ? "✓ 已保存" : "保存检索配置"}
+                  </button>
+                </div>
+              </section>
+
               {debugResult && (
-               <section className="settings-section">
-                 <h3>最近一次测试结果</h3>
-                 <pre className="settings-debug-pre">
-                   {JSON.stringify(debugResult, null, 2)}
-                 </pre>
-               </section>
+                <section className="settings-section">
+                  <h3>最近一次测试结果</h3>
+                  <pre className="settings-debug-pre">
+                    {JSON.stringify(debugResult, null, 2)}
+                  </pre>
+                </section>
               )}
             </>
           )}
@@ -566,7 +1140,7 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
             onClick={handleTest}
             disabled={testing || loading}
           >
-            {testing ? '测试中...' : '测试外部数据源'}
+            {testing ? "测试中..." : "测试外部数据源"}
           </button>
 
           <div className="settings-footer-spacer" />
@@ -579,12 +1153,12 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
             onClick={handleSave}
             disabled={saving || loading}
           >
-            {saving ? '保存中...' : '保存'}
+            {saving ? "保存中..." : "保存"}
           </button>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default SettingsModal
+export default SettingsModal;

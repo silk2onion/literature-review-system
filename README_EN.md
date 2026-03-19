@@ -1,230 +1,390 @@
-```markdown
-# Urban Design Literature Review Assistant (Crawler + LLM + RAG)
+# ScholarNative — Academic Literature Review Generation System
 
-This project is an end-to-end system aimed at researchers in urban design and planning. It covers multi-source crawlers to collect literature, building a local literature database, automated literature review generation using large language models (LLMs), and a visual RAG (retrieval-augmented generation) semantic search and debugging interface.
+> **An end-to-end literature review assistant for Urban Design / Urban Planning PhD researchers**
+>
+> Multi-source crawling → Staging review → Main library → Semantic search (RAG) → LLM-powered academic review generation → `[[REF_x]]` deterministic citation tracking
 
-The codebase already supports an end-to-end local workflow: keyword search → multi-source crawling → staging review → main literature database → LLM-generated reviews → RAG semantic search and debugging. This document provides a quick overview of features, how to use the system, and design/usage notes for the RAG subsystem.
+---
 
-## 1. Project Structure & Responsibilities
+## Table of Contents
 
-- Backend service: Built with FastAPI + SQLite. Responsibilities include:
-  - Crawling and ingesting literature
-  - Local literature search and management
-  - LLM-based review generation
-  - Vector embeddings and semantic search (RAG)
-  - Various debugging/administration APIs
-- Frontend application: Built with React + TypeScript + Vite. Provides:
-  - Review assistant page (keyword search + one-click review generation)
-  - Library page (filtering, paginated browsing)
-  - Staging review page (inspect crawl results and promote to main DB)
-  - Crawl jobs page (view job status, retry, pause)
-  - RAG visualization & debugging panel (inspect retrieval and activated semantic groups)
-- Data & model layer:
-  - `Paper` / `StagingPaper`: main library and staging library
-  - `Review`: each generated review with content and structured analysis
-  - `CrawlJob`: batch crawl jobs
-  - `Tag` / `TagGroup` / `PaperTag`: tags and tag groups
-  - `PaperCitation`: citation relationships
-  - `RecallLog`: logs of recalled papers during review generation
+- [System Overview](#system-overview)
+- [Core Features](#core-features)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Feature Guide](#feature-guide)
+- [API Reference](#api-reference)
+- [Data Models](#data-models)
+- [Frontend Pages](#frontend-pages)
+- [Configuration](#configuration)
+- [Docker Deployment](#docker-deployment)
+- [Roadmap](#roadmap)
 
-## 2. Feature Overview
+---
 
-### 2.1 Crawling and Local Library Management
+## System Overview
 
-- Support keyword-based batch crawls with year ranges and source combinations (e.g., arXiv, Scholar SerpAPI, Scopus).
-- Crawl jobs (`CrawlJob`) perform multi-page, paginated crawling and ingest results in background.
-- All crawl results are first written to the staging table (`StagingPaper`) and must be manually reviewed before promotion to the main `Paper` table.
-- `Paper` records include title, authors, abstract, year, source, DOI and reserved fields like `pdf_path`, journal tier, and indexing platform.
-- Staging and main library queries support filtering by keyword, batch, status, and paginated results.
+ScholarNative is a full-stack academic assistant covering the entire pipeline from literature collection to review writing:
 
-### 2.2 LLM Literature Review Generation
+```
+Keywords → Multi-source Crawlers → Staging Review → Main Library → Embedding Vectorization
+                                                                        ↓
+                                                              Semantic Search (RAG) ← Query
+                                                                        ↓
+                                                              LLM Review Generation (with [[REF_x]] Citation Anchoring)
+                                                                        ↓
+                                                              Multi-format Export (Markdown)
+```
 
-- From the Review Assistant page the user provides topic keywords, year range, sources and max number of papers. The system will:
-  - Retrieve and recall a candidate set of papers;
-  - Call an LLM to generate a structured review (by default in a single pass);
-  - Save the result as a `Review` record containing:
-    - Review content (Markdown)
-    - Structured analysis data (timeline, topic clustering, etc.) in `analysis_json`
-    - Associations between the review and the papers used (many-to-many `Review` ↔ `Paper`)
-- There is an entry point for a PhD-level multi-stage pipeline:
-  - Option: enable the PhD multi-stage pipeline to generate an outline first, then the full text;
-  - Option: generate outline only, useful for drafting chapter structure and writing plan;
-- Future work will add chapter-level RAG + citation pipelines to improve citation accuracy and traceability.
+**Current Status**: The system has been validated end-to-end. A single run can produce a complete academic review with **7 chapters, 30+ cited papers, 22,000+ words**, supporting Harvard / APA / IEEE / Chicago / Vancouver citation formats.
 
-### 2.3 RAG Semantic Search (Current Capabilities)
+---
 
-- Generate embeddings for each paper in the main library (based on title and abstract) and store them in the database.
-- Provide semantic search HTTP API: input a natural language query and filters, return top-K similar papers with similarity scores.
-- Provide RAG WebSocket debugging API: stream intermediate retrieval results (`partial_result`, `done`, `error`).
-- Frontend includes a RAG debug panel to:
-  - Inspect retrieved papers, similarity scores and activated semantic group tags in real time;
-  - Run multiple queries/sessions for comparison of retrieval settings.
+## Core Features
 
-## 3. Environment Setup & Run Instructions
+### 📚 Multi-Source Literature Collection
 
-### 3.1 Requirements
+- **5 Academic Sources**: Arxiv, Google Scholar (SerpAPI), Scopus, CrossRef, Semantic Scholar
+- **Two-Stage Ingestion**: Crawled results enter a staging library (StagingPaper) first, then get promoted to the main library (Paper) after manual review
+- **Batch Job Management**: Paginated crawling, pause/resume/retry, real-time logs
 
-- OS: macOS / Linux / Windows (development validated on macOS).
-- Required components:
-  - Python 3.10+ (use a virtual environment is recommended)
-  - Node.js 18+ and `npm` or `pnpm`
-  - An LLM service compatible with OpenAI APIs (either OpenAI or a self-hosted compatible service). Configure API key and model names.
+### 🔍 Semantic Search (RAG)
 
-### 3.2 Start Backend
+- **Vector Indexing**: Title + abstract based embedding generation (supports Google Gemini Embedding and other models, 3072 dimensions)
+- **Hybrid Recall**: Semantic similarity + tag enhancement + keyword expansion
+- **WebSocket Real-time Debugging**: Stream intermediate retrieval results, visualize similarity distributions and activated semantic groups
 
-1. Change into the `backend` directory and install Python dependencies:
+### 📝 Intelligent Review Generation
+
+- **One-Click Review (Orchestrate)**: Input topic → auto-generate framework → per-section semantic search → LLM generates 800-1500 words/section of academic narrative
+- **PhD Multi-Stage Pipeline**: Framework generation → claim extraction → evidence matching → section rendering → full document assembly (6-step async pipeline with checkpoint/resume)
+- **`[[REF_x]]` Citation Anchoring System**: LLM outputs deterministic placeholders → post-processor resolves them to real citations `(Author, Year)` via DB lookup, completely eliminating LLM citation hallucinations
+- **Multiple Citation Formats**: Harvard / APA / IEEE / Chicago / Vancouver, unified rendering by `ReferenceFormatterService`
+
+### 📊 Citation Analysis
+
+- **Citation Graph**: Automatically collect citing/cited relationships, build ego-graph visualization
+- **Journal Info Enhancement**: Auto-query impact factors, JCR quartiles, indexing platforms (SCI/SSCI/EI)
+
+### 🤖 AI Assistant
+
+- **Agent Chat**: Built-in conversational AI assistant supporting natural language interaction and task execution
+- **Proactive Heartbeat**: Agent periodically pushes system status notifications
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Frontend                              │
+│  React 18 + TypeScript + Vite                                │
+│  10 feature pages + Agent Chat sidebar                       │
+│  Port: 5173 (dev) / 80 (nginx)                               │
+├─────────────────────────────────────────────────────────────┤
+│                        Backend                               │
+│  FastAPI + SQLAlchemy + SQLite                               │
+│  Port: 5444                                                  │
+│                                                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐           │
+│  │ 12 API   │  │ Services │  │ LLM Integration  │           │
+│  │ Routers  │  │ Layer    │  │ (OpenAI Compat.) │           │
+│  └──────────┘  └──────────┘  └──────────────────┘           │
+│                                                              │
+│  ┌──────────────────────────────────────────────┐            │
+│  │ Crawler Layer (5 sources)                     │            │
+│  │ arxiv / scholar_serpapi / scopus /             │            │
+│  │ crossref / semantic_scholar                   │            │
+│  └──────────────────────────────────────────────┘            │
+│                                                              │
+│  ┌──────────────────────────────────────────────┐            │
+│  │ Citation Anchoring ([[REF_x]] system)         │            │
+│  │ citation_anchoring.py + reference_formatter   │            │
+│  └──────────────────────────────────────────────┘            │
+├─────────────────────────────────────────────────────────────┤
+│  SQLite Database                                             │
+│  15 tables / 11 core models                                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Quick Start
+
+### Requirements
+
+| Component | Version                                       |
+| --------- | --------------------------------------------- |
+| Python    | 3.10+                                         |
+| Node.js   | 18+                                           |
+| LLM API   | OpenAI-compatible endpoint (API Key required) |
+
+### Start Backend
 
 ```bash
 cd backend
 pip install -r requirements.txt
+
+# Configure .env file (see "Configuration" section)
+# Or modify defaults in app/config.py
+
+python run.py
+# Backend listens on http://localhost:5444
+# API docs at http://localhost:5444/api/docs
 ```
 
-2. Configure environment variables:
-  - Create a `.env` file under `backend/` and set:
-    - Database path (if not set, the default SQLite file is used)
-    - LLM service API URL and API key
-    - Default LLM model and embedding model names
-
-3. Start FastAPI in development mode:
-
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 5444
-```
-
-The backend will be available at http://localhost:5444 by default.
-
-### 3.3 Start Frontend
-
-1. Change into the `frontend` directory and install dependencies:
+### Start Frontend
 
 ```bash
 cd frontend
 npm install
+npm run dev
+# Frontend listens on http://localhost:5173
 ```
 
-2. Start the Vite dev server:
+### Verify
+
+1. Visit `http://localhost:5173` — you should see the main interface
+2. Go to "Settings" to configure LLM API Key and models
+3. Navigate to "Literature Search" page, enter keywords to start collecting papers
+
+---
+
+## Feature Guide
+
+### 1. Literature Collection & Ingestion
+
+**Flow**: Keywords + year range + data sources → CrawlJob batch task → staging library → manual review → main library
+
+```
+User enters keywords
+    ↓
+CrawlJob created (multiple sources can run in parallel)
+    ↓
+Crawlers paginate through results (supports pause/resume/retry)
+    ↓
+Results written to StagingPaper (staging library)
+    ↓
+User reviews in staging page → Promote / Reject / Delete
+    ↓
+On promotion: auto-generate Embedding → write to Paper (main library)
+```
+
+**Source Capabilities**:
+
+| Source                   | Full Metadata | Abstract | Citation Count | PDF Link |
+| ------------------------ | ------------- | -------- | -------------- | -------- |
+| Arxiv                    | ✅            | ✅       | ❌             | ✅       |
+| Google Scholar (SerpAPI) | ✅            | ✅       | ✅             | Partial  |
+| Scopus                   | ✅            | ✅       | ✅             | ✅       |
+| CrossRef                 | ✅            | Partial  | ✅             | ❌       |
+| Semantic Scholar         | ✅            | ✅       | ✅             | Partial  |
+
+### 2. One-Click Review Generation (Orchestrate)
+
+**Entry**: Review Orchestrate page → input topic, keywords, language, citation format
+
+**Pipeline Flow**:
+
+1. **Framework Generation**: LLM generates a structured outline of 5-8 sections (with title / description / research_gap / search_keywords)
+2. **Per-Section Literature Search**: Semantic search using each section's search_keywords, recall top-K relevant papers
+3. **Per-Section Content Generation**: Inject recalled papers into `[[REF_x]]` mapping table → LLM generates 800-1500 word academic narrative → post-processor resolves citations
+4. **Full Document Assembly**: Merge all sections + generate reference list → save as Review record
+
+**End-to-End Validation Results** (2026-03-18):
+
+- 7 sections, each with 800-1200 words of critical academic narrative
+- 30 papers cited with Harvard format `(Author, Year)`
+- Total word count: 22,236
+- Complete `citation_map`, `references_markdown`, `full_markdown`
+
+### 3. PhD Multi-Stage Pipeline
+
+**Entry**: Review Shelf → "Generate from Library" / PhD Pipeline page
+
+**6-Step Pipeline** (supports SSE progress streaming + checkpoint/resume):
+
+| Step     | Name              | Description                                  |
+| -------- | ----------------- | -------------------------------------------- |
+| Step 0   | Framework         | LLM generates structured outline             |
+| Step 0.5 | Auto Search       | Auto-crawl/search papers by section keywords |
+| Step 1   | Claim Extraction  | Extract claims from literature               |
+| Step 2   | Evidence Matching | Match supporting papers to each claim        |
+| Step 3   | Section Rendering | From claims + evidence → full section text   |
+| Step 4   | Document Assembly | Merge sections + reference list              |
+
+### 4. `[[REF_x]]` Citation Anchoring System
+
+**Core Design**: Replace LLM free-form citations with deterministic IDs, completely eliminating citation hallucinations.
+
+```
+Step 1: Build mapping table
+  paper_id=42 → [[REF_1]], paper_id=17 → [[REF_2]], ...
+
+Step 2: Inject into prompt
+  "Paper: Transit-Oriented Development... [[REF_1]]"
+
+Step 3: LLM output
+  "...as demonstrated by [[REF_1]] and [[REF_2]]..."
+
+Step 4: Post-processor resolves
+  [[REF_1]] → DB lookup paper_id=42 → (Chen, 2023)
+  [[REF_2]] → DB lookup paper_id=17 → (Wang and Li, 2024)
+```
+
+**Implementation**: `backend/app/services/citation_anchoring.py` (~355 lines)
+
+### 5. Semantic Search (RAG)
+
+- **HTTP API**: `POST /api/semantic-search/search` — input query text, return top-K similar papers
+- **WebSocket Debug**: `/api/semantic-search/ws` — stream retrieval process
+- **Frontend Debug Panel**: Real-time visualization of similarity distributions, activated semantic groups, expanded keywords
+
+### 6. Citation Analysis
+
+- **Ego-Graph**: `GET /api/citations/ego-graph/{paper_id}` — get citation network for a single paper
+- **Batch Sync**: `POST /api/citations/sync-batch` — batch collect citation relationships
+- **Network Analysis**: `POST /api/citation-analysis/analyze` — compute citation network metrics
+
+---
+
+## API Reference
+
+The backend provides **12 API router modules**. Full interactive documentation at `http://localhost:5444/api/docs` (Swagger UI).
+
+| Route Prefix             | Module             | Key Endpoints                                                    |
+| ------------------------ | ------------------ | ---------------------------------------------------------------- |
+| `/api/papers`            | Paper Management   | CRUD, local search, PDF upload/download, embedding backfill      |
+| `/api/staging-papers`    | Staging Library    | Search, review, promote, reject, delete                          |
+| `/api/reviews`           | Review Management  | One-click review, PhD pipeline (6 steps), SSE progress, export   |
+| `/api/crawl`             | Crawl Jobs         | Create jobs, paginated crawling, pause/resume/retry              |
+| `/api/semantic-search`   | Semantic Search    | HTTP search, WebSocket debug, embedding backfill                 |
+| `/api/citations`         | Citation Relations | Ego-graph, single sync, batch sync                               |
+| `/api/citation-analysis` | Citation Analysis  | Network metrics computation                                      |
+| `/api/groups`            | Paper Groups       | CRUD, paper association management                               |
+| `/api/journal-info`      | Journal Info       | Journal lookup, paper info enrichment                            |
+| `/api/recall-logs`       | Recall Logs        | Log search interaction behavior                                  |
+| `/api/agent`             | AI Assistant       | Chat API, WebSocket notifications                                |
+| `/api/settings`          | System Settings    | Data source config, model selection, system prompt, agent config |
+
+---
+
+## Data Models
+
+The system contains **15 database tables** and **11 core ORM models**:
+
+| Model              | Description        | Key Fields                                                          |
+| ------------------ | ------------------ | ------------------------------------------------------------------- |
+| `Paper`            | Main Library       | title, authors, abstract, year, doi, embedding, journal_quartile    |
+| `StagingPaper`     | Staging Library    | Same as Paper + batch_id, status (pending/promoted/rejected)        |
+| `Review`           | Review Records     | title, framework(JSON), content(Markdown), citation_map, word_count |
+| `CrawlJob`         | Crawl Jobs         | keywords, sources, status, fetched_count, log                       |
+| `PipelineTask`     | PhD Pipeline Tasks | task_id, status, state_data(checkpoint JSON), steps                 |
+| `Citation`         | Citation Relations | citing_paper_id, cited_paper_id, source                             |
+| `Tag` / `TagGroup` | Tag System         | Paper tags and tag groups                                           |
+| `PaperChunk`       | Text Fragments     | paper_id, chunk_text, chunk_embedding (PDF segments)                |
+| `RecallLog`        | Recall Logs        | query_keywords, paper_id, rank, score                               |
+| `Group`            | Paper Groups       | name, description, paper associations                               |
+| `SystemSetting`    | System Config      | key-value pair storage                                              |
+
+---
+
+## Frontend Pages
+
+The system includes **10 feature pages** + 1 sidebar Agent Chat:
+
+| Page               | Component File                                      | Function                                                          |
+| ------------------ | --------------------------------------------------- | ----------------------------------------------------------------- |
+| Literature Search  | `CrawlerSearchPage.tsx`                             | Keyword input → multi-source crawling → job management            |
+| Library            | `LibraryPage.tsx`                                   | Browse, filter, sort, PDF management, citation analysis, grouping |
+| Staging Library    | `StagingPapersPage.tsx`                             | Review staging papers: promote/reject/delete                      |
+| Review Orchestrate | `ReviewOrchestratePage.tsx`                         | One-click review entry (topic → framework → full text)            |
+| Review Shelf       | `ReviewListPage.tsx`                                | Generated review list, export                                     |
+| Generate from Lib  | `ReviewGenerateFromLibraryPage.tsx`                 | Select papers from library → generate review                      |
+| PhD Pipeline       | `PhdPipelinePage.tsx`                               | 6-step pipeline interactive interface                             |
+| RAG Debug          | `RagDebugPage.tsx` + `SemanticSearchDebugPanel.tsx` | Semantic search visualization & debugging                         |
+| Task Monitor       | `MonitoringDashboard.tsx`                           | PhD tasks + crawl jobs real-time status                           |
+| Settings           | `SettingsModal.tsx`                                 | API config, model selection, data source settings                 |
+| Agent Chat         | `AgentChatPanel.tsx`                                | Sidebar AI assistant chat                                         |
+
+---
+
+## Configuration
+
+### Backend Configuration
+
+Create a `.env` file in the `backend/` directory:
+
+```env
+# LLM Service (OpenAI-compatible endpoint)
+LLM_API_KEY=sk-your-api-key
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o
+
+# Embedding Model
+EMBEDDING_MODEL=text-embedding-3-large
+
+# Database (defaults to SQLite)
+DATABASE_URL=sqlite:///./data/literature.db
+
+# Crawler API Keys (configure as needed)
+SERPAPI_KEY=your-serpapi-key
+SCOPUS_API_KEY=your-scopus-key
+```
+
+LLM models, embedding models, and data source parameters can also be configured dynamically from the frontend "Settings" page.
+
+### Frontend Configuration
+
+The frontend uses the proxy config in `vite.config.ts` to automatically proxy API requests to the backend at `localhost:5444`. No additional configuration needed.
+
+---
+
+## Docker Deployment
 
 ```bash
-npm run dev
+# From project root
+docker-compose -f deployment/docker-compose.yml up -d
+
+# Access
+# Frontend: http://localhost (nginx reverse proxy)
+# API docs: http://localhost/api/docs
 ```
 
-3. Open the Vite local address in your browser (typically http://localhost:5173).
+Configuration files are in the `deployment/` directory:
 
-## 4. How to Use
+- `docker-compose.yml` — service orchestration
+- `Dockerfile.backend` — backend image
+- `Dockerfile.frontend` — frontend image
+- `nginx.conf` — nginx reverse proxy config
 
-### 4.1 From Keywords to First Review
+---
 
-1. Open the frontend and go to the Review Assistant view.
-2. Fill the top input fields with:
-  - Topic keywords (e.g., "transit oriented development" or any urban design topic)
-  - Start and end years, and a maximum number of papers
-  - Select data sources (e.g., arXiv, Scholar SerpAPI, Scopus)
-3. Click the search button to fetch and display candidate papers.
-4. When the candidate list looks satisfactory, click "Generate review from these papers":
-  - Default: generate full review in one step;
-  - PhD pipeline: generate outline first, then full text;
-  - Outline-only: generate a chapter outline for planning.
-5. After generation, the review content appears in the left conversation stream and the preview shows Markdown and structured analysis.
+## Roadmap
 
-### 4.2 Library & Staging Management
+### ✅ Completed
 
-- Staging page:
-  - Inspect raw crawl results grouped by crawl job;
-  - Filter by keyword, batch, status;
-  - Promote confirmed staging papers to the main library (StagingPaper → Paper) with one click.
-- Library page:
-  - Filter by keyword, year, source, peer-review status, etc.;
-  - Paginated browsing and future bulk operations (grouping, archiving).
+- [x] Multi-source literature crawling (5 data sources) + two-stage ingestion
+- [x] Semantic search RAG (embedding + cosine similarity + tag enhancement)
+- [x] One-click review generation (Orchestrate pipeline: framework → per-section generation)
+- [x] `[[REF_x]]` deterministic citation anchoring system
+- [x] PhD 6-step multi-stage pipeline (SSE progress streaming + checkpoint/resume)
+- [x] 5 citation formats (Harvard / APA / IEEE / Chicago / Vancouver)
+- [x] Citation graph + journal info enhancement
+- [x] AI Agent Chat assistant
+- [x] 10 frontend feature pages
 
-Promoting a staging paper automatically generates or updates its embedding to keep vector search in sync.
+### 🔄 In Progress / Planned
 
-### 4.3 Crawl Job Management
+- [ ] Fragment-level RAG (PDF segment embedding + page-numbered citations)
+- [ ] Citation Anchoring enhancement (per-section independent RAG recall → LLM writes only within recalled scope)
+- [ ] Abstract / Conclusion auto-generation
+- [ ] Export to DOCX / PDF formats
+- [ ] Claim-evidence structured storage (`analysis_json` with claim → supporting_papers mapping)
+- [ ] Citation validation tools (auto-detect citation anomalies in reviews)
 
-- Crawl Jobs page shows existing `CrawlJob` entries:
-  - Keywords, sources, time range, requested count, failure count, and current status;
-  - View job logs and failure reasons; supports retry/pause in future iterations.
-- A top-level status bar polls crawl progress and notifies when jobs complete or fail.
+---
 
-### 4.4 RAG Debug Panel
+## License
 
-This panel is intended for research and parameter tuning. Typical workflow:
-
-1. Open the RAG Debug view on the frontend.
-2. Enter a natural language query (e.g., "Impact of compact urban form on walkability and public space vitality") and choose whether to enable semantic group expansion.
-3. Submit the query and receive streamed results by WebSocket:
-  - Batch display of retrieved papers and similarity scores;
-  - Which semantic groups were activated.
-4. Use the panel to observe model behavior under current embedding and semantic group settings.
-
-## 5. RAG System Manual
-
-### 5.1 Design Goals
-
-- Upgrade keyword + traditional filters to a hybrid retrieval scheme: semantic search + tag/citation enhancement.
-- Recall a set of highly relevant papers for each chapter or question before review generation to serve as evidence context for the LLM.
-- Enable traceable citations: every citation should map to a concrete paper or text fragment.
-
-### 5.2 Current Implementation
-
-1. Vector generation & storage:
-  - Generate embeddings for papers in the main library and store them in the DB.
-  - A vector generation service ensures new papers get embeddings on ingest.
-2. Semantic search API:
-  - HTTP endpoint accepts query text and filters, returns top-K similar papers and optional debug info.
-3. RAG WebSocket debug API:
-  - Stream retrieval results per session, supporting multi-round queries/debugging.
-4. Frontend RAG debug panel:
-  - Show retrieval results, similarity, activated semantic groups;
-  - Can be extended to integrate with Review Assistant to preview the evidence pool before generation.
-
-### 5.3 Future Extension: Chapter-level RAG & Citation Pipeline (Design Stage)
-
-Planned approach:
-
-1. Construct queries at chapter / question granularity:
-  - Generate RAG queries for each chapter title or question;
-  - Retrieve a set of relevant paper cards (title, authors, abstract, year).
-2. LLM generates chapter text restricted to the retrieved cards and embeds citations:
-  - Constrain the LLM to cite only from the candidate cards;
-  - Use a numeric citation format like [1], [2,5] to avoid inventing sources.
-3. The system maps citation numbers back to `paper_id`:
-  - System renders the bibliography based on DB metadata rather than trusting the LLM-generated list.
-4. Later extend to fragment-level RAG when PDF parsing is available:
-  - Embed paper passages and retrieve fragments for direct quoting with page numbers.
-
-This design is an important part of the PhD-level multi-stage pipeline to improve citation accuracy and traceability.
-
-## 6. Completed Features (Brief)
-
-- Backend:
-  - FastAPI service with base routes (health, version).
-  - SQLite DB and core models (`Paper`, `Review`, `CrawlJob`, `StagingPaper`, `Tag`, etc.).
-- Multi-source crawlers & crawl jobs:
-  - Wrappers for arXiv, Scholar SerpAPI, Scopus, etc.
-  - Batch crawl tasks and a crawl job list page.
-- Literature library:
-  - Two-stage ingestion: staging + main library with manual review.
-  - Local search and paginated display.
-- LLM reviews:
-  - Single-pass structured review generation (with timeline/topics).
-  - Entry point for PhD multi-stage pipeline (outline first).
-- Vector search & RAG:
-  - Embedding generation and storage for papers.
-  - Vector search service, HTTP API, and WebSocket debug interface.
-  - Frontend RAG visualization panel.
-
-## 7. Next Development Directions (related to this README)
-
-- Integrate chapter-level RAG into the review pipeline:
-  - Retrieve candidate paper cards per chapter before generation;
-  - Force the LLM to write only within that candidate set and embed citation numbers.
-- Build an argument–evidence structure:
-  - Save each argument and its supporting paper list in `Review.analysis_json`;
-  - Allow the frontend to trace conclusions back to supporting papers.
-- Citation validation tools:
-  - Parse review references and verify they map to real papers;
-  - Flag potential inconsistencies.
-
-After these enhancements, the system will evolve from "automatic review writing" to an "evidence-traceable, auditable citation" assistant—better suited for PhD theses and high-quality literature reviews.
-
-```
+This project is a personal academic research tool, intended for learning and research purposes only.

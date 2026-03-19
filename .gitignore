@@ -94,8 +94,93 @@ dmypy.json
 # Additional ignores for test and environment files
 tests/
 
+# User data / runtime artifacts (no usage traces in repo)
 data/
+backend/data/
 *.pdf
 *.db
 *.sqlite
+*.sqlite3
 .env*
+
+# Frontend build cache
+frontend/dist/
+frontend/node_modules/
+
+# ============================================
+# Development artifacts (not for production/PR)
+# ============================================
+
+# Kilocode / IDE-specific project config
+.kilocodemodes
+
+# Memory bank (Roo/Cline working memory)
+memory-bank/
+
+# Development / progress docs (README.md & README_EN.md are the canonical docs)
+architecture.md
+BACKEND_SETUP.md
+CODE_REVIEW_FIXES.md
+DEBUG_LOG.md
+implementation-guide.md
+PROGRESS.md
+PROGRESS_BACKEND.md
+quick-start.md
+
+# Redundant docs folder (content covered by README)
+docs/
+
+# Backend one-off debug/repair/analysis scripts and their outputs
+# (keep only run.py, requirements.txt and the app/ package)
+backend/*.txt
+!backend/requirements.txt
+backend/*.json
+
+# Root-level development/planning docs (not for production)
+READMEEE.MD
+scraper.md
+tech-stack-options.md
+V2-RULES-TODO.md
+workflow-diagrams.md
+backend/add_archived_columns.py
+backend/calculate_workspace_hash.py
+backend/check_api_task.py
+backend/check_memory_task.py
+backend/check_task.py
+backend/decode_global.py
+backend/decode_metadata.py
+backend/decode_sync_data_full.py
+backend/evaluate_citation_graph.py
+backend/extract_antigravity_global.py
+backend/extract_global_keys.py
+backend/extract_global_vals_v2.py
+backend/extract_sync_data.py
+backend/extract_workspace_items.py
+backend/find_active_workspace.py
+backend/find_session_index.py
+backend/get_global_restoration_data.py
+backend/get_global_vals.py
+backend/get_hist_f322.py
+backend/inspect_db.py
+backend/parse_trajectories.py
+backend/query_workspace_keys.py
+backend/repair_task_79e92d04.py
+backend/restore_chat_index_final.py
+backend/restore_chat_index_v3.py
+backend/restore_history.py
+backend/resurrect_task.py
+backend/reverify_workspace.py
+backend/search_global_id.py
+backend/search_global_title.py
+backend/search_global_titles.py
+backend/search_pb.py
+backend/search_workspace_id.py
+backend/sweep_vscdb.py
+backend/sweep_vscdb_v2.py
+backend/sweep_vscdb_v3.py
+backend/test_recall_enhancement.py
+backend/test_search.py
+backend/verify_repair.py
+backend/verify_restoration.py
+backend/debug_checkpoint.json
+backend/app/1
