@@ -63,7 +63,7 @@ def search_across_sources(
             logger.error("初始化 CrossRefCrawler 失败: %s", e)
     if "semantic_scholar" in normalized_sources:
         try:
-            crawlers.append(SemanticScholarCrawler(settings=settings))
+            crawlers.append(SemanticScholarCrawler())
         except Exception as e:
             logger.error("初始化 SemanticScholarCrawler 失败: %s", e)
 

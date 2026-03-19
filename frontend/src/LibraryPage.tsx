@@ -57,7 +57,7 @@ type TaskStatus = "idle" | "running" | "done" | "error";
 
 type SortField = "year" | "title" | "firstAuthor" | "source" | "createdAt";
 type SortOrder = "asc" | "desc";
-type SourceFilter = "all" | "arxiv" | "crossref";
+type SourceFilter = "all" | "arxiv" | "crossref" | "semantic_scholar";
 
 const API_BASE_URL = "http://localhost:5444";
 
@@ -198,7 +198,6 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
 
   const executeDelete = async () => {
     setDeleting(true);
-    const countToDelete = selectedIds.size;
     try {
       const resp = await fetch(`${API_BASE_URL}/api/papers/batch-delete`, {
         method: "POST",
@@ -997,6 +996,7 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
               <option value="all">全部</option>
               <option value="arxiv">arXiv</option>
               <option value="crossref">CrossRef</option>
+              <option value="semantic_scholar">Semantic Scholar</option>
             </select>
           </div>
 

@@ -5,6 +5,7 @@ from app.services.crawler.base_crawler import BaseCrawler
 from app.services.crawler.source_models import SourcePaper
 from app.services.crawler.scholar_serpapi_crawler import ScholarSerpapiCrawler
 from app.services.crawler.scopus_crawler import ScopusCrawler
+from app.services.crawler.semantic_scholar_crawler import SemanticScholarCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class MultiSourceOrchestrator:
         self._crawler_factories: Dict[str, Callable[[], BaseCrawler]] = {
             "scholar_serpapi": ScholarSerpapiCrawler,
             "scopus": ScopusCrawler,
+            "semantic_scholar": SemanticScholarCrawler,
         }
 
     def _create_crawler(self, name: str) -> Optional[BaseCrawler]:
