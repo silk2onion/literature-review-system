@@ -506,4 +506,95 @@ def get_search_config(db: Session = Depends(get_db)):
 def save_search_config(payload: SearchConfig, db: Session = Depends(get_db)):
     """保存语义检索配置"""
     _set_setting(db, "search_config", payload.model_dump())
+
+
+# ---- 学科配置 (Discipline Profile) ----
+
+
+class DisciplinePresetSaveRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100, description="预设名称")
+    profile: Dict[str, Any] = Field(..., description="DisciplineProfile 字典")
+
+
+@router.get("/settings/discipline-profile")
+def get_discipline_profile_endpoint(db: Session = Depends(get_db)):
+    """获取当前学科配置"""
+    from app.services.llm.prompts import get_discipline_profile
+    profile = get_discipline_profile(db)
+    return profile.model_dump()
+
+
+@router.put("/settings/discipline-profile")
+def save_discipline_profile_endpoint(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+):
+    """保存/更新当前学科配置"""
+    from app.services.llm.prompts import DisciplineProfile, save_discipline_profile
+    profile = DisciplineProfile(**payload)
+    save_discipline_profile(db, profile)
+    return {"success": True, "message": "学科配置已保存", "profile": profile.model_dump()}
+
+
+@router.get("/settings/discipline-presets")
+def list_discipline_presets(db: Session = Depends(get_db)):
+    """获取所有已保存的学科预设列表"""
+    saved = _get_setting(db, "discipline_presets", {})
+    if not saved or not isinstance(saved, dict):
+        saved = {}
+    # 返回预设名称列表和简要信息
+    presets = []
+    for name, profile_data in saved.items():
+        presets.append({
+            "name": name,
+            "field_name": profile_data.get("field_name", "Unknown"),
+        })
+    return {"presets": presets}
+
+
+@router.post("/settings/discipline-presets")
+def save_discipline_preset(
+    payload: DisciplinePresetSaveRequest,
+    db: Session = Depends(get_db),
+):
+    """将当前学科配置另存为命名预设"""
+    from app.services.llm.prompts import DisciplineProfile
+    # 验证 profile 数据合法性
+    profile = DisciplineProfile(**payload.profile)
+    
+    # 读取现有预设
+    saved = _get_setting(db, "discipline_presets", {})
+    if not saved or not isinstance(saved, dict):
+        saved = {}
+    
+    saved[payload.name] = profile.model_dump()
+    _set_setting(db, "discipline_presets", saved)
+    
+    return {"success": True, "message": f"预设 '{payload.name}' 已保存"}
+
+
+@router.delete("/settings/discipline-presets/{name}")
+def delete_discipline_preset(name: str, db: Session = Depends(get_db)):
+    """删除指定的学科预设"""
+    saved = _get_setting(db, "discipline_presets", {})
+    if not saved or not isinstance(saved, dict) or name not in saved:
+        return {"success": False, "message": f"预设 '{name}' 不存在"}
+    
+    del saved[name]
+    _set_setting(db, "discipline_presets", saved)
+    return {"success": True, "message": f"预设 '{name}' 已删除"}
+
+
+@router.post("/settings/discipline-presets/{name}/load")
+def load_discipline_preset(name: str, db: Session = Depends(get_db)):
+    """加载指定预设为当前学科配置"""
+    from app.services.llm.prompts import DisciplineProfile, save_discipline_profile
+    
+    saved = _get_setting(db, "discipline_presets", {})
+    if not saved or not isinstance(saved, dict) or name not in saved:
+        return {"success": False, "message": f"预设 '{name}' 不存在"}
+    
+    profile = DisciplineProfile(**saved[name])
+    save_discipline_profile(db, profile)
+    return {"success": True, "message": f"已加载预设 '{name}'", "profile": profile.model_dump()}
     return payload
