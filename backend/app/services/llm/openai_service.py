@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 from app.config import Settings
 from app.models.paper import Paper
 from app.schemas.review import LitReviewLLMResult, TimelinePoint, TopicStat
-from app.services.llm.prompts import PromptConfig, DEFAULT_LIT_REVIEW_PROMPT_CONFIG
+from app.services.llm.prompts import PromptConfig, DEFAULT_LIT_REVIEW_PROMPT_CONFIG, get_discipline_profile
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,8 @@ class OpenAIService:
     async def generate_review_framework(
         self,
         keywords: List[str],
-        papers: List[Paper]
+        papers: List[Paper],
+        db=None,
     ) -> str:
         """
         生成综述框架
@@ -61,24 +62,32 @@ class OpenAIService:
         Args:
             keywords: 关键词列表
             papers: 文献列表
+            db: 可选的数据库 session，用于读取学科配置
             
         Returns:
             综述框架文本
         """
         try:
+            # 获取学科配置
+            profile = get_discipline_profile(db) if db else get_discipline_profile(None)
+            
             # 构建prompt
-            prompt = self._build_framework_prompt(keywords, papers)
+            prompt = self._build_framework_prompt(keywords, papers, field_name=profile.field_name)
             
             # 调用LLM
             logger.info(f"Generating framework with model: {self.model}, prompt length: {len(prompt)}")
             logger.debug(f"Framework prompt snippet: {prompt[:200]}...")
+
+            system_content = profile.framework_system_prompt or (
+                f"你是一位资深的学术研究专家，擅长撰写{profile.field_name}相关的文献综述。"
+            )
 
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "你是一位资深的学术研究专家，擅长撰写城市设计相关的文献综述。"
+                        "content": system_content
                     },
                     {
                         "role": "user",
@@ -112,7 +121,8 @@ class OpenAIService:
     async def generate_review_content(
         self,
         framework: str,
-        papers: List[Paper]
+        papers: List[Paper],
+        db=None,
     ) -> str:
         """
         基于框架生成详细综述内容
@@ -120,21 +130,30 @@ class OpenAIService:
         Args:
             framework: 综述框架
             papers: 文献列表
+            db: 可选的数据库 session，用于读取学科配置
             
         Returns:
             详细综述内容
         """
         try:
-            # 构建prompt
-            prompt = self._build_content_prompt(framework, papers)
+            # 获取学科配置
+            profile = get_discipline_profile(db) if db else get_discipline_profile(None)
             
+            # 构建prompt
+            prompt = self._build_content_prompt(framework, papers, field_name=profile.field_name)
+            
+            system_content = profile.section_system_prompt or (
+                f"你是一位资深的学术研究专家，擅长撰写{profile.field_name}相关的文献综述。"
+                "请基于提供的框架和文献，撰写详细、专业、有深度的综述内容。"
+            )
+
             # 调用LLM
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "你是一位资深的学术研究专家，擅长撰写城市设计相关的文献综述。请基于提供的框架和文献，撰写详细、专业、有深度的综述内容。"
+                        "content": system_content
                     },
                     {
                         "role": "user",
@@ -235,6 +254,7 @@ class OpenAIService:
         custom_prompt: Optional[str] = None,
         year_from: Optional[int] = None,
         year_to: Optional[int] = None,
+        db=None,
     ) -> LitReviewLLMResult:
         """
         一次性生成结构化文献综述:
@@ -244,12 +264,19 @@ class OpenAIService:
         Args:
             keywords: 关键词列表
             papers: 候选文献列表
-            prompt_config: 默认提示词配置，如不提供则使用 DEFAULT_LIT_REVIEW_PROMPT_CONFIG
+            prompt_config: 提示词配置，如不提供则从学科配置动态构建
             custom_prompt: 前端传入的自定义提示词，若非空则优先使用
             year_from: 起始年份
             year_to: 结束年份
+            db: 可选的数据库 session，用于读取学科配置动态构建 PromptConfig
         """
-        cfg = prompt_config or DEFAULT_LIT_REVIEW_PROMPT_CONFIG
+        if prompt_config:
+            cfg = prompt_config
+        elif db:
+            from app.services.llm.prompts import build_lit_review_prompt
+            cfg = build_lit_review_prompt(db)
+        else:
+            cfg = DEFAULT_LIT_REVIEW_PROMPT_CONFIG
 
         # 1. 构造 year_range 文本
         if year_from and year_to:
@@ -412,7 +439,8 @@ class OpenAIService:
     def _build_framework_prompt(
         self,
         keywords: List[str],
-        papers: List[Any]
+        papers: List[Any],
+        field_name: str = "学术研究",
     ) -> str:
         """构建生成框架的prompt"""
         keywords_str = "、".join(keywords)
@@ -460,7 +488,7 @@ class OpenAIService:
         
         papers_text = "\n".join(paper_summaries)
         
-        prompt = f"""请基于以下关键词和文献，为一篇城市设计相关的文献综述生成详细的框架大纲。
+        prompt = f"""请基于以下关键词和文献，为一篇{field_name}相关的文献综述生成详细的框架大纲。
 
 关键词：{keywords_str}
 
@@ -488,7 +516,8 @@ class OpenAIService:
     def _build_content_prompt(
         self,
         framework: str,
-        papers: List[Any]
+        papers: List[Any],
+        field_name: str = "学术研究",
     ) -> str:
         """构建生成详细内容的prompt"""
         # 提取文献详细信息

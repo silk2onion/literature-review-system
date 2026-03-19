@@ -576,7 +576,7 @@ class PipelineTaskRunner:
     async def _step_generate_framework(self):
         from app.config import settings
         from app.services.llm.openai_service import OpenAIService
-        from app.services.llm.prompts import ORCHESTRATE_FRAMEWORK_PROMPT
+        from app.services.llm.prompts import ORCHESTRATE_FRAMEWORK_PROMPT, get_framework_system_prompt
 
         step_key = "framework"
         self._step_start(step_key, "调用 LLM 生成文献综述框架...")
@@ -593,10 +593,7 @@ class PipelineTaskRunner:
                 language=lang_label,
                 custom_instructions="Please ensure each section is detailed enough to warrant a 500-800 word academic discussion later.",
             )
-            system_prompt = (
-                "You are an expert academic researcher. Generate a DETAILED LITERATURE REVIEW outline "
-                "(not a PhD research plan). Include 4-7 sections with search_keywords per section."
-            )
+            system_prompt = get_framework_system_prompt(self.db)
             raw = await llm.complete(prompt=prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=2000)
             return raw
 

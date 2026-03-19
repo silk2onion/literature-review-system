@@ -1,5 +1,10 @@
-from typing import List
-from pydantic import BaseModel
+import json as _json
+import logging
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class PromptConfig(BaseModel):
@@ -13,44 +18,175 @@ class PromptPreviewResponse(BaseModel):
     rendered_prompt: str
 
 
+# ========================================================================
+# 学科配置模型 (Discipline Profile)
+# ========================================================================
+
+class DisciplineProfile(BaseModel):
+    """
+    学科配置——控制综述 LLM 的学术身份和领域特化。
+    通过 Agent 对话自动生成，或在 Settings 面板手动编辑。
+    """
+    field_name: str = Field(
+        default="General Academic Research",
+        description="学科/领域名称，如 'Urban Design', '量子计算', 'Biomedical Engineering'",
+    )
+    researcher_identity: str = Field(
+        default=(
+            "你是一位资深的跨学科学术研究者，"
+            "擅长撰写系统性的文献综述，能够从大量论文中抽取发展脉络、研究主题与研究空白。"
+        ),
+        description="综述 LLM 的身份描述（用于 system_prompt 开头）",
+    )
+    review_system_prompt: str = Field(
+        default=(
+            "你是一位资深的跨学科学术研究者，"
+            "擅长撰写系统性的文献综述，能够从大量论文中抽取发展脉络、研究主题与研究空白。"
+        ),
+        description="一键综述的完整 system_prompt",
+    )
+    review_user_template: str = Field(
+        default=(
+            "请基于下列信息撰写一篇结构化的、面向学术读者的文献综述。\n\n"
+            "【研究主题关键词】\n"
+            "{{keywords}}\n\n"
+            "【时间范围】\n"
+            "{{year_range}}\n\n"
+            "【候选文献摘要】\n"
+            "{{paper_summaries}}\n\n"
+            "写作要求：\n"
+            "1. 用结构化 Markdown 输出，章节结构建议为：\n"
+            "   - 引言：研究背景与问题动机\n"
+            "   - 研究进展：按时间或主题分段梳理主要研究方向\n"
+            "   - 方法与技术路径：归纳主要方法类别与代表性工作\n"
+            "   - 综合讨论：比较不同研究路线的贡献、局限与适用场景\n"
+            "   - 研究空白与未来方向：指出尚未充分研究的问题与潜在突破点\n"
+            "2. 行文要基于提供的文献，不要凭空捏造不存在的论文。\n"
+            "3. 在涉及具体研究工作时，引用文献列表中的编号或标题片段以帮助读者定位。\n"
+            "4. **关注期刊质量**：如果文献信息中提供了期刊分区（Q1/Q2）、影响因子或收录情况（SCI/SSCI），"
+            "请优先讨论高水平期刊的论文，并在文中适当提及（例如'发表于 Q1 期刊的研究指出...'）。\n\n"
+            "在 Markdown 正文之后，请额外输出一个 JSON 代码块，格式示意如下（注意保持合法 JSON）：\n"
+            "```json\n"
+            "{\n"
+            '  "timeline": [\n'
+            '    {"period": "2010-2013", "topic": "早期研究探索", "paper_ids": [1, 3, 5]},\n'
+            '    {"period": "2014-2017", "topic": "方法论成熟期", "paper_ids": [2, 4]}\n'
+            "  ],\n"
+            '  "topics": [\n'
+            '    {"label": "核心主题A", "count": 8},\n'
+            '    {"label": "核心主题B", "count": 5}\n'
+            "  ]\n"
+            "}\n"
+            "```\n"
+            "其中 paper_ids 需对应你在综述中重点讨论的文献编号或内部索引。"
+        ),
+        description="一键综述的 user 模板（含 {{keywords}} 等占位符）",
+    )
+    example_timeline_topics: List[str] = Field(
+        default_factory=lambda: ["早期研究探索", "方法论成熟期"],
+        description="JSON 示例中的时间线主题词（帮 LLM 生成更贴合学科的时间线）",
+    )
+    example_theme_labels: List[str] = Field(
+        default_factory=lambda: ["核心主题A", "核心主题B"],
+        description="JSON 示例中的主题标签（帮 LLM 生成更贴合学科的主题分类）",
+    )
+    claims_system_prompt: str = Field(
+        default=(
+            "你是一位资深的{field_name}领域学术研究者，"
+            "擅长将章节草稿拆解为结构化的'论点–证据'表。"
+        ),
+        description="Claims 生成的 system_prompt（支持 {field_name} 占位符）",
+    )
+    framework_system_prompt: str = Field(
+        default=(
+            "You are an expert academic researcher. Your task is to generate a LITERATURE REVIEW outline "
+            "(not a PhD research plan or timeline). The outline should contain 3-6 sections covering: "
+            "introduction, core topic literature analysis, methods/techniques review, discussion and research gaps. "
+            "Each section should include search_keywords for finding relevant papers in academic databases."
+        ),
+        description="框架生成的 system_prompt",
+    )
+    section_system_prompt: str = Field(
+        default=(
+            "你是一位精通学术写作的研究者，擅长撰写高质量的学术综述。"
+        ),
+        description="章节写作的 system_prompt",
+    )
+
+
+# ── 默认通用学术配置 ──────────────────────────────────────
+
+DEFAULT_DISCIPLINE_PROFILE = DisciplineProfile()
+
+
+def get_discipline_profile(db) -> DisciplineProfile:
+    """
+    从数据库 SystemSetting 读取学科配置。
+    Fallback 链：DB → DEFAULT_DISCIPLINE_PROFILE
+    """
+    try:
+        from app.models.system_setting import SystemSetting
+        row = db.query(SystemSetting).filter(
+            SystemSetting.key == "discipline_profile"
+        ).first()
+        if row and row.value:
+            data = _json.loads(row.value) if isinstance(row.value, str) else row.value
+            return DisciplineProfile(**data)
+    except Exception as e:
+        logger.warning("Failed to load discipline profile from DB: %s", e)
+    return DEFAULT_DISCIPLINE_PROFILE
+
+
+def save_discipline_profile(db, profile: DisciplineProfile) -> None:
+    """将学科配置写入 SystemSetting"""
+    from app.models.system_setting import SystemSetting
+    row = db.query(SystemSetting).filter(
+        SystemSetting.key == "discipline_profile"
+    ).first()
+    value_str = _json.dumps(profile.model_dump(), ensure_ascii=False)
+    if row:
+        row.value = value_str
+    else:
+        db.add(SystemSetting(key="discipline_profile", value=value_str))
+    db.commit()
+
+
+def build_lit_review_prompt(db) -> PromptConfig:
+    """
+    动态构建 PromptConfig——从 DisciplineProfile 读取 system_prompt 和 user_template。
+    替代原来的静态 DEFAULT_LIT_REVIEW_PROMPT_CONFIG。
+    """
+    profile = get_discipline_profile(db)
+    return PromptConfig(
+        system_prompt=profile.review_system_prompt,
+        user_template=profile.review_user_template,
+    )
+
+
+def get_claims_system_prompt(db) -> str:
+    """获取 Claims 阶段的 system_prompt，自动替换 {field_name}"""
+    profile = get_discipline_profile(db)
+    return profile.claims_system_prompt.replace(
+        "{field_name}", profile.field_name
+    )
+
+
+def get_framework_system_prompt(db) -> str:
+    """获取框架生成阶段的 system_prompt"""
+    profile = get_discipline_profile(db)
+    return profile.framework_system_prompt
+
+
+def get_section_system_prompt(db) -> str:
+    """获取章节写作阶段的 system_prompt"""
+    profile = get_discipline_profile(db)
+    return profile.section_system_prompt
+
+
+# ── 保留静态引用供无 DB 场景 fallback ──────────────────────
 DEFAULT_LIT_REVIEW_PROMPT_CONFIG = PromptConfig(
-    system_prompt=(
-        "你是一位拥有城市设计与城市规划双重背景的资深学术研究者，"
-        "擅长撰写系统性的城市设计相关文献综述，能够从大量论文中抽取发展脉络、研究主题与研究空白。"
-    ),
-    user_template=(
-        "请基于下列信息撰写一篇结构化的、面向学术读者的文献综述。\n\n"
-        "【研究主题关键词】\n"
-        "{{keywords}}\n\n"
-        "【时间范围】\n"
-        "{{year_range}}\n\n"
-        "【候选文献摘要】\n"
-        "{{paper_summaries}}\n\n"
-        "写作要求：\n"
-        "1. 用结构化 Markdown 输出，章节结构建议为：\n"
-        "   - 引言：研究背景与问题动机\n"
-        "   - 研究进展：按时间或主题分段梳理主要研究方向\n"
-        "   - 方法与技术路径：归纳主要方法类别与代表性工作\n"
-        "   - 综合讨论：比较不同研究路线的贡献、局限与适用场景\n"
-        "   - 研究空白与未来方向：指出尚未充分研究的问题与潜在突破点\n"
-        "2. 行文要基于提供的文献，不要凭空捏造不存在的论文。\n"
-        "3. 在涉及具体研究工作时，引用文献列表中的编号或标题片段以帮助读者定位。\n"
-        "4. **关注期刊质量**：如果文献信息中提供了期刊分区（Q1/Q2）、影响因子或收录情况（SCI/SSCI），请优先讨论高水平期刊的论文，并在文中适当提及（例如'发表于 Q1 期刊的研究指出...'）。\n\n"
-        "在 Markdown 正文之后，请额外输出一个 JSON 代码块，格式示意如下（注意保持合法 JSON）：\n"
-        "```json\n"
-        "{\n"
-        "  \"timeline\": [\n"
-        "    {\"period\": \"2010-2013\", \"topic\": \"早期可持续城市设计\", \"paper_ids\": [1, 3, 5]},\n"
-        "    {\"period\": \"2014-2017\", \"topic\": \"数据驱动的城市形态分析\", \"paper_ids\": [2, 4]}\n"
-        "  ],\n"
-        "  \"topics\": [\n"
-        "    {\"label\": \"公共空间与步行友好性\", \"count\": 8},\n"
-        "    {\"label\": \"街道网络形态\", \"count\": 5}\n"
-        "  ]\n"
-        "}\n"
-        "```\n"
-        "其中 paper_ids 需对应你在综述中重点讨论的文献编号或内部索引。"
-    ),
+    system_prompt=DEFAULT_DISCIPLINE_PROFILE.review_system_prompt,
+    user_template=DEFAULT_DISCIPLINE_PROFILE.review_user_template,
 )
 
 

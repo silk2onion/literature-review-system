@@ -163,6 +163,14 @@ TOOLS_SCHEMA = [
             "new_topic": "可选：修改该任务的研究课题",
         },
     },
+    {
+        "name": "configure_discipline",
+        "description": "配置/切换综述系统的学科身份。用户可以用自然语言描述自己的学科方向，AI 会自动生成完整的学科配置（包括 LLM 身份、提示词模板等）并保存。例如：'把系统配置成建筑学方向'、'我是做计算机视觉的'。",
+        "parameters": {
+            "description": "用户对学科方向的自然语言描述（必填）",
+            "preset_name": "可选：同时保存为命名预设",
+        },
+    },
 ]
 
 TOOLS_DESCRIPTION = "\n".join(
@@ -444,6 +452,7 @@ class AgentService:
             "manage_groups": self._tool_manage_groups,
             "check_task_progress": self._tool_check_task_progress,
             "modify_task_requirements": self._tool_modify_task_requirements,
+            "configure_discipline": self._tool_configure_discipline,
         }
 
         handler = handlers.get(tool)
@@ -672,7 +681,7 @@ class AgentService:
 
     async def _tool_generate_framework(self, params: Dict, db: Session) -> Dict:
         """Generate a literature review framework"""
-        from app.services.llm.prompts import ORCHESTRATE_FRAMEWORK_PROMPT
+        from app.services.llm.prompts import ORCHESTRATE_FRAMEWORK_PROMPT, get_framework_system_prompt
         import re as _re
 
         topic = params.get("topic", "")
@@ -697,12 +706,7 @@ class AgentService:
         try:
             raw = await self.llm.complete(
                 prompt=prompt,
-                system_prompt=(
-                    "You are an expert academic researcher. Your task is to generate a LITERATURE REVIEW outline "
-                    "(not a PhD research plan or timeline). The outline should contain 3-6 sections covering: "
-                    "introduction, core topic literature analysis, methods/techniques review, discussion and research gaps. "
-                    "Each section should include search_keywords for finding relevant papers in academic databases."
-                ),
+                system_prompt=get_framework_system_prompt(db),
                 temperature=0.3,
                 max_tokens=20000,
             )
@@ -1062,6 +1066,77 @@ class AgentService:
                     PaperGroupAssociation.paper_id == int(pid),
                 ).delete()
                 removed += count
+    async def _tool_configure_discipline(self, params: Dict, db: Session) -> Dict:
+        """AI 自动生成学科配置并保存"""
+        from app.services.llm.prompts import DisciplineProfile, save_discipline_profile
+
+        description = params.get("description", "")
+        if not description:
+            return {"error": "请描述你的学科方向，例如：'我是做计算机视觉的' 或 '建筑学与城市规划'"}
+
+        # 用 LLM 生成完整的 DisciplineProfile
+        generation_prompt = f"""Based on the following discipline description, generate a complete academic discipline profile in JSON format.
+
+User's discipline description: "{description}"
+
+Generate a JSON object with these exact fields:
+{{
+  "field_name": "学科名称（中文，2-6个字，如：计算机视觉、建筑学、分子生物学）",
+  "researcher_identity": "一句话描述研究者身份，如：你是一位资深的计算机视觉领域学术研究者",
+  "review_system_prompt": "综述生成的 system prompt（中文，约50-100字，描述AI在该学科领域的角色和能力）",
+  "review_user_template": "综述生成的 user prompt 模板，必须包含 {{{{keywords}}}}、{{{{year_range}}}}、{{{{paper_summaries}}}} 三个占位符",
+  "example_timeline_topics": ["该学科3-5个典型的研究阶段/时间线主题"],
+  "example_theme_labels": ["该学科5-8个典型的研究主题标签"],
+  "claims_system_prompt": "论点生成的 system prompt（中文，包含 {{field_name}} 占位符）",
+  "framework_system_prompt": "框架生成的 system prompt（中文，描述AI规划该学科综述框架的角色）",
+  "section_system_prompt": "章节生成的 system prompt（中文，描述AI撰写该学科学术综述的角色）"
+}}
+
+Requirements:
+1. All prompts should be in Chinese
+2. The content should be highly specific to the discipline described
+3. The review_user_template MUST contain the three placeholders: {{{{keywords}}}}, {{{{year_range}}}}, {{{{paper_summaries}}}}
+4. Output ONLY valid JSON, no markdown or extra text"""
+
+        try:
+            result = await self.llm.complete_json(
+                prompt=generation_prompt,
+                system_prompt="You are an expert at configuring academic AI systems for specific disciplines. Output only valid JSON.",
+                temperature=0.3,
+            )
+
+            # Validate and create DisciplineProfile
+            profile = DisciplineProfile(**result)
+
+            # Save to database
+            save_discipline_profile(db, profile)
+
+            # Optionally save as preset
+            preset_name = params.get("preset_name")
+            if preset_name:
+                from app.models.system_setting import SystemSetting
+                presets_record = db.query(SystemSetting).filter(
+                    SystemSetting.key == "discipline_presets"
+                ).first()
+                presets = (presets_record.value or {}) if presets_record else {}
+                presets[preset_name] = profile.model_dump()
+                if presets_record:
+                    presets_record.value = presets
+                else:
+                    db.add(SystemSetting(key="discipline_presets", value=presets))
+                db.commit()
+
+            return {
+                "success": True,
+                "field_name": profile.field_name,
+                "researcher_identity": profile.researcher_identity,
+                "preset_saved": preset_name or None,
+                "message": f"学科配置已成功切换为「{profile.field_name}」！所有综述生成、论点提取、框架规划等功能现在都将以该学科身份运行。",
+            }
+        except Exception as e:
+            logger.error(f"Configure discipline failed: {e}", exc_info=True)
+            return {"error": f"学科配置生成失败: {e}"}
+
             db.commit()
             return {"removed": removed, "group_id": int(group_id)}
 
