@@ -373,15 +373,16 @@ docker-compose -f deployment/docker-compose.yml up -d
 - [x] 引文图谱 + 期刊信息增强
 - [x] AI Agent Chat 助手
 - [x] 前端 10 个功能页面
+- [x] Abstract / Conclusion 自动生成（LLM 驱动，管线集成 + 独立 API）
+- [x] 综述导出为 DOCX 格式（`python-docx` 学术排版：Times New Roman、1.5 倍行距、标题层级）
+- [x] 论点-证据结构化存储（`analysis_json.claims_evidence` 中保存 claim → supporting_papers 映射）
+- [x] 引用校验工具（7 项自动检测：未解析占位符、未引用文献、括号不匹配、孤立映射、重复引用等）
 
 ### 🔄 进行中 / 计划
 
 - [ ] 文本片段级 RAG（PDF 分段 Embedding + 带页码引用）
 - [ ] Citation Anchoring 增强（章节级 RAG 独立召回 → LLM 仅在召回范围内写作）
-- [ ] Abstract / Conclusion 自动生成
-- [ ] 综述导出为 DOCX / PDF 格式
-- [ ] 论点-证据结构化存储（`analysis_json` 中保存 claim → supporting_papers 映射）
-- [ ] 引用校验工具（自动检测综述中的引用异常）
+- [ ] 综述导出为 PDF 格式
 
 ---
 
