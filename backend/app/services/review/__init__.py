@@ -24,11 +24,14 @@ from app.services.crawler import search_across_sources
 from fastapi import HTTPException
 from app.models import Paper
 from app.schemas.review import (
+    ChunkSnippet,
     ClaimEvidence,
     RenderedSection,
     SectionClaimTable,
 )
 from app.services.citation_anchoring import (
+    build_chunk_context_block,
+    build_chunk_ref_instruction,
     build_paper_context_block,
     extract_ref_ids,
     resolve_ref_placeholders,
@@ -127,17 +130,17 @@ class SectionReviewPipelineService:
         top_k: int = 5,
         paper_ids: Optional[List[int]] = None,
     ) -> SectionClaimTable:
-        """阶段 2: 为每条论点附加 RAG 证据 (带有 LLM Fallback)"""
+        """阶段 2: 为每条论点附加 RAG 证据 (paper-level + chunk-level 双层检索)"""
         total_found = 0
         for claim in table.claims:
             if not claim.rag_query:
                 continue
 
             try:
-                # 使用语义检索服务查找相关文献
+                # ── Layer 1: Paper-level 语义检索 ──
                 search_results, _ = await self.semantic_search_service.search(
-                    db=self.db, 
-                    keywords=[claim.rag_query], 
+                    db=self.db,
+                    keywords=[claim.rag_query],
                     limit=top_k,
                     paper_ids=paper_ids
                 )
@@ -156,8 +159,52 @@ class SectionReviewPipelineService:
                 ]
                 claim.support_snippets = snippets
 
-                if found_paper_ids:
-                    total_found += len(found_paper_ids)
+                # ── Layer 2: Chunk-level 精确检索（带页码） ──
+                try:
+                    chunk_results = await self.semantic_search_service.search_chunks(
+                        db=self.db,
+                        keywords=[claim.rag_query],
+                        limit=top_k * 2,  # 召回更多 chunks 以覆盖多篇论文
+                        paper_ids=paper_ids,
+                        score_threshold=0.3,
+                    )
+                    
+                    if chunk_results:
+                        # 构建 chunk_snippets
+                        chunk_snippet_list = []
+                        
+                        for chunk in chunk_results:
+                            pid = chunk.get("paper_id")
+                            page_num = chunk.get("page_number")
+                            page_suffix = f":p{page_num}" if page_num else ""
+                            ref_marker = f"[[REF_{pid}{page_suffix}]]"
+                            
+                            chunk_snippet_list.append(ChunkSnippet(
+                                paper_id=pid or 0,
+                                chunk_index=chunk.get("chunk_index", 0),
+                                page_number=page_num,
+                                content=(chunk.get("chunk_content", "") or "")[:500],
+                                score=chunk.get("score", 0.0),
+                                ref_marker=ref_marker,
+                            ))
+                            
+                            # 同时将 chunk 来源的 paper_id 加入 support_papers（去重）
+                            if pid and pid not in claim.support_papers:
+                                claim.support_papers.append(pid)
+                        
+                        claim.chunk_snippets = chunk_snippet_list
+                        logger.debug(
+                            f"Claim {claim.claim_id}: found {len(chunk_snippet_list)} chunk snippets "
+                            f"from {len(paper_ref_map)} papers"
+                        )
+                except Exception as chunk_err:
+                    logger.warning(
+                        f"Chunk-level search failed for claim {claim.claim_id}, "
+                        f"continuing with paper-level only: {chunk_err}"
+                    )
+
+                if found_paper_ids or claim.chunk_snippets:
+                    total_found += len(claim.support_papers)
                     try:
                         log = RecallLog(
                             event_type="accept",
@@ -170,8 +217,9 @@ class SectionReviewPipelineService:
                             extra={
                                 "claim_id": getattr(claim, 'claim_id', None),
                                 "claim_text": getattr(claim, 'text', ''),
-                                "accepted_paper_ids": found_paper_ids,
-                                "count": len(found_paper_ids)
+                                "accepted_paper_ids": claim.support_papers,
+                                "chunk_count": len(claim.chunk_snippets),
+                                "count": len(claim.support_papers)
                             }
                         )
                         self.db.add(log)
@@ -183,6 +231,7 @@ class SectionReviewPipelineService:
                 logger.error(f"Failed to attach evidence for claim {claim.claim_id} ('{claim.text}'): {e}", exc_info=True)
                 claim.support_papers = []
                 claim.support_snippets = []
+                claim.chunk_snippets = []
 
         # -- LLM Fallback Strategy --
         # If we have fixed paper_ids but didn't find enough evidence (or 0),
@@ -251,12 +300,15 @@ class SectionReviewPipelineService:
     ) -> RenderedSection:
         """
         Render section text from claim-evidence table.
-        Uses [[REF_x]] anchoring system for deterministic citation tracking.
+        Uses [[REF_x]] / [[REF_x:pN]] anchoring system for deterministic citation tracking.
+        Dual-layer context: chunk snippets (with page numbers) preferred over abstract snippets.
         """
         # 1. Collect unique paper_ids from all claims
         all_paper_ids = set()
         for claim in table.claims:
             all_paper_ids.update(claim.support_papers)
+            for cs in claim.chunk_snippets:
+                all_paper_ids.add(cs.paper_id)
 
         sorted_paper_ids = sorted(list(all_paper_ids))
 
@@ -266,48 +318,89 @@ class SectionReviewPipelineService:
         ).all()
         paper_map = {p.id: p for p in papers}
 
-        # 3. Build LLM payload with [[REF_x]] markers
+        # 3. Check if we have chunk-level evidence available
+        has_chunks = any(len(claim.chunk_snippets) > 0 for claim in table.claims)
+
+        # 4. Build LLM payload with [[REF_x]] or [[REF_x:pN]] markers
         claims_payload_lines = []
         for claim in table.claims:
-            # Use [[REF_x]] markers for citations
-            ref_markers = [
-                f"[[REF_{pid}]]"
-                for pid in claim.support_papers
-                if pid in paper_map
-            ]
-
             line = f"- Claim: {claim.text}"
-            if ref_markers:
-                line += f" (Supported by: {', '.join(ref_markers)})"
 
-            claims_payload_lines.append(line)
+            if has_chunks and claim.chunk_snippets:
+                # ── Chunk-enhanced mode: use precise text snippets with page numbers ──
+                ref_markers = list(set(cs.ref_marker for cs in claim.chunk_snippets if cs.ref_marker))
+                if ref_markers:
+                    line += f" (Supported by: {', '.join(ref_markers[:8])})"
+                claims_payload_lines.append(line)
 
-            # Add paper details as context for the LLM
-            if claim.support_papers:
-                claims_payload_lines.append("  Evidence papers:")
+                claims_payload_lines.append("  Evidence chunks (with page references):")
+                for cs in claim.chunk_snippets[:10]:  # Cap at 10 chunks per claim
+                    p = paper_map.get(cs.paper_id)
+                    author_str = (p.authors[0].split(",")[0] if p and p.authors else "Unknown") if p else "Unknown"
+                    year_str = p.year or "N/A" if p else "N/A"
+                    page_info = f", p.{cs.page_number}" if cs.page_number else ""
+                    content_preview = cs.content[:300].replace("\n", " ")
+                    claims_payload_lines.append(
+                        f"    {cs.ref_marker} ({author_str}, {year_str}{page_info}): "
+                        f"\"{content_preview}...\""
+                    )
+                
+                # Also add paper-level context for papers that only have abstract (no chunks)
+                chunk_paper_ids = set(cs.paper_id for cs in claim.chunk_snippets)
                 for pid in claim.support_papers:
-                    p = paper_map.get(pid)
-                    if p:
-                        abstract_snippet = (p.abstract or "")[:200]
+                    if pid not in chunk_paper_ids and pid in paper_map:
+                        p = paper_map[pid]
+                        abstract_snippet = (p.abstract or "")[:150]
                         claims_payload_lines.append(
                             f"    [[REF_{pid}]] {p.authors or 'Unknown'} ({p.year or 'N/A'}) "
                             f"- \"{p.title or 'Untitled'}\": {abstract_snippet}..."
                         )
+            else:
+                # ── Paper-level fallback: use abstract snippets ──
+                ref_markers = [
+                    f"[[REF_{pid}]]"
+                    for pid in claim.support_papers
+                    if pid in paper_map
+                ]
+                if ref_markers:
+                    line += f" (Supported by: {', '.join(ref_markers)})"
+                claims_payload_lines.append(line)
+
+                if claim.support_papers:
+                    claims_payload_lines.append("  Evidence papers:")
+                    for pid in claim.support_papers:
+                        p = paper_map.get(pid)
+                        if p:
+                            abstract_snippet = (p.abstract or "")[:200]
+                            claims_payload_lines.append(
+                                f"    [[REF_{pid}]] {p.authors or 'Unknown'} ({p.year or 'N/A'}) "
+                                f"- \"{p.title or 'Untitled'}\": {abstract_snippet}..."
+                            )
 
         claims_payload = "\n".join(claims_payload_lines)
 
-        # 4. Select prompt and call LLM
+        # 5. Build chunk-specific instruction if chunks are available
+        chunk_instruction = ""
+        if has_chunks:
+            lang_key = "en" if language.lower() == "en" else "zh"
+            chunk_instruction = "\n" + build_chunk_ref_instruction(lang_key)
+
+        # 6. Select prompt and call LLM
         if language.lower() == "en":
             system_prompt = (
                 "You are an expert academic writer. Organize the structured claim-evidence "
-                "materials into fluent, coherent academic paragraphs. Use the [[REF_x]] markers "
-                "to cite papers. Write deep analytical narratives, NOT bullet-point summaries."
+                "materials into fluent, coherent academic paragraphs. Use the [[REF_x]] or "
+                "[[REF_x:pN]] markers to cite papers (with page numbers when available). "
+                "Write deep analytical narratives, NOT bullet-point summaries."
+                + chunk_instruction
             )
             prompt_template = RENDER_SECTION_FROM_CLAIMS_PROMPT_EN
         else:
             system_prompt = (
                 "你是一位资深学术写作者。请将结构化的论点-证据材料组织成流畅、连贯的学术段落。"
-                "使用 [[REF_x]] 标记来引用文献。请写出深度的分析性叙事，而不是简单的要点列表。"
+                "使用 [[REF_x]] 或 [[REF_x:pN]] 标记来引用文献（有页码时请使用带页码的标记）。"
+                "请写出深度的分析性叙事，而不是简单的要点列表。"
+                + chunk_instruction
             )
             prompt_template = RENDER_SECTION_FROM_CLAIMS_PROMPT_ZH
 
@@ -329,7 +422,7 @@ class SectionReviewPipelineService:
             if not raw_text and isinstance(result, str):
                 raw_text = result
 
-            # 5. Post-process: resolve [[REF_x]] to (Author, Year) citations
+            # 7. Post-process: resolve [[REF_x]] and [[REF_x:pN]] to (Author, Year) citations
             resolved_text, resolved_ids, missing_ids = resolve_ref_placeholders(
                 text=raw_text,
                 db=self.db,

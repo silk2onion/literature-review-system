@@ -34,6 +34,8 @@ class StagingPaperBase(BaseModel):
     status: Optional[str] = Field(default=None, description="暂存状态，如 pending/accepted/rejected")
     llm_tags: Optional[Dict[str, Any]] = Field(default=None, description="LLM 打标信息")
     llm_score: Optional[float] = Field(default=None, description="LLM 评估分数")
+    screening_stage: Optional[str] = Field(default="identification", description="PRISMA 筛选阶段: identification/screening/eligibility/included")
+    exclusion_reason: Optional[str] = Field(default=None, description="PRISMA 排除原因")
     final_paper_id: Optional[int] = Field(default=None, description="对应正式库 Paper ID")
     crawl_job_id: Optional[int] = Field(default=None, description="来源抓取任务 ID")
 
@@ -53,6 +55,7 @@ class StagingPaperSearch(BaseModel):
     q: Optional[str] = Field(default=None, description="关键词，模糊匹配 title / abstract")
     status: Optional[str] = Field(default=None, description="状态过滤 pending/accepted/rejected")
     source: Optional[str] = Field(default=None, description="数据源过滤")
+    screening_stage: Optional[str] = Field(default=None, description="PRISMA 筛选阶段过滤: identification/screening/eligibility/included")
     crawl_job_id: Optional[int] = Field(default=None, description="来源抓取任务 ID 过滤")
     year_from: Optional[int] = Field(default=None, description="起始年份（包含）")
     year_to: Optional[int] = Field(default=None, description="结束年份（包含）")
@@ -65,6 +68,7 @@ class StagingPaperSearch(BaseModel):
                 "q": "urban design",
                 "status": "pending",
                 "source": "scopus",
+                "screening_stage": "identification",
                 "crawl_job_id": 1,
                 "year_from": 2015,
                 "year_to": 2024,
@@ -96,3 +100,61 @@ class StagingPaperPromoteRequest(BaseModel):
                 "ids": [1, 2, 3],
             }
         }
+
+
+# ========== PRISMA 筛选附属功能 Schemas ==========
+
+class ScreeningUpdateRequest(BaseModel):
+    """更新单条文献的 PRISMA 筛选阶段"""
+    screening_stage: str = Field(
+        ...,
+        description="目标筛选阶段: identification/screening/eligibility/included",
+    )
+    exclusion_reason: Optional[str] = Field(
+        default=None,
+        description="排除原因（当文献被排除时填写）",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "screening_stage": "screening",
+                "exclusion_reason": "Not relevant to research question",
+            }
+        }
+
+
+class BatchScreeningRequest(BaseModel):
+    """批量更新 PRISMA 筛选阶段"""
+    ids: List[int] = Field(..., min_length=1, description="待更新的 StagingPaper ID 列表")
+    screening_stage: str = Field(
+        ...,
+        description="目标筛选阶段: identification/screening/eligibility/included",
+    )
+    exclusion_reason: Optional[str] = Field(
+        default=None,
+        description="排除原因（批量排除时统一填写）",
+    )
+
+
+class PrismaStageCount(BaseModel):
+    """单个 PRISMA 阶段的统计"""
+    stage: str
+    count: int
+    excluded_count: int = Field(default=0, description="该阶段被排除的文献数")
+
+
+class PrismaStatsResponse(BaseModel):
+    """PRISMA 流程统计响应"""
+    success: bool
+    crawl_job_id: Optional[int] = None
+    total: int
+    stages: List[PrismaStageCount]
+    exclusion_reasons: Dict[str, int] = Field(
+        default_factory=dict,
+        description="排除原因分类统计 {reason: count}",
+    )
+    search_strategy: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="关联的搜索策略元数据",
+    )

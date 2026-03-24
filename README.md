@@ -377,12 +377,9 @@ docker-compose -f deployment/docker-compose.yml up -d
 - [x] 综述导出为 DOCX 格式（`python-docx` 学术排版：Times New Roman、1.5 倍行距、标题层级）
 - [x] 论点-证据结构化存储（`analysis_json.claims_evidence` 中保存 claim → supporting_papers 映射）
 - [x] 引用校验工具（7 项自动检测：未解析占位符、未引用文献、括号不匹配、孤立映射、重复引用等）
-
-### 🔄 进行中 / 计划
-
-- [ ] 文本片段级 RAG（PDF 分段 Embedding + 带页码引用）
-- [ ] Citation Anchoring 增强（章节级 RAG 独立召回 → LLM 仅在召回范围内写作）
-- [ ] 综述导出为 PDF 格式
+- [x] 文本片段级 RAG（PDF 分段 Embedding + 带页码引用 `[[REF_x:pN]]`，双层 RAG：chunk-first → paper-fallback）
+- [x] Citation Anchoring 增强（章节级 RAG 独立召回 → LLM 仅在召回范围内写作，`search_chunks_for_section()` + `ChunkSnippet`）
+- [x] 综述导出为 PDF 格式（`xhtml2pdf` 学术排版：A4、Times New Roman、页码、1.6 倍行距、参考文献悬挂缩进）
 
 ---
 

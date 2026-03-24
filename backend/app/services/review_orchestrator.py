@@ -25,12 +25,6 @@ from app.schemas.review import (
     ReviewStatus,
     SectionResult,
 )
-from app.services.citation_anchoring import (
-    build_paper_context_block,
-    extract_ref_ids,
-    generate_reference_list,
-    resolve_ref_placeholders,
-)
 from app.services.embedding_service import EmbeddingService, get_embedding_service
 from app.services.llm.openai_service import OpenAIService
 from app.services.llm.prompts import (
@@ -342,10 +336,77 @@ class ReviewOrchestrationService:
         language: str = "zh-CN",
         citation_style: str = "harvard",
     ) -> SectionResult:
-        """为单个章节生成综述正文（使用 [[REF_x]] 锚定引用系统）"""
+        """为单个章节生成综述正文（双层 RAG：chunk 优先 → paper 回退）
 
-        # 使用 citation_anchoring 模块构建 [[REF_x]] 格式的文献上下文
-        papers_context = build_paper_context_block(papers, lang=language[:2])
+        策略：
+        1. 先尝试 chunk-level RAG：用章节标题+描述做语义检索，召回带页码的文本片段
+        2. 如果有 chunk 结果，使用 [[REF_x:pN]] 页码级引用
+        3. 如果无 chunk 结果，回退到 paper-level [[REF_x]] 引用（兼容无 PDF 场景）
+        """
+        lang_code = language[:2]
+
+        # Lazy import:
+        # Abstract / Conclusion endpoints only need to import ReviewOrchestrationService,
+        # not the chunk-level citation helpers. Delaying this import avoids request-time
+        # failures when unrelated endpoints pull in citation_anchoring too early.
+        from app.services.citation_anchoring import (
+            build_paper_context_block,
+            build_chunk_context_block,
+            build_chunk_ref_instruction,
+            extract_ref_ids,
+            resolve_ref_placeholders,
+        )
+
+        # --- 尝试 chunk-level RAG ---
+        chunk_results = []
+        paper_ids = []
+        for p in papers:
+            pid = p.id if isinstance(p, Paper) else (p.get("id") if isinstance(p, dict) else None)
+            if pid:
+                paper_ids.append(pid)
+
+        if paper_ids:
+            try:
+                chunk_results = await self.search.search_chunks_for_section(
+                    db=self.db,
+                    section_title=section.title,
+                    section_description=section.description or "",
+                    paper_ids=paper_ids,
+                    limit=15,
+                    per_paper_cap=3,
+                    score_threshold=0.05,
+                )
+            except Exception as e:
+                logger.warning(f"[Orchestrate] Chunk search failed for section {section.id}: {e}")
+
+        # --- 决定使用 chunk 上下文还是 paper 上下文 ---
+        use_chunks = len(chunk_results) >= 3  # 至少3个 chunk 才值得用 chunk 模式
+
+        if use_chunks:
+            context_block = build_chunk_context_block(chunk_results, lang=lang_code)
+            ref_instruction = build_chunk_ref_instruction(lang=lang_code)
+            logger.info(
+                f"[Orchestrate] Section '{section.title}': using chunk-level RAG "
+                f"({len(chunk_results)} chunks from {len(set(c['paper_id'] for c in chunk_results))} papers)"
+            )
+        else:
+            context_block = build_paper_context_block(papers, lang=lang_code)
+            if lang_code == "zh":
+                ref_instruction = (
+                    "\n你必须使用提供的 [[REF_x]] 标记来引用文献，确保每个论点都有明确的文献支撑。"
+                    "请写出深度、连贯、具有批判性分析的学术叙事，而不是简单的要点列表。\n"
+                )
+            else:
+                ref_instruction = (
+                    "\nYou MUST use the provided [[REF_x]] markers to cite papers, ensuring every argument "
+                    "is supported by specific references. Write deep, coherent, critically analytical "
+                    "academic narratives, NOT simple bullet-point summaries.\n"
+                )
+            if chunk_results:
+                logger.info(
+                    f"[Orchestrate] Section '{section.title}': only {len(chunk_results)} chunks, "
+                    "falling back to paper-level RAG"
+                )
 
         # 选择 prompt
         if language.lower().startswith("en"):
@@ -356,24 +417,12 @@ class ReviewOrchestrationService:
         prompt = prompt_template.format(
             section_title=section.title,
             section_description=section.description,
-            papers_context=papers_context,
+            papers_context=context_block,
         )
 
-        # 从学科配置获取基础 system_prompt，再追加 [[REF_x]] 引用指令
+        # 从学科配置获取基础 system_prompt，追加引用指令
         base_section_prompt = get_section_system_prompt(self.db)
-        ref_instruction_zh = (
-            "你必须使用提供的 [[REF_x]] 标记来引用文献，确保每个论点都有明确的文献支撑。"
-            "请写出深度、连贯、具有批判性分析的学术叙事，而不是简单的要点列表。"
-        )
-        ref_instruction_en = (
-            "You MUST use the provided [[REF_x]] markers to cite papers, ensuring every argument "
-            "is supported by specific references. Write deep, coherent, critically analytical "
-            "academic narratives, NOT simple bullet-point summaries."
-        )
-        if language.startswith("zh"):
-            system_prompt = f"{base_section_prompt}{ref_instruction_zh}"
-        else:
-            system_prompt = f"{base_section_prompt} {ref_instruction_en}"
+        system_prompt = f"{base_section_prompt}\n{ref_instruction}"
 
         try:
             raw_text = await self.llm.complete(
@@ -386,10 +435,10 @@ class ReviewOrchestrationService:
             logger.error(f"[Orchestrate] Failed to generate section {section.id}: {e}")
             raw_text = f"*（生成失败: {e}）*"
 
-        # 使用确定性的 [[REF_x]] 解析提取引用的文献 ID
+        # 使用确定性的 [[REF_x]] / [[REF_x:pN]] 解析提取引用的文献 ID
         cited_paper_ids = extract_ref_ids(raw_text)
 
-        # 后处理：将 [[REF_x]] 替换为真实的 (Author, Year) 引用
+        # 后处理：将 [[REF_x]] / [[REF_x:pN]] 替换为真实的 (Author, Year) / (Author, Year, p.N) 引用
         resolved_text, resolved_ids, missing_ids = resolve_ref_placeholders(
             text=raw_text,
             db=self.db,
@@ -482,35 +531,36 @@ class ReviewOrchestrationService:
         abstract_text: str = "",
         conclusion_text: str = "",
     ) -> str:
-        """组装完整的综述 Markdown 文档"""
-        parts = [f"# {framework.title}\n"]
-
-        # Abstract 区块
-        if abstract_text:
-            parts.append("## Abstract\n")
-            parts.append(abstract_text)
-            parts.append("")
-        elif framework.abstract_description:
-            parts.append(f"> {framework.abstract_description}\n")
-
-        # 正文章节
+        """组装完整的综述 Markdown 文档（委托给 document_composer）"""
+        # 构造一个临时 review-like 对象供 composer 使用
+        # 这里 body 部分由 sections 直接拼接
+        body_parts = []
         for section in sections:
-            parts.append(f"## {section.section_title}\n")
-            parts.append(section.text)
-            parts.append("")  # blank line
+            body_parts.append(f"## {section.section_title}\n")
+            body_parts.append(section.text)
+            body_parts.append("")
+        body_md = "\n".join(body_parts)
 
-        # Conclusion 区块
-        if conclusion_text:
-            parts.append("## Conclusion\n")
-            parts.append(conclusion_text)
-            parts.append("")
+        from app.services.document_composer import compose_full_document
 
-        # References
-        if references_md:
-            parts.append("\n---\n")
-            parts.append(references_md)
+        class _TempReview:
+            """临时对象，模拟 Review ORM 的字段"""
+            pass
 
-        return "\n".join(parts)
+        temp = _TempReview()
+        temp.title = framework.title
+        temp.abstract = abstract_text or framework.abstract_description or None
+        temp.content = body_md  # composer 会从 content 中 extract_body
+        temp.conclusion = conclusion_text or None
+        temp.references_json = None  # references_md 会在 _save_to_db 中转为 references_json
+
+        full = compose_full_document(temp)
+
+        # 追加 references（composer 处理 references_json，这里是原始 markdown）
+        if references_md and "## References" not in full:
+            full += f"\n\n---\n\n{references_md}"
+
+        return full
 
     # ------------------------------------------------------------------
     # 保存到数据库
@@ -528,13 +578,23 @@ class ReviewOrchestrationService:
         abstract_text: str = "",
         conclusion_text: str = "",
     ) -> int:
-        """将综述保存到 Review 表"""
+        """将综述保存到 Review 表（写入独立字段 + composer 组装 content）"""
+
+        # 构建 references_json
+        references_json_data = self._build_references_json(
+            cited_papers=cited_papers,
+            citation_map=citation_map,
+            citation_style=request.citation_style,
+        )
+
         review = Review(
             title=framework.title,
             keywords=request.keywords,
             framework=framework.model_dump(),
             content=full_md,
             abstract=abstract_text or framework.abstract_description or None,
+            conclusion=conclusion_text or None,
+            references_json=references_json_data,
             status=ReviewStatus.COMPLETED.value,
             language=request.language,
             model_config=None,
@@ -544,7 +604,8 @@ class ReviewOrchestrationService:
                 "orchestration": True,
                 "citation_map": citation_map,
                 "stats": stats,
-                "conclusion": conclusion_text or None,
+                # 保留 references_markdown 以兼容旧前端读取
+                "references_markdown": references_md,
             },
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
@@ -564,10 +625,85 @@ class ReviewOrchestrationService:
                 )
                 self.db.add(rp)
 
+        # 用 composer 重组 content（确保 references_json 也被包含）
+        from app.services.document_composer import compose_full_document
+        review.content = compose_full_document(review)
+        review.word_count = len(review.content) if review.content else 0
+
         self.db.commit()
         self.db.refresh(review)
 
         return review.id
+
+    def _build_references_json(
+        self,
+        cited_papers: List[Any],
+        citation_map: Dict[str, Any],
+        citation_style: str = "harvard",
+    ) -> Dict[str, Any]:
+        """从 cited_papers + citation_map 构建 references_json 结构"""
+        try:
+            style_enum = CitationStyle(citation_style)
+        except ValueError:
+            style_enum = CitationStyle.HARVARD
+
+        # 反转 citation_map: citation_key -> paper_info
+        # citation_map 格式: {"(Author, Year)": {"paper_id": N, "title": "...", ...}}
+        key_to_info = {}
+        if citation_map:
+            for key, info in citation_map.items():
+                if isinstance(info, dict) and info.get("paper_id"):
+                    key_to_info[info["paper_id"]] = {"citation_key": key, **info}
+
+        items = []
+        for idx, paper in enumerate(cited_papers):
+            pid = paper.id if isinstance(paper, Paper) else (paper.get("id") if isinstance(paper, dict) else None)
+            if not pid:
+                continue
+
+            # 获取格式化引用
+            formatted = ""
+            try:
+                formatted = self.ref_formatter.format_one(paper, style=style_enum)
+            except Exception:
+                pass
+
+            # 从 citation_map 获取 citation_key
+            map_info = key_to_info.get(pid, {})
+            citation_key = map_info.get("citation_key", "")
+            if not citation_key:
+                try:
+                    citation_key = self.ref_formatter.make_inline_citation(paper, style=style_enum)
+                except Exception:
+                    citation_key = f"[{idx + 1}]"
+
+            # 构建 raw 元数据
+            if isinstance(paper, Paper):
+                raw = {
+                    "title": paper.title or "",
+                    "authors": paper.authors if paper.authors else [],
+                    "year": paper.year,
+                    "journal": paper.journal or "",
+                    "doi": paper.doi or "",
+                }
+            else:
+                raw = {
+                    "title": paper.get("title", ""),
+                    "authors": paper.get("authors", []),
+                    "year": paper.get("year"),
+                    "journal": paper.get("journal", ""),
+                    "doi": paper.get("doi", ""),
+                }
+
+            items.append({
+                "paper_id": pid,
+                "order_index": idx + 1,
+                "citation_key": citation_key,
+                "formatted": formatted,
+                "raw": raw,
+            })
+
+        return {"style": style_enum.value, "items": items}
 
     # ------------------------------------------------------------------
     # Helpers
@@ -585,7 +721,7 @@ class ReviewOrchestrationService:
 
     @staticmethod
     async def generate_abstract_for_review(db: Session, review_id: int) -> str:
-        """为已有综述独立生成 Abstract，并更新 DB"""
+        """为已有综述独立生成 Abstract，写入独立字段并 recompose content"""
         review = db.query(Review).filter(Review.id == review_id).first()
         if not review:
             raise ValueError(f"Review {review_id} not found")
@@ -600,7 +736,10 @@ class ReviewOrchestrationService:
 
         if abstract:
             review.abstract = abstract
-            # 同时更新 content 中的 abstract（如果需要）
+            # 用 composer 重组 content
+            from app.services.document_composer import compose_full_document
+            review.content = compose_full_document(review)
+            review.word_count = len(review.content) if review.content else 0
             review.updated_at = datetime.utcnow()
             db.commit()
 
@@ -608,7 +747,7 @@ class ReviewOrchestrationService:
 
     @staticmethod
     async def generate_conclusion_for_review(db: Session, review_id: int) -> str:
-        """为已有综述独立生成 Conclusion，并更新 DB"""
+        """为已有综述独立生成 Conclusion，写入独立字段并 recompose content"""
         review = db.query(Review).filter(Review.id == review_id).first()
         if not review:
             raise ValueError(f"Review {review_id} not found")
@@ -622,26 +761,12 @@ class ReviewOrchestrationService:
         conclusion = await service._generate_conclusion(content, language)
 
         if conclusion:
-            # 保存到 analysis_json
-            analysis = review.analysis_json or {}
-            if isinstance(analysis, str):
-                import json as _json
-                try:
-                    analysis = _json.loads(analysis)
-                except Exception:
-                    analysis = {}
-            analysis["conclusion"] = conclusion
-            review.analysis_json = analysis
+            # 写入独立字段（Single Source of Truth）
+            review.conclusion = conclusion
 
-            # 追加到 content 末尾（在 References 之前）
-            if review.content and "## References" in review.content:
-                review.content = review.content.replace(
-                    "## References",
-                    f"## Conclusion\n\n{conclusion}\n\n## References",
-                )
-            elif review.content:
-                review.content += f"\n\n## Conclusion\n\n{conclusion}"
-
+            # 用 composer 重组 content
+            from app.services.document_composer import compose_full_document
+            review.content = compose_full_document(review)
             review.word_count = len(review.content) if review.content else 0
             review.updated_at = datetime.utcnow()
             db.commit()

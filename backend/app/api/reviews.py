@@ -22,6 +22,7 @@ from app.schemas.review import (
     OrchestrationResult,
     PipelineTaskListResponse,
     PipelineTaskResponse,
+    ReviewSectionsUpdate,
 )
 from app.models import Review
 from app.database import SessionLocal, get_db
@@ -700,6 +701,32 @@ async def stream_task_progress(task_id: str):
 
 
 @router.post(
+    "/phd/task/{task_id}/cancel",
+    summary="Cancel a running pipeline task",
+)
+async def cancel_pipeline_task(task_id: str):
+    """
+    Cancel an async pipeline task.
+    This marks task status as cancelled and persists cancellation to DB.
+    """
+    from app.services.task_runner import cancel_task
+
+    try:
+        task = cancel_task(task_id)
+        return {
+            "task_id": task.task_id,
+            "status": task.status,
+            "message": "任务已取消",
+            "stream_url": f"/api/reviews/phd/task/{task.task_id}/stream",
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Cancel task failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"取消任务失败: {e}")
+
+
+@router.post(
     "/phd/task/{task_id}/resume",
     summary="Resume a failed pipeline task from its last checkpoint",
 )
@@ -931,6 +958,53 @@ def export_review_docx(
     )
 
 
+@router.get(
+    "/{review_id}/export/pdf",
+    summary="导出综述为 PDF 格式",
+)
+def export_review_pdf(
+    review_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    将综述导出为 PDF 格式（学术排版：A4、Times New Roman、页码、1.6 倍行距）。
+    返回二进制文件流，可直接下载。
+    """
+    from app.services.export_service import export_review_to_pdf
+    from fastapi.responses import Response
+
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    content = review.content
+    if not content:
+        raise HTTPException(status_code=400, detail="Review has no content to export")
+
+    title = review.title or "Literature Review"
+
+    try:
+        pdf_bytes = export_review_to_pdf(content, title)
+    except RuntimeError as e:
+        # xhtml2pdf not installed
+        raise HTTPException(status_code=501, detail=str(e))
+    except Exception as e:
+        logger.error(f"PDF export failed for review {review_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"PDF 导出失败: {e}")
+
+    # Sanitize filename
+    safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:60]
+    filename = f"{safe_title}.pdf" if safe_title else f"review_{review_id}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
 @router.get("/{review_id}/export/full", response_model=ReviewFullExport)
 def export_review_full(review_id: int, db: Session = Depends(get_db)):
     """
@@ -1027,6 +1101,14 @@ async def generate_abstract(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Generate abstract failed for review {review_id}: {e}", exc_info=True)
+        try:
+            import traceback as _traceback
+            with open("api_review_error.log", "a", encoding="utf-8") as _f:
+                _f.write(f"\n=== generate-abstract review_id={review_id} ===\n")
+                _f.write(_traceback.format_exc())
+                _f.write("\n")
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"摘要生成失败: {e}")
 
 
@@ -1040,7 +1122,7 @@ async def generate_conclusion(
 ):
     """
     基于综述正文内容，调用 LLM 自动生成学术结论章节，
-    并追加到综述内容中（在 References 之前），同时保存到 analysis_json.conclusion。
+    并保存到 Review.conclusion 独立字段，同时通过 composer 重新组装完整文档。
     """
     from app.services.review_orchestrator import ReviewOrchestrationService
 
@@ -1056,7 +1138,70 @@ async def generate_conclusion(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Generate conclusion failed for review {review_id}: {e}", exc_info=True)
+        try:
+            import traceback as _traceback
+            with open("api_review_error.log", "a", encoding="utf-8") as _f:
+                _f.write(f"\n=== generate-conclusion review_id={review_id} ===\n")
+                _f.write(_traceback.format_exc())
+                _f.write("\n")
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"结论生成失败: {e}")
+
+
+@router.patch(
+    "/{review_id}/sections",
+    summary="编辑综述的 Abstract / Conclusion / References 独立字段",
+)
+def update_review_sections(
+    review_id: int,
+    payload: ReviewSectionsUpdate,
+    db: Session = Depends(get_db),
+):
+    """
+    PATCH 端点：允许前端独立编辑并保存综述的摘要、结论和参考文献元数据。
+    只更新 payload 中非 None 的字段，更新后通过 document_composer 重新组装 content。
+    """
+    from app.services.document_composer import compose_full_document
+
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    updated_fields = []
+
+    if payload.abstract is not None:
+        review.abstract = payload.abstract
+        updated_fields.append("abstract")
+
+    if payload.conclusion is not None:
+        review.conclusion = payload.conclusion
+        updated_fields.append("conclusion")
+
+    if payload.references_json is not None:
+        review.references_json = payload.references_json
+        updated_fields.append("references_json")
+
+    if not updated_fields:
+        return {
+            "success": True,
+            "review_id": review_id,
+            "message": "没有需要更新的字段",
+            "updated_fields": [],
+        }
+
+    # 重新组装完整文档
+    review.content = compose_full_document(review)
+    review.word_count = len(review.content)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "review_id": review_id,
+        "message": f"已更新: {', '.join(updated_fields)}",
+        "updated_fields": updated_fields,
+    }
 
 
 @router.get(
