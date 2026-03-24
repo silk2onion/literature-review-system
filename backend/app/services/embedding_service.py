@@ -1,7 +1,8 @@
 """
 Embedding 服务
 - 为 Paper 生成文本向量
-- 提供批量回填 Paper.embedding 的能力
+- 为 PaperChunk 生成文本向量（片段级 RAG）
+- 提供批量回填 Paper.embedding / PaperChunk.embedding 的能力
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.paper import Paper
+from app.models.paper_chunk import PaperChunk
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +110,64 @@ class EmbeddingService:
         text: str = f"{title}\n\n{abstract}".strip()
         return await self.embed_text(text)
 
+    async def embed_chunk(self, chunk: PaperChunk) -> Optional[List[float]]:
+        """
+        为单个 PaperChunk 生成 embedding 向量。
+        """
+        content = getattr(chunk, "content", "") or ""
+        if not content.strip():
+            return None
+        return await self.embed_text(content)
+
+    async def embed_chunks_batch(
+        self, chunks: List[PaperChunk], batch_size: int = 20
+    ) -> int:
+        """
+        批量为 PaperChunk 列表生成 embedding。
+        
+        Args:
+            chunks: 需要生成 embedding 的 PaperChunk 列表
+            batch_size: 每批调用 API 的数量
+            
+        Returns:
+            成功生成 embedding 的 chunk 数量
+        """
+        if not chunks:
+            return 0
+        
+        updated = 0
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            texts = [(getattr(c, "content", "") or "").strip() for c in batch]
+            
+            # 过滤空文本
+            valid_indices = [j for j, t in enumerate(texts) if t]
+            if not valid_indices:
+                continue
+            
+            valid_texts = [texts[j] for j in valid_indices]
+            
+            try:
+                embeddings = await self.embed_texts(valid_texts)
+                for idx, emb in zip(valid_indices, embeddings):
+                    if emb is not None:
+                        batch[idx].embedding = emb  # type: ignore[assignment]
+                        updated += 1
+            except Exception as e:
+                logger.error(f"Batch chunk embedding failed (batch {i // batch_size}): {e}")
+                # 降级为逐个处理
+                for j, text in zip(valid_indices, valid_texts):
+                    try:
+                        vec = await self.embed_text(text)
+                        if vec:
+                            batch[j].embedding = vec  # type: ignore[assignment]
+                            updated += 1
+                    except Exception as inner_e:
+                        logger.warning(f"Individual chunk embedding failed: {inner_e}")
+        
+        logger.info(f"Batch chunk embedding: {updated}/{len(chunks)} succeeded")
+        return updated
+
     async def backfill_missing_embeddings(self, db: Session, limit: int = 100) -> int:
         """
         为缺少 embedding 的 Paper 批量生成向量并回填。
@@ -157,6 +217,53 @@ class EmbeddingService:
             logger.info("成功回填 %d 条 Paper.embedding", updated)
         else:
             logger.info("本次未成功回填任何 Paper.embedding")
+        return updated
+
+    async def backfill_missing_chunk_embeddings(
+        self, db: Session, limit: int = 500, batch_size: int = 20
+    ) -> int:
+        """
+        为缺少 embedding 的 PaperChunk 批量生成向量并回填。
+        
+        Args:
+            db: SQLAlchemy Session
+            limit: 本次最多处理多少条 chunk
+            batch_size: 每批调用 API 的数量
+            
+        Returns:
+            成功写入 embedding 的 PaperChunk 数量
+        """
+        # 查询缺少 embedding 的 chunks
+        all_chunks = (
+            db.query(PaperChunk)
+            .order_by(PaperChunk.id.asc())
+            .limit(limit * 2)  # 多取一些，因为有些可能已有 embedding
+            .all()
+        )
+        
+        chunks_without_embedding = []
+        for c in all_chunks:
+            emb = getattr(c, "embedding", None)
+            if not emb or emb in ([], {}, "", "null", "[]", "{}"):
+                chunks_without_embedding.append(c)
+                if len(chunks_without_embedding) >= limit:
+                    break
+        
+        if not chunks_without_embedding:
+            logger.info("没有需要回填 embedding 的 PaperChunk 记录")
+            return 0
+        
+        logger.info(
+            "准备为 %d 个 PaperChunk 生成 embedding（上限 %d）",
+            len(chunks_without_embedding), limit
+        )
+        
+        updated = await self.embed_chunks_batch(chunks_without_embedding, batch_size=batch_size)
+        
+        if updated > 0:
+            db.commit()
+            logger.info("成功回填 %d 条 PaperChunk.embedding", updated)
+        
         return updated
 
 

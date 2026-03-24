@@ -21,8 +21,10 @@ class Review(Base):
     
     # 综述内容
     framework = Column(JSON)  # 综述框架结构（大纲）
-    content = Column(Text)  # 综述正文内容
-    abstract = Column(Text)  # 综述摘要
+    content = Column(Text)  # 综述正文内容（完整组装文档：abstract+body+conclusion+refs）
+    abstract = Column(Text)  # 综述摘要（独立字段，Single Source of Truth）
+    conclusion = Column(Text)  # 综述结论（独立字段，Single Source of Truth）
+    references_json = Column(JSON)  # 结构化参考文献列表 {style, items: [{paper_id, citation_key, formatted, raw}]}
     analysis_json = Column(JSON)  # 结构化分析数据（例如 timeline / topics），用于前端可视化
     
     # 状态
@@ -52,6 +54,8 @@ class Review(Base):
             "keywords": self.keywords,
             "framework": self.framework,
             "abstract": self.abstract,
+            "conclusion": self.conclusion,
+            "references_json": self.references_json,
             "status": self.status,
             "language": self.language,
             "paper_count": self.paper_count,

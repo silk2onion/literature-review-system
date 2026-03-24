@@ -70,7 +70,7 @@ class TaskState:
         self.sources = sources
         self.language = language
         self.citation_style = citation_style
-        self.status = "pending"   # pending | running | done | failed
+        self.status = "pending"   # pending | running | done | failed | cancelled
         self.created_at = datetime.now().isoformat()
         self.finished_at: Optional[str] = None
         self.error: Optional[str] = None
@@ -290,7 +290,7 @@ async def resume_task(task_id: str, db: Session) -> TaskState:
     if not task:
         raise ValueError(f"Task {task_id} not found")
     
-    if task.status not in ("failed", "done", "running"):
+    if task.status not in ("failed", "done", "running", "cancelled"):
         raise ValueError(f"Task {task_id} is in status '{task.status}', cannot resume")
     
     logger.info(f"🚀 Resuming task {task_id} (current status: {task.status})")
@@ -323,6 +323,52 @@ async def resume_task(task_id: str, db: Session) -> TaskState:
     return task
 
 
+def cancel_task(task_id: str) -> TaskState:
+    """
+    Mark a task as cancelled.
+    - If task exists in memory, updates immediate state for UI/SSE.
+    - Always persists cancelled snapshot to DB for history consistency.
+    """
+    task = get_task(task_id)
+    if not task:
+        raise ValueError(f"Task {task_id} not found")
+
+    now_iso = datetime.now().isoformat()
+    task.status = "cancelled"
+    task.error = "Cancelled by operator"
+    task.finished_at = now_iso
+
+    # Mark any running step as failed/cancelled message, keep done steps untouched
+    for step in task.steps:
+        if step.status == "running":
+            step.status = "failed"
+            step.finished_at = time.time()
+            step.message = "已手动取消"
+
+    try:
+        task.event_queue.put_nowait({
+            "event": "task_cancelled",
+            "data": task.to_dict(),
+        })
+    except asyncio.QueueFull:
+        pass
+
+    # Persist to DB
+    try:
+        with SessionLocal() as db:
+            db_task = db.query(PipelineTask).filter(PipelineTask.task_id == task_id).first()
+            if db_task:
+                db_task.status = "cancelled"
+                db_task.error = task.error
+                db_task.finished_at = datetime.fromisoformat(now_iso)
+                db_task.state_data = task.to_dict()
+                db.commit()
+    except Exception as e:
+        logger.error(f"Failed to persist cancelled task {task_id}: {e}")
+
+    return task
+
+
 # ────────────────────────────────────────────────────────────
 # Retry helper
 # ────────────────────────────────────────────────────────────
@@ -334,6 +380,8 @@ async def with_retry(coro_fn, max_attempts: int = 10, initial_delay: float = 3.0
     """
     last_exc = None
     for attempt in range(1, max_attempts + 1):
+        if task and task.status == "cancelled":
+            raise asyncio.CancelledError("Task cancelled by operator")
         if step_log:
             step_log.attempt = attempt
             step_log.max_attempts = max_attempts
@@ -473,6 +521,10 @@ class PipelineTaskRunner:
         except ValueError:
             return False
 
+    def _raise_if_cancelled(self):
+        if self.task.status == "cancelled":
+            raise asyncio.CancelledError("Task cancelled by operator")
+
     def _restore_checkpoint(self, resume_from: str):
         """Restore intermediate products from checkpoint_data before resuming."""
         cp = self.task.checkpoint_data
@@ -541,16 +593,22 @@ class PipelineTaskRunner:
             self._emit("task_start", {"task_id": self.task.task_id, "topic": self.task.topic})
 
             try:
+                self._raise_if_cancelled()
                 if not self._should_skip("framework", resume_from):
                     await self._step_generate_framework()
+                self._raise_if_cancelled()
                 if not self._should_skip("auto_search", resume_from):
                     await self._step_auto_search()
+                self._raise_if_cancelled()
                 if not self._should_skip("claims", resume_from):
                     await self._step_generate_claims()
+                self._raise_if_cancelled()
                 if not self._should_skip("evidence", resume_from):
                     await self._step_attach_evidence()
+                self._raise_if_cancelled()
                 if not self._should_skip("render", resume_from):
                     await self._step_render_all()
+                self._raise_if_cancelled()
                 if not self._should_skip("assemble", resume_from):
                     await self._step_assemble()
 
@@ -558,6 +616,13 @@ class PipelineTaskRunner:
                 self.task.finished_at = datetime.now().isoformat()
                 self._emit("task_done", self.task.to_dict())
                 logger.info(f"[Task {self.task.task_id}] Completed successfully")
+
+            except asyncio.CancelledError:
+                self.task.status = "cancelled"
+                self.task.error = "Cancelled by operator"
+                self.task.finished_at = datetime.now().isoformat()
+                self._emit("task_cancelled", self.task.to_dict())
+                logger.info(f"[Task {self.task.task_id}] Cancelled by operator")
 
             except Exception as e:
                 self.task.status = "failed"
@@ -950,6 +1015,7 @@ class PipelineTaskRunner:
             GENERATE_ABSTRACT_PROMPT_ZH, GENERATE_ABSTRACT_PROMPT_EN,
             GENERATE_CONCLUSION_PROMPT_ZH, GENERATE_CONCLUSION_PROMPT_EN,
         )
+        from app.services.document_composer import compose_full_document
 
         step_key = "assemble"
         self._step_start(step_key, "组装完整文档 + 生成参考文献列表...")
@@ -1093,17 +1159,47 @@ class PipelineTaskRunner:
                     "evidence_count": len(support),
                 }
 
-        # ── 6f: Save to DB ──
+        # ── 6f: Build references_json (structured) ──
+        references_json_data = None
+        try:
+            ref_items = []
+            # Build citation_map for inline key lookup
+            citation_map = ref_formatter.build_citation_map(cited_papers, style=style_enum)
+            for idx, paper in enumerate(cited_papers):
+                formatted = ref_formatter.format_one(paper, style=style_enum)
+                inline_key = ref_formatter.make_inline_citation(paper, style=style_enum)
+                ref_items.append({
+                    "paper_id": paper.id,
+                    "order_index": idx,
+                    "citation_key": inline_key,
+                    "formatted": formatted,
+                    "raw": {
+                        "title": paper.title,
+                        "authors": paper.authors or [],
+                        "year": paper.year,
+                        "journal": paper.journal,
+                        "doi": paper.doi,
+                    },
+                })
+            references_json_data = {
+                "style": style_enum.value,
+                "items": ref_items,
+            }
+        except Exception as e:
+            logger.warning(f"[Task {self.task.task_id}] Failed to build references_json: {e}")
+
+        # ── 6g: Save to DB ──
         if self.task.review_id:
             from app.models.review import ReviewPaper
             review = self.db.query(Review).filter(Review.id == self.task.review_id).first()
             if review:
-                review.content = full_md
+                # ── Write independent fields (Single Source of Truth) ──
                 review.abstract = abstract_text or None
+                review.conclusion = conclusion_text or None
+                review.references_json = references_json_data
                 review.paper_count = len(cited_papers)
-                review.word_count = len(full_md)
 
-                # Save analysis_json with claim→evidence mapping
+                # ── Save analysis_json (backward compat + claim→evidence mapping) ──
                 existing_analysis = review.analysis_json or {}
                 if isinstance(existing_analysis, str):
                     try:
@@ -1111,7 +1207,8 @@ class PipelineTaskRunner:
                     except Exception:
                         existing_analysis = {}
                 existing_analysis["citation_map"] = self._all_citation_map
-                existing_analysis["conclusion"] = conclusion_text or None
+                existing_analysis["conclusion"] = conclusion_text or None  # backward compat
+                existing_analysis["references_markdown"] = refs_md  # backward compat
                 existing_analysis["claims_evidence"] = claims_evidence_map
                 existing_analysis["stats"] = {
                     "total_cited_papers": len(cited_papers),
@@ -1121,7 +1218,13 @@ class PipelineTaskRunner:
                 }
                 review.analysis_json = existing_analysis
 
-                # Link cited papers
+                # ── Compose full document via composer (content = assembled cache) ──
+                review.content = body_md  # Temporarily store body for composer extraction
+                full_md = compose_full_document(review)
+                review.content = full_md
+                review.word_count = len(full_md)
+
+                # ── Link cited papers ──
                 # 1. Clear existing links to avoid duplicates on resume
                 self.db.query(ReviewPaper).filter(ReviewPaper.review_id == review.id).delete()
 

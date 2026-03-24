@@ -178,6 +178,7 @@ class OpenAIService:
         system_prompt: str = "You are a helpful assistant.",
         temperature: float = 0.7,
         max_tokens: int = 16000,
+        model_override: Optional[str] = None,
     ) -> str:
         """
         通用文本补全
@@ -187,13 +188,15 @@ class OpenAIService:
             system_prompt (str): 系统提示词
             temperature (float): 温度
             max_tokens (int): 最大 token 数
+            model_override (str, optional): 临时覆盖模型名称（用于心跳等轻量场景）
 
         Returns:
             str: LLM 返回的文本
         """
         try:
+            use_model = model_override or self.model
             response = await self.client.chat.completions.create(
-                model=self.model,
+                model=use_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
@@ -202,7 +205,7 @@ class OpenAIService:
                 max_tokens=max_tokens,
             )
             content = self._extract_content(response)
-            logger.info(f"文本补全成功 (Model: {self.model})，长度: {len(content)}")
+            logger.info(f"文本补全成功 (Model: {use_model})，长度: {len(content)}")
             return content
         except Exception as e:
             logger.error(f"文本补全失败: {e}")

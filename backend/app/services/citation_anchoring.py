@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 # Pattern to match [[REF_x]] where x is a positive integer (paper ID)
 REF_PATTERN = re.compile(r'\[\[REF_(\d+)\]\]')
 
+# Enhanced pattern to match [[REF_x:pN]] (paper ID with page number)
+# Group 1: paper_id, Group 2: page_number (optional)
+REF_PAGE_PATTERN = re.compile(r'\[\[REF_(\d+)(?::p(\d+))?\]\]')
+
 
 def extract_ref_ids(text: str) -> list[int]:
     """Extract all unique paper IDs from [[REF_x]] placeholders in text.
@@ -131,6 +135,101 @@ def build_paper_context_block(
     return "\n".join(lines) + "\n"
 
 
+def build_chunk_context_block(
+    chunk_results: list[dict],
+    lang: str = "zh",
+) -> str:
+    """Build a context block from chunk-level search results for LLM prompts.
+
+    Each chunk carries its own page number and [[REF_x:pN]] marker,
+    enabling page-level citation in the generated text.
+
+    Args:
+        chunk_results: List of dicts from search_chunks() / search_chunks_for_section().
+            Expected keys: paper_id, paper_title, paper_authors, paper_year,
+                          chunk_content, page_number, chunk_index, ref_index, ref_marker
+        lang: Language code ('zh' or 'en').
+
+    Returns:
+        Formatted context block for injection into LLM section-writing prompts.
+
+    Example output:
+        === Source Fragment [[REF_1:p5]] ===
+        Paper: Smith, J.; Wang, L. (2021) - "Transit-Oriented Development"
+        Page: 5 | Chunk: 3/12
+        Content:
+        The relationship between TOD and urban morphology has been extensively studied...
+        ---
+    """
+    if not chunk_results:
+        return "(No text fragments available)\n"
+
+    lines: list[str] = []
+    for cr in chunk_results:
+        paper_id = cr.get("paper_id", 0)
+        title = cr.get("paper_title", "Unknown Title")
+        authors = cr.get("paper_authors", "Unknown")
+        year = cr.get("paper_year", "N/A")
+        content = cr.get("chunk_content", "")
+        page_num = cr.get("page_number")
+        chunk_idx = cr.get("chunk_index", 0)
+        ref_marker = cr.get("ref_marker", f"[[REF_{paper_id}]]")
+        score = cr.get("score", 0.0)
+
+        # Header with ref marker
+        lines.append(f"=== Source Fragment {ref_marker} ===")
+        lines.append(f"Paper: {authors} ({year}) - \"{title}\"")
+
+        # Page and chunk position info
+        meta_parts = []
+        if page_num is not None:
+            meta_parts.append(f"Page: {page_num}")
+        meta_parts.append(f"Chunk: #{chunk_idx}")
+        meta_parts.append(f"Relevance: {score:.3f}")
+        lines.append(" | ".join(meta_parts))
+
+        # Content
+        lines.append("Content:")
+        # Truncate very long chunks for token efficiency
+        content_text = content.strip()
+        if len(content_text) > 1200:
+            content_text = content_text[:1197] + "..."
+        lines.append(content_text)
+        lines.append("---")
+
+    return "\n".join(lines) + "\n"
+
+
+def build_chunk_ref_instruction(lang: str = "en") -> str:
+    """Generate the LLM instruction for using [[REF_x:pN]] markers.
+
+    This instruction block tells the LLM how to cite using page-level markers.
+
+    Args:
+        lang: Language code.
+
+    Returns:
+        Instruction string for injection into system/user prompts.
+    """
+    if lang == "zh":
+        return (
+            "\n## 引用指令\n"
+            "你必须使用上面提供的 [[REF_x:pN]] 标记来引用文献片段。\n"
+            "- [[REF_x:pN]] 表示引用第 x 篇文献的第 N 页内容\n"
+            "- [[REF_x]] 表示引用第 x 篇文献（无特定页码）\n"
+            "- 只引用上面提供的文献片段，不要编造引用\n"
+            "- 在论述中自然地嵌入引用标记\n"
+        )
+    return (
+        "\n## Citation Instructions\n"
+        "You MUST use the [[REF_x:pN]] markers provided above to cite source fragments.\n"
+        "- [[REF_x:pN]] cites paper x, page N (for page-specific references)\n"
+        "- [[REF_x]] cites paper x (general reference, no specific page)\n"
+        "- ONLY cite fragments provided above. Do NOT fabricate citations.\n"
+        "- Embed citation markers naturally within your academic prose.\n"
+    )
+
+
 def resolve_ref_placeholders(
     text: str,
     db: Session,
@@ -180,6 +279,7 @@ def resolve_ref_placeholders(
 
     def replace_ref(match: re.Match) -> str:
         paper_id = int(match.group(1))
+        page_num = match.group(2)  # May be None if no :pN suffix
         paper = paper_map.get(paper_id)
 
         if paper is None:
@@ -192,9 +292,18 @@ def resolve_ref_placeholders(
 
         # Build inline citation using ReferenceFormatterService
         inline = formatter.make_inline_citation(paper, style=style_enum)
+
+        # Append page number if present: (Author, Year, p.N)
+        if page_num is not None:
+            # Insert page number before the closing parenthesis
+            if inline.endswith(")"):
+                inline = inline[:-1] + f", p.{page_num})"
+            else:
+                inline = f"{inline} (p.{page_num})"
+
         return inline
 
-    resolved_text = REF_PATTERN.sub(replace_ref, text)
+    resolved_text = REF_PAGE_PATTERN.sub(replace_ref, text)
 
     # Deduplicate while preserving order
     seen = set()
@@ -252,6 +361,7 @@ def resolve_ref_placeholders_with_map(
 
     def replace_ref(match: re.Match) -> str:
         paper_id = int(match.group(1))
+        page_num = match.group(2)  # May be None if no :pN suffix
         paper = paper_map.get(paper_id)
 
         if paper is None:
@@ -259,10 +369,18 @@ def resolve_ref_placeholders_with_map(
             return f"[REF_{paper_id}_NOT_FOUND]"
 
         inline = formatter.make_inline_citation(paper, style=style_enum)
+
+        # Append page number if present
+        if page_num is not None:
+            if inline.endswith(")"):
+                inline = inline[:-1] + f", p.{page_num})"
+            else:
+                inline = f"{inline} (p.{page_num})"
+
         citation_map[inline] = paper_id
         return inline
 
-    resolved_text = REF_PATTERN.sub(replace_ref, text)
+    resolved_text = REF_PAGE_PATTERN.sub(replace_ref, text)
     return resolved_text, citation_map
 
 
