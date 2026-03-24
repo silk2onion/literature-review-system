@@ -481,85 +481,239 @@ class SemanticSearchService:
         keywords: List[str],
         limit: int = 10,
         paper_ids: Optional[List[int]] = None,
+        score_threshold: float = 0.0,
     ) -> List[Dict[str, Any]]:
         """
         在 PaperChunk.embedding 上做语义检索 (Full-Text RAG)。
+
+        返回字段:
+          chunk_id, paper_id, paper_title, paper_year, paper_authors,
+          chunk_index, chunk_content, page_number, score, ref_marker
         """
         if not keywords:
             return []
 
         # 1. 关键词扩展 & 向量生成
-        # 简单起见，这里复用 expand_keywords 但不强制依赖
-        query_text = ", ".join(keywords)
+        expand_res = self._groups.expand_keywords(keywords, text=" ".join(keywords))
+        expanded_keywords = cast(List[str], expand_res.get("keywords", keywords))
+        query_text = ", ".join(expanded_keywords)
         query_vec = await self._embedding.embed_text(query_text)
-        
+
         if not query_vec:
             return []
 
-        # 2. 查询候选 Chunks
-        from app.models.paper_chunk import PaperChunk
-        
+        # 2. 查询候选 Chunks（只加载必要字段做相似度计算）
         q = db.query(PaperChunk).filter(PaperChunk.embedding.isnot(None))
-        
-        # 如果指定了 paper_ids 范围
         if paper_ids:
             q = q.filter(PaperChunk.paper_id.in_(paper_ids))
-            
-        # 3. 计算相似度 (内存计算，数据量大时需换向量库)
-        # 注意：如果 Chunk 数量巨大，全量加载会 OOM。
-        # 临时方案：先只加载 embedding 和 id，计算完 top-k 再取 content
-        # 或者：限制候选范围（例如只查最近 N 年的 paper 的 chunks）
-        
-        # 优化：只查询 id, paper_id, embedding
-        candidates = q.with_entities(PaperChunk.id, PaperChunk.paper_id, PaperChunk.embedding).all()
-        
-        hits = []
+
+        candidates = q.with_entities(
+            PaperChunk.id, PaperChunk.paper_id, PaperChunk.embedding
+        ).all()
+
+        # 3. 计算相似度
+        hits: List[Tuple[int, int, float]] = []
         for cid, pid, vec in candidates:
             if not isinstance(vec, list):
                 continue
             try:
                 vec_floats = [float(x) for x in vec]
                 score = self._cosine_similarity(query_vec, vec_floats)
-                if score > 0.0:
+                if score > score_threshold:
                     hits.append((cid, pid, score))
             except Exception:
                 continue
-                
+
         # 4. 排序并截断
         hits.sort(key=lambda x: x[2], reverse=True)
         top_hits = hits[:limit]
-        
+
         if not top_hits:
             return []
-            
-        # 5. 补全详细信息
+
+        # 5. 补全详细信息（chunk + paper 元数据）
         top_ids = [h[0] for h in top_hits]
         chunk_map = {
-            c.id: c 
+            c.id: c
             for c in db.query(PaperChunk).filter(PaperChunk.id.in_(top_ids)).all()
         }
-        
-        # 还需要 Paper 的标题等信息
+
         top_pids = list(set(h[1] for h in top_hits))
         paper_map = {
             p.id: p
             for p in db.query(Paper).filter(Paper.id.in_(top_pids)).all()
         }
-        
-        results = []
+
+        # 6. 为每篇 paper 分配稳定的 ref_index（按 paper_id 首次出现顺序）
+        seen_papers: Dict[int, int] = {}
+        ref_counter = 1
+
+        results: List[Dict[str, Any]] = []
         for cid, pid, score in top_hits:
             chunk = chunk_map.get(cid)
             paper = paper_map.get(pid)
-            if chunk and paper:
-                results.append({
-                    "chunk_id": chunk.id,
-                    "paper_id": paper.id,
-                    "paper_title": paper.title,
-                    "paper_year": paper.year,
-                    "chunk_content": chunk.content,
-                    "score": score
-                })
-                
+            if not chunk or not paper:
+                continue
+
+            # 分配 ref_index
+            if pid not in seen_papers:
+                seen_papers[pid] = ref_counter
+                ref_counter += 1
+            ref_idx = seen_papers[pid]
+
+            # 构造 ref_marker: [[REF_x]] 或 [[REF_x:pN]]
+            page_num = getattr(chunk, "page_number", None)
+            if page_num is not None:
+                ref_marker = f"[[REF_{ref_idx}:p{page_num}]]"
+            else:
+                ref_marker = f"[[REF_{ref_idx}]]"
+
+            results.append({
+                "chunk_id": chunk.id,
+                "paper_id": paper.id,
+                "paper_title": paper.title,
+                "paper_year": paper.year,
+                "paper_authors": paper.authors,
+                "chunk_index": chunk.chunk_index,
+                "chunk_content": chunk.content,
+                "page_number": page_num,
+                "score": round(score, 4),
+                "ref_index": ref_idx,
+                "ref_marker": ref_marker,
+            })
+
+        return results
+
+    async def search_chunks_for_section(
+        self,
+        db: Session,
+        section_title: str,
+        section_description: str,
+        paper_ids: Optional[List[int]] = None,
+        limit: int = 15,
+        per_paper_cap: int = 3,
+        score_threshold: float = 0.05,
+    ) -> List[Dict[str, Any]]:
+        """
+        章节级独立 chunk 召回：
+
+        为综述的某个章节提供精准的 chunk 级文献证据。
+        - 用 section_title + description 构造语义查询
+        - 每篇 paper 最多召回 per_paper_cap 个 chunks（避免单篇垄断）
+        - 返回的 ref_index 在本次调用内稳定
+
+        Args:
+            section_title: 章节标题
+            section_description: 章节描述/论点
+            paper_ids: 可选，限定候选 paper 范围
+            limit: 最终返回的 chunk 数量上限
+            per_paper_cap: 每篇 paper 最多返回的 chunk 数
+            score_threshold: 最低相似度阈值
+
+        Returns:
+            与 search_chunks 相同格式的结果列表
+        """
+        # 构造查询文本：章节标题 + 描述
+        query_text = f"{section_title}. {section_description}"
+        query_vec = await self._embedding.embed_text(query_text)
+
+        if not query_vec:
+            logger.warning("search_chunks_for_section: 查询向量生成失败")
+            return []
+
+        # 查询候选 Chunks
+        q = db.query(PaperChunk).filter(PaperChunk.embedding.isnot(None))
+        if paper_ids:
+            q = q.filter(PaperChunk.paper_id.in_(paper_ids))
+
+        candidates = q.with_entities(
+            PaperChunk.id, PaperChunk.paper_id, PaperChunk.embedding
+        ).all()
+
+        # 计算相似度
+        all_hits: List[Tuple[int, int, float]] = []
+        for cid, pid, vec in candidates:
+            if not isinstance(vec, list):
+                continue
+            try:
+                vec_floats = [float(x) for x in vec]
+                score = self._cosine_similarity(query_vec, vec_floats)
+                if score > score_threshold:
+                    all_hits.append((cid, pid, score))
+            except Exception:
+                continue
+
+        # 按分数排序
+        all_hits.sort(key=lambda x: x[2], reverse=True)
+
+        # 应用 per_paper_cap：贪心选择，保持全局排序但每篇 paper 有上限
+        paper_count: Dict[int, int] = {}
+        filtered_hits: List[Tuple[int, int, float]] = []
+        for cid, pid, score in all_hits:
+            if len(filtered_hits) >= limit:
+                break
+            current = paper_count.get(pid, 0)
+            if current >= per_paper_cap:
+                continue
+            paper_count[pid] = current + 1
+            filtered_hits.append((cid, pid, score))
+
+        if not filtered_hits:
+            return []
+
+        # 补全详细信息
+        top_ids = [h[0] for h in filtered_hits]
+        chunk_map = {
+            c.id: c
+            for c in db.query(PaperChunk).filter(PaperChunk.id.in_(top_ids)).all()
+        }
+
+        top_pids = list(set(h[1] for h in filtered_hits))
+        paper_map = {
+            p.id: p
+            for p in db.query(Paper).filter(Paper.id.in_(top_pids)).all()
+        }
+
+        # 分配 ref_index
+        seen_papers: Dict[int, int] = {}
+        ref_counter = 1
+
+        results: List[Dict[str, Any]] = []
+        for cid, pid, score in filtered_hits:
+            chunk = chunk_map.get(cid)
+            paper = paper_map.get(pid)
+            if not chunk or not paper:
+                continue
+
+            if pid not in seen_papers:
+                seen_papers[pid] = ref_counter
+                ref_counter += 1
+            ref_idx = seen_papers[pid]
+
+            page_num = getattr(chunk, "page_number", None)
+            if page_num is not None:
+                ref_marker = f"[[REF_{ref_idx}:p{page_num}]]"
+            else:
+                ref_marker = f"[[REF_{ref_idx}]]"
+
+            results.append({
+                "chunk_id": chunk.id,
+                "paper_id": paper.id,
+                "paper_title": paper.title,
+                "paper_year": paper.year,
+                "paper_authors": paper.authors,
+                "chunk_index": chunk.chunk_index,
+                "chunk_content": chunk.content,
+                "page_number": page_num,
+                "score": round(score, 4),
+                "ref_index": ref_idx,
+                "ref_marker": ref_marker,
+            })
+
+        logger.info(
+            "search_chunks_for_section '%s': %d chunks from %d papers",
+            section_title, len(results), len(seen_papers),
+        )
         return results
 
 

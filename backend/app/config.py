@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     # AI 助手主动模式配置
     AGENT_PROACTIVE_ENABLED: bool = True
     AGENT_HEARTBEAT_INTERVAL: int = 60  # 秒
+    HEARTBEAT_MODEL: str = ""  # 心跳专用模型，为空则使用 OPENAI_MODEL
 
     
     # 文件存储路径

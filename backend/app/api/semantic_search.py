@@ -2,11 +2,12 @@
 语义检索 HTTP API
 
 提供基于 Paper.embedding 的语义检索能力，返回检索结果和调试信息。
+同时提供基于 PaperChunk.embedding 的片段级语义检索。
 """
 
 from dataclasses import asdict
 import logging
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -118,6 +119,93 @@ async def backfill_embeddings(
         "updated": updated,
         "message": f"本次成功回填 {updated} 条 Paper.embedding",
     }
+
+
+# ─── Chunk-level 语义检索 ────────────────────────────────────────────
+
+class ChunkSearchRequest(BaseModel):
+    """Chunk 级语义检索请求"""
+    keywords: List[str]
+    limit: int = 15
+    paper_ids: Optional[List[int]] = None
+    score_threshold: float = 0.0
+
+
+class ChunkSearchForSectionRequest(BaseModel):
+    """章节级 Chunk 召回请求"""
+    section_title: str
+    section_description: str = ""
+    paper_ids: Optional[List[int]] = None
+    limit: int = 15
+    per_paper_cap: int = 3
+    score_threshold: float = 0.05
+
+
+@router.post("/chunks")
+async def search_chunks(
+    payload: ChunkSearchRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    在 PaperChunk.embedding 上执行片段级语义检索。
+
+    返回带页码、作者、ref_marker 的 chunk 列表，
+    可用于 RAG Debug 页面或综述写作的 chunk 级证据选取。
+    """
+    try:
+        service = get_semantic_search_service()
+        results = await service.search_chunks(
+            db=db,
+            keywords=payload.keywords,
+            limit=payload.limit,
+            paper_ids=payload.paper_ids,
+            score_threshold=payload.score_threshold,
+        )
+        return {
+            "success": True,
+            "total": len(results),
+            "items": results,
+            "message": f"Chunk 级检索命中 {len(results)} 个片段",
+        }
+    except Exception as exc:
+        logger.exception("Chunk 级语义检索失败: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Chunk 级语义检索失败: {exc}")
+
+
+@router.post("/chunks/for-section")
+async def search_chunks_for_section(
+    payload: ChunkSearchForSectionRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    章节级独立 Chunk 召回。
+
+    为综述某个章节提供精准的 chunk 级文献证据：
+    - 用章节标题 + 描述构造语义查询
+    - 每篇 paper 最多召回 per_paper_cap 个 chunks
+    - 返回的 ref_index 在本次调用内稳定
+    """
+    try:
+        service = get_semantic_search_service()
+        results = await service.search_chunks_for_section(
+            db=db,
+            section_title=payload.section_title,
+            section_description=payload.section_description,
+            paper_ids=payload.paper_ids,
+            limit=payload.limit,
+            per_paper_cap=payload.per_paper_cap,
+            score_threshold=payload.score_threshold,
+        )
+        return {
+            "success": True,
+            "total": len(results),
+            "items": results,
+            "section_title": payload.section_title,
+            "message": f"章节 '{payload.section_title}' 召回 {len(results)} 个 chunks",
+        }
+    except Exception as exc:
+        logger.exception("章节级 Chunk 召回失败: %s", exc)
+        raise HTTPException(status_code=500, detail=f"章节级 Chunk 召回失败: {exc}")
 
 
 @router.websocket("/ws")

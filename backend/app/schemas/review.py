@@ -50,6 +50,12 @@ class ReviewUpdate(BaseModel):
 class ReviewResponse(ReviewBase):
     """综述响应模型"""
     id: int
+    abstract: Optional[str] = Field(default=None, description="综述摘要")
+    conclusion: Optional[str] = Field(default=None, description="综述结论（独立字段）")
+    references_json: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="结构化参考文献 {style, items: [{paper_id, citation_key, formatted, raw}]}"
+    )
     status: ReviewStatus
     paper_count: int = Field(default=0, description="关联的文献数量")
     # 与模型 Review.analysis_json 对应：结构化分析数据（timeline/topics等）
@@ -62,6 +68,20 @@ class ReviewResponse(ReviewBase):
     
     class Config:
         from_attributes = True
+
+
+class ReviewSectionsUpdate(BaseModel):
+    """
+    PATCH /{review_id}/sections 请求体。
+    用于独立编辑摘要、结论、参考文献等字段。
+    所有字段均可选——仅传入需要修改的部分。
+    """
+    abstract: Optional[str] = Field(default=None, description="综述摘要")
+    conclusion: Optional[str] = Field(default=None, description="综述结论")
+    references_json: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="结构化参考文献 JSON"
+    )
 
 
 class ReviewPaperInfo(BaseModel):
@@ -199,6 +219,24 @@ class ReviewExport(BaseModel):
 
 
 # ========== 章节级 PhD 管线：论点–证据 + RAG + 渲染 ==========
+class ChunkSnippet(BaseModel):
+    """
+    单条 chunk 级证据片段（带页码追踪）
+    - paper_id: 来源 Paper.id
+    - chunk_index: chunk 在论文中的顺序索引
+    - page_number: chunk 所在页码（可能为 None）
+    - content: chunk 文本片段（截断至合理长度）
+    - score: 语义相似度得分
+    - ref_marker: 预分配的 [[REF_x:pN]] 锚定标记
+    """
+    paper_id: int = Field(..., description="来源 Paper ID")
+    chunk_index: int = Field(default=0, description="chunk 在论文中的顺序索引")
+    page_number: Optional[int] = Field(default=None, description="chunk 所在页码")
+    content: str = Field(..., description="chunk 文本片段")
+    score: float = Field(default=0.0, description="语义相似度得分")
+    ref_marker: str = Field(default="", description="预分配的 [[REF_x:pN]] 锚定标记")
+
+
 class ClaimEvidence(BaseModel):
     """
     单条论点及其检索与证据信息
@@ -207,12 +245,14 @@ class ClaimEvidence(BaseModel):
     - rag_query: 用于 RAG 的检索查询语句
     - support_papers: 通过 RAG 命中的 Paper.id 列表
     - support_snippets: 来自这些文献的简短片段/说明（可选）
+    - chunk_snippets: chunk 级精确证据片段（含页码）
     """
     claim_id: int = Field(..., description="本章节内的论点编号，从 1 开始")
     text: str = Field(..., description="论点的自然语言描述")
     rag_query: str = Field(..., description="用于向量检索 / RAG 的查询语句")
     support_papers: List[int] = Field(default_factory=list, description="通过 RAG 命中的 Paper ID 列表")
     support_snippets: List[str] = Field(default_factory=list, description="来自文献的简短片段或说明")
+    chunk_snippets: List[ChunkSnippet] = Field(default_factory=list, description="chunk 级精确证据片段（含页码和锚定标记）")
     section_id: Optional[str] = Field(default=None, description="所属章节标识（合并多章节时自动填入）")
     section_title: Optional[str] = Field(default=None, description="所属章节标题（合并多章节时自动填入）")
 

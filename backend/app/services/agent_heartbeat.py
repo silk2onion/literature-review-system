@@ -58,8 +58,9 @@ class AgentHeartbeatService:
                 await asyncio.sleep(10)
 
     async def _proactive_notify(self, task):
-        # 使用 LLM 格式化女仆话语
+        # 使用 LLM 格式化女仆话语（心跳专用轻量模型，避免占用主模型配额）
         llm = OpenAIService(settings=settings)
+        heartbeat_model = getattr(settings, "HEARTBEAT_MODEL", "") or None
         status_msg = f"任务 {task['task_id']} ({task['topic']}) 现在的状态变更为: {task['status']}。"
         if task['status'] == 'done':
             status_msg += " 综述已经全部生成完毕。任务成功了。"
@@ -74,7 +75,12 @@ class AgentHeartbeatService:
 
         prompt = MAID_PROMPT.format(status_update=status_msg)
         try:
-            reply = await llm.complete(prompt=prompt, system_prompt="你是一个名为“小爱”的萌妹女仆助手。", temperature=0.8)
+            reply = await llm.complete(
+                prompt=prompt,
+                system_prompt='你是一个名为"小爱"的萌妹女仆助手。',
+                temperature=0.8,
+                model_override=heartbeat_model,
+            )
             
             # 广播给所有客户端
             await broadcast_manager.broadcast({
