@@ -188,6 +188,68 @@ def _backfill_review_data():
         db.close()
 
 
+def _migrate_crawl_job_columns():
+    """
+    为 crawl_jobs 表添加 exhaustive 列（幂等操作）。
+    """
+    raw_conn = engine.raw_connection()
+    try:
+        cursor = raw_conn.cursor()
+        cursor.execute("PRAGMA table_info(crawl_jobs)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        if "exhaustive" not in existing_columns:
+            cursor.execute("ALTER TABLE crawl_jobs ADD COLUMN exhaustive BOOLEAN DEFAULT 0 NOT NULL")
+            logger.info("✅ 已添加 crawl_jobs.exhaustive 列")
+
+        raw_conn.commit()
+    except Exception as e:
+        logger.error(f"❌ 迁移 crawl_jobs 列失败: {e}")
+        raw_conn.rollback()
+    finally:
+        raw_conn.close()
+
+
+def _migrate_prisma_columns():
+    """
+    为 PRISMA 筛选附属功能添加新列（幂等操作）。
+    - staging_papers: screening_stage, exclusion_reason
+    - crawl_jobs: search_strategy
+    """
+    raw_conn = engine.raw_connection()
+    try:
+        cursor = raw_conn.cursor()
+
+        # --- staging_papers 表 ---
+        cursor.execute("PRAGMA table_info(staging_papers)")
+        staging_columns = {row[1] for row in cursor.fetchall()}
+
+        if "screening_stage" not in staging_columns:
+            cursor.execute(
+                "ALTER TABLE staging_papers ADD COLUMN screening_stage VARCHAR(20) DEFAULT 'identification'"
+            )
+            logger.info("✅ 已添加 staging_papers.screening_stage 列")
+
+        if "exclusion_reason" not in staging_columns:
+            cursor.execute("ALTER TABLE staging_papers ADD COLUMN exclusion_reason TEXT")
+            logger.info("✅ 已添加 staging_papers.exclusion_reason 列")
+
+        # --- crawl_jobs 表 ---
+        cursor.execute("PRAGMA table_info(crawl_jobs)")
+        crawl_columns = {row[1] for row in cursor.fetchall()}
+
+        if "search_strategy" not in crawl_columns:
+            cursor.execute("ALTER TABLE crawl_jobs ADD COLUMN search_strategy TEXT")  # SQLite JSON 存储为 TEXT
+            logger.info("✅ 已添加 crawl_jobs.search_strategy 列")
+
+        raw_conn.commit()
+    except Exception as e:
+        logger.error(f"❌ 迁移 PRISMA 列失败: {e}")
+        raw_conn.rollback()
+    finally:
+        raw_conn.close()
+
+
 def init_db():
     """
     初始化数据库
@@ -202,6 +264,8 @@ def init_db():
 
     # 幂等迁移：为已有数据库添加新列
     _migrate_review_columns()
+    _migrate_crawl_job_columns()
+    _migrate_prisma_columns()
 
     # 回填旧数据
     _backfill_review_data()

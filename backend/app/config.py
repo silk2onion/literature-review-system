@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     SERPAPI_SCHOLAR_ENABLED: bool = False
     SERPAPI_SCHOLAR_ENGINE: str = "google_scholar"
 
+    # OpenAlex API（免费，无需 API Key；加 email 进入 polite pool 提速）
+    OPENALEX_ENABLED: bool = True
+    OPENALEX_EMAIL: str = ""  # 填入邮箱可进入 polite pool（无速率限制）
+
     # Scopus API（低等级）预留
     SCOPUS_ENABLED: bool = False
     SCOPUS_API_KEY: str = ""

@@ -65,6 +65,14 @@ class StagingPaper(Base):
     llm_tags = Column(JSON)  # LLM 打标信息（主题、类型、相关度标签等）
     llm_score = Column(Float)  # LLM 评估分数（相关度/质量等）
 
+    # PRISMA 筛选流程字段（附属功能，与 status 独立）
+    screening_stage = Column(
+        String(20),
+        default="identification",
+        index=True,
+    )  # identification / screening / eligibility / included（PRISMA-ScR 四阶段）
+    exclusion_reason = Column(Text, nullable=True)  # 排除原因（在 screening/eligibility 阶段标记）
+
     # 若已提升到正式库，则记录对应的 Paper.id，方便比对
     final_paper_id = Column(Integer, ForeignKey("papers.id"), nullable=True, index=True)
 

@@ -10,6 +10,8 @@ type StagingPaper = {
   year?: number | null;
   source?: string | null;
   status?: string | null;
+  screening_stage?: string | null;
+  exclusion_reason?: string | null;
   crawl_job_id?: number | null;
   doi?: string | null;
   arxiv_id?: string | null;
@@ -22,6 +24,7 @@ type StagingSearchRequest = {
   q?: string | null;
   status?: string | null;
   source?: string | null;
+  screening_stage?: string | null;
   crawl_job_id?: number | null;
   year_from?: number | null;
   year_to?: number | null;
@@ -35,8 +38,6 @@ type StagingSearchResponse = {
   items: StagingPaper[];
   message?: string | null;
 };
-
-type TaskStatus = "idle" | "running" | "done" | "error";
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "all", label: "全部" },
@@ -54,10 +55,23 @@ const SOURCE_OPTIONS: { value: string; label: string }[] = [
   { value: "semantic_scholar", label: "Semantic Scholar" },
 ];
 
+const SCREENING_STAGE_OPTIONS: {
+  value: string;
+  label: string;
+  color: string;
+}[] = [
+  { value: "all", label: "全部阶段", color: "#64748b" },
+  { value: "identification", label: "🔍 识别", color: "#6366f1" },
+  { value: "screening", label: "📋 筛选", color: "#0ea5e9" },
+  { value: "eligibility", label: "✅ 资格", color: "#f59e0b" },
+  { value: "included", label: "📎 纳入", color: "#22c55e" },
+];
+
 export default function StagingPapersPage() {
   const [q, setQ] = useState<string>("");
   const [status, setStatus] = useState<string>("pending");
   const [source, setSource] = useState<string>("all");
+  const [screeningStage, setScreeningStage] = useState<string>("all");
   const [crawlJobId, setCrawlJobId] = useState<string>("");
   const [yearFrom, setYearFrom] = useState<string>("");
   const [yearTo, setYearTo] = useState<string>("");
@@ -68,13 +82,16 @@ export default function StagingPapersPage() {
   const [total, setTotal] = useState<number>(0);
   const [items, setItems] = useState<StagingPaper[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [taskStatus, setTaskStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [taskStatus, setTaskStatus] = useState<
+    "idle" | "running" | "done" | "error"
+  >("idle");
   const [taskMessage, setTaskMessage] = useState("");
   const [showConfirmModal, setShowConfirmModal] = useState<{
     show: boolean;
     type: "delete" | "reject" | null;
     count: number;
   }>({ show: false, type: null, count: 0 });
+  const [exclusionReasonInput, setExclusionReasonInput] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -88,7 +105,8 @@ export default function StagingPapersPage() {
     [items, selectedIds],
   );
 
-  const allCurrentSelected = items.length > 0 && currentPageSelectedCount === items.length;
+  const allCurrentSelected =
+    items.length > 0 && currentPageSelectedCount === items.length;
 
   const toggleSelectAllCurrent = () => {
     if (allCurrentSelected) {
@@ -108,8 +126,14 @@ export default function StagingPapersPage() {
 
   const effectiveStatusValue = status === "all" ? undefined : status;
   const effectiveSourceValue = source === "all" ? undefined : source;
+  const effectiveScreeningStageValue =
+    screeningStage === "all" ? undefined : screeningStage;
 
-  const fetchData = async (opts?: { resetPage?: boolean; page?: number; pageSize?: number }) => {
+  const fetchData = async (opts?: {
+    resetPage?: boolean;
+    page?: number;
+    pageSize?: number;
+  }) => {
     try {
       setLoading(true);
       setError(null);
@@ -119,17 +143,14 @@ export default function StagingPapersPage() {
       }
 
       const effectivePage =
-        typeof opts?.page === "number"
-          ? opts.page
-          : opts?.resetPage
-            ? 1
-            : page;
+        typeof opts?.page === "number" ? opts.page : opts?.resetPage ? 1 : page;
 
       const effectivePageSize = opts?.pageSize ?? pageSize;
       const payload: StagingSearchRequest = {
         q: q.trim() || undefined,
         status: effectiveStatusValue,
         source: effectiveSourceValue,
+        screening_stage: effectiveScreeningStageValue,
         crawl_job_id: crawlJobId ? Number(crawlJobId) : undefined,
         year_from: yearFrom ? Number(yearFrom) : undefined,
         year_to: yearTo ? Number(yearTo) : undefined,
@@ -157,7 +178,10 @@ export default function StagingPapersPage() {
       setItems(data.items || []);
       setTotal(data.total ?? 0);
       setPage(effectivePage);
-      if (!taskMessage.includes("已永久删除") && !taskMessage.includes("已标记拒绝")) {
+      if (
+        !taskMessage.includes("已永久删除") &&
+        !taskMessage.includes("已标记拒绝")
+      ) {
         setTaskStatus("done");
         setTaskMessage(
           `加载完成：共 ${data.total} 条暂存记录，当前第 ${effectivePage} / ${Math.max(
@@ -170,12 +194,10 @@ export default function StagingPapersPage() {
       console.error("staging search error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `加载失败：${(err as { message?: string })?.message || "未知错误"
-        }`,
+        `加载失败：${(err as { message?: string })?.message || "未知错误"}`,
       );
       setError(
-        (err as { message?: string })?.message ||
-        "加载暂存文献时出现错误",
+        (err as { message?: string })?.message || "加载暂存文献时出现错误",
       );
     } finally {
       setLoading(false);
@@ -251,12 +273,10 @@ export default function StagingPapersPage() {
       console.error("promote staging error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `提升失败：${(err as { message?: string })?.message || "未知错误"
-        }`,
+        `提升失败：${(err as { message?: string })?.message || "未知错误"}`,
       );
       setError(
-        (err as { message?: string })?.message ||
-        "提升暂存文献时出现错误",
+        (err as { message?: string })?.message || "提升暂存文献时出现错误",
       );
     } finally {
       setPromoting(false);
@@ -277,12 +297,17 @@ export default function StagingPapersPage() {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
-        body: JSON.stringify({ ids: selectedIds }),
+        body: JSON.stringify({
+          ids: selectedIds,
+          exclusion_reason: exclusionReasonInput.trim() || undefined,
+        }),
       });
 
       if (!resp.ok) {
         const text = await resp.text();
-        throw new Error(`拒绝失败: ${resp.status} ${resp.statusText} - ${text}`);
+        throw new Error(
+          `拒绝失败: ${resp.status} ${resp.statusText} - ${text}`,
+        );
       }
 
       const result = await resp.json();
@@ -321,7 +346,9 @@ export default function StagingPapersPage() {
 
       if (!resp.ok) {
         const text = await resp.text();
-        throw new Error(`删除失败: ${resp.status} ${resp.statusText} - ${text}`);
+        throw new Error(
+          `删除失败: ${resp.status} ${resp.statusText} - ${text}`,
+        );
       }
 
       const result = await resp.json();
@@ -381,51 +408,79 @@ export default function StagingPapersPage() {
       <header className="page-header">
         <div className="page-title">
           <h1>暂存文献库</h1>
-          <p>审核和筛选由爬虫抓取的原始文献元数据，将合适的记录提升为正式文献</p>
+          <p>
+            审核和筛选由爬虫抓取的原始文献元数据，将合适的记录提升为正式文献
+          </p>
         </div>
-        <div className="page-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div
+          className="page-actions"
+          style={{
+            display: "flex",
+            gap: "8px",
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
           {renderTaskBadge()}
           <button
             type="button"
             onClick={() => fetchData({ page })}
             className="action-button"
-            style={{ padding: '6px 14px' }}
+            style={{ padding: "6px 14px" }}
           >
             🔄 刷新
           </button>
           <button
             type="button"
-            onClick={() => setShowConfirmModal({ show: true, type: "delete", count: selectedIds.length })}
+            onClick={() =>
+              setShowConfirmModal({
+                show: true,
+                type: "delete",
+                count: selectedIds.length,
+              })
+            }
             disabled={selectedIds.length === 0}
             style={{
-              padding: '6px 14px',
+              padding: "6px 14px",
               borderRadius: 6,
-              border: selectedIds.length > 0 ? '1px solid #ef4444' : '1px solid #d1d5db',
-              backgroundColor: selectedIds.length > 0 ? '#fef2f2' : '#f9fafb',
-              color: selectedIds.length > 0 ? '#dc2626' : '#9ca3af',
+              border:
+                selectedIds.length > 0
+                  ? "1px solid #ef4444"
+                  : "1px solid #d1d5db",
+              backgroundColor: selectedIds.length > 0 ? "#fef2f2" : "#f9fafb",
+              color: selectedIds.length > 0 ? "#dc2626" : "#9ca3af",
               fontSize: 13,
               fontWeight: 500,
-              cursor: selectedIds.length > 0 ? 'pointer' : 'default',
+              cursor: selectedIds.length > 0 ? "pointer" : "default",
             }}
           >
-            🗑 删除 {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
+            🗑 删除 {selectedIds.length > 0 ? `(${selectedIds.length})` : ""}
           </button>
           <button
             type="button"
-            onClick={() => setShowConfirmModal({ show: true, type: "reject", count: selectedIds.length })}
+            onClick={() =>
+              setShowConfirmModal({
+                show: true,
+                type: "reject",
+                count: selectedIds.length,
+              })
+            }
             disabled={selectedIds.length === 0}
             style={{
-              padding: '6px 14px',
+              padding: "6px 14px",
               borderRadius: 6,
-              border: selectedIds.length > 0 ? '1px solid #f97316' : '1px solid #d1d5db',
-              backgroundColor: selectedIds.length > 0 ? '#fff7ed' : '#f9fafb',
-              color: selectedIds.length > 0 ? '#ea580c' : '#9ca3af',
+              border:
+                selectedIds.length > 0
+                  ? "1px solid #f97316"
+                  : "1px solid #d1d5db",
+              backgroundColor: selectedIds.length > 0 ? "#fff7ed" : "#f9fafb",
+              color: selectedIds.length > 0 ? "#ea580c" : "#9ca3af",
               fontSize: 13,
               fontWeight: 500,
-              cursor: selectedIds.length > 0 ? 'pointer' : 'default',
+              cursor: selectedIds.length > 0 ? "pointer" : "default",
             }}
           >
-            ✕ 拒绝 {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
+            ✕ 拒绝 {selectedIds.length > 0 ? `(${selectedIds.length})` : ""}
           </button>
           <button
             type="button"
@@ -467,9 +522,33 @@ export default function StagingPapersPage() {
           flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 240 }}>
-          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500, whiteSpace: "nowrap" }}>关键词:</label>
-          <div style={{ position: "relative", display: "flex", alignItems: "center", width: "100%" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flex: 1,
+            minWidth: 240,
+          }}
+        >
+          <label
+            style={{
+              fontSize: 12,
+              color: "#64748b",
+              fontWeight: 500,
+              whiteSpace: "nowrap",
+            }}
+          >
+            关键词:
+          </label>
+          <div
+            style={{
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              width: "100%",
+            }}
+          >
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -513,7 +592,9 @@ export default function StagingPapersPage() {
         <div style={{ width: 1, height: 20, backgroundColor: "#e2e8f0" }} />
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>状态:</label>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
+            状态:
+          </label>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
@@ -540,7 +621,9 @@ export default function StagingPapersPage() {
         <div style={{ width: 1, height: 20, backgroundColor: "#e2e8f0" }} />
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>数据源:</label>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
+            数据源:
+          </label>
           <select
             value={source}
             onChange={(e) => setSource(e.target.value)}
@@ -568,7 +651,39 @@ export default function StagingPapersPage() {
         <div style={{ width: 1, height: 20, backgroundColor: "#e2e8f0" }} />
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>年份:</label>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
+            筛选阶段:
+          </label>
+          <select
+            value={screeningStage}
+            onChange={(e) => setScreeningStage(e.target.value)}
+            style={{
+              height: 36,
+              padding: "0 8px",
+              borderRadius: 6,
+              border: "1px solid #cbd5e1",
+              backgroundColor: "#ffffff",
+              color: "#0f172a",
+              fontSize: 13,
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+              cursor: "pointer",
+              minWidth: 100,
+            }}
+          >
+            {SCREENING_STAGE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ width: 1, height: 20, backgroundColor: "#e2e8f0" }} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
+            年份:
+          </label>
           <input
             value={yearFrom}
             onChange={(e) => setYearFrom(e.target.value)}
@@ -607,7 +722,9 @@ export default function StagingPapersPage() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>Job ID:</label>
+          <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
+            Job ID:
+          </label>
           <input
             value={crawlJobId}
             onChange={(e) => setCrawlJobId(e.target.value)}
@@ -672,6 +789,7 @@ export default function StagingPapersPage() {
                 <th style={{ width: 120 }}>来源</th>
                 <th style={{ width: 80 }}>年份</th>
                 <th style={{ width: 100 }}>状态</th>
+                <th style={{ width: 110 }}>筛选阶段</th>
                 <th style={{ width: 140 }}>链接</th>
                 <th style={{ width: 100 }}>抓取任务</th>
               </tr>
@@ -680,7 +798,7 @@ export default function StagingPapersPage() {
               {items.length === 0 && !loading && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     style={{
                       padding: "16px 12px",
                       textAlign: "center",
@@ -733,8 +851,7 @@ export default function StagingPapersPage() {
                             color: p.pdf_url || p.url ? "#0284c7" : "#94a3b8",
                             textDecoration:
                               p.pdf_url || p.url ? "underline" : "none",
-                            cursor:
-                              p.pdf_url || p.url ? "pointer" : "default",
+                            cursor: p.pdf_url || p.url ? "pointer" : "default",
                           }}
                         >
                           {p.title}
@@ -787,6 +904,36 @@ export default function StagingPapersPage() {
                       }}
                     >
                       {p.status || "-"}
+                    </td>
+                    <td
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: 12,
+                      }}
+                    >
+                      {(() => {
+                        const stageOpt = SCREENING_STAGE_OPTIONS.find(
+                          (o) => o.value === p.screening_stage,
+                        );
+                        if (!stageOpt || p.screening_stage === "all")
+                          return <span style={{ color: "#9ca3af" }}>-</span>;
+                        return (
+                          <span
+                            style={{
+                              display: "inline-block",
+                              padding: "2px 8px",
+                              borderRadius: 999,
+                              fontSize: 11,
+                              fontWeight: 500,
+                              backgroundColor: `${stageOpt.color}18`,
+                              color: stageOpt.color,
+                              border: `1px solid ${stageOpt.color}40`,
+                            }}
+                          >
+                            {stageOpt.label}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td
                       style={{
@@ -865,8 +1012,9 @@ export default function StagingPapersPage() {
                   const newSize = Number(e.target.value) || 20;
                   setPage(1);
                   setPageSize(newSize);
-                  fetchData({ resetPage: true, pageSize: newSize }).catch((err) =>
-                    console.error("change staging page size error", err),
+                  fetchData({ resetPage: true, pageSize: newSize }).catch(
+                    (err) =>
+                      console.error("change staging page size error", err),
                   );
                 }}
                 style={{
@@ -912,8 +1060,7 @@ export default function StagingPapersPage() {
                 backgroundColor: "#ffffff",
                 color: "#0f172a",
                 fontSize: 12,
-                cursor:
-                  loading || page >= totalPages ? "default" : "pointer",
+                cursor: loading || page >= totalPages ? "default" : "pointer",
                 opacity: loading || page >= totalPages ? 0.5 : 1,
               }}
             >
@@ -924,64 +1071,117 @@ export default function StagingPapersPage() {
       </section>
       {/* Deletion/Rejection Confirmation Modal */}
       {showConfirmModal.show && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999
-        }}>
-          <div style={{
-            backgroundColor: 'white',
-            padding: '24px',
-            borderRadius: '12px',
-            maxWidth: '400px',
-            width: '90%',
-            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
-          }}>
-            <h3 style={{ marginTop: 0, color: showConfirmModal.type === 'delete' ? '#ef4444' : '#f97316' }}>
-              {showConfirmModal.type === 'delete' ? '⚠️ 确认永久删除' : '确认标记拒绝'}
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              padding: "24px",
+              borderRadius: "12px",
+              maxWidth: "400px",
+              width: "90%",
+              boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
+            }}
+          >
+            <h3
+              style={{
+                marginTop: 0,
+                color:
+                  showConfirmModal.type === "delete" ? "#ef4444" : "#f97316",
+              }}
+            >
+              {showConfirmModal.type === "delete"
+                ? "⚠️ 确认永久删除"
+                : "确认标记拒绝"}
             </h3>
-            <p style={{ color: '#4b5563', fontSize: '14px', lineHeight: '1.5' }}>
-              {showConfirmModal.type === 'delete' 
+            <p
+              style={{ color: "#4b5563", fontSize: "14px", lineHeight: "1.5" }}
+            >
+              {showConfirmModal.type === "delete"
                 ? `确定要永久删除选中的 ${showConfirmModal.count} 条暂存文献吗？此操作不可恢复！`
                 : `确定要将当前选中的 ${showConfirmModal.count} 条暂存文献标记为"已拒绝"吗？`}
             </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
-              <button 
-                onClick={() => setShowConfirmModal({ show: false, type: null, count: 0 })}
+            {showConfirmModal.type === "reject" && (
+              <div style={{ marginTop: 12 }}>
+                <label
+                  style={{ fontSize: 13, color: "#374151", fontWeight: 500 }}
+                >
+                  排除原因 (可选):
+                </label>
+                <textarea
+                  value={exclusionReasonInput}
+                  onChange={(e) => setExclusionReasonInput(e.target.value)}
+                  placeholder="例如: 非实证研究 / 研究对象不符 / 重复文献 / 年份超出范围..."
+                  style={{
+                    width: "100%",
+                    marginTop: 6,
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    border: "1px solid #d1d5db",
+                    fontSize: 13,
+                    minHeight: 60,
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                  }}
+                />
+              </div>
+            )}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "12px",
+                marginTop: "24px",
+              }}
+            >
+              <button
+                onClick={() => {
+                  setShowConfirmModal({ show: false, type: null, count: 0 });
+                  setExclusionReasonInput("");
+                }}
                 style={{
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  border: '1px solid #d1d5db',
-                  backgroundColor: 'white',
-                  cursor: 'pointer'
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  border: "1px solid #d1d5db",
+                  backgroundColor: "white",
+                  cursor: "pointer",
                 }}
               >
                 取消
               </button>
-              <button 
+              <button
                 onClick={() => {
-                  if (showConfirmModal.type === 'delete') handleDeleteSelected();
-                  else if (showConfirmModal.type === 'reject') handleRejectSelected();
+                  if (showConfirmModal.type === "delete")
+                    handleDeleteSelected();
+                  else if (showConfirmModal.type === "reject")
+                    handleRejectSelected();
                   setShowConfirmModal({ show: false, type: null, count: 0 });
+                  setExclusionReasonInput("");
                 }}
                 style={{
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: showConfirmModal.type === 'delete' ? '#ef4444' : '#f97316',
-                  color: 'white',
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor:
+                    showConfirmModal.type === "delete" ? "#ef4444" : "#f97316",
+                  color: "white",
                   fontWeight: 500,
-                  cursor: 'pointer'
+                  cursor: "pointer",
                 }}
               >
-                确认{showConfirmModal.type === 'delete' ? '删除' : '拒绝'}
+                确认{showConfirmModal.type === "delete" ? "删除" : "拒绝"}
               </button>
             </div>
           </div>
