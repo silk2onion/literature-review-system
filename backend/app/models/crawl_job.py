@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, JSON
+from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean
 
 from app.database import Base
 
@@ -25,6 +25,10 @@ class CrawlJob(Base):
     year_to = Column(Integer, nullable=True)
     max_results = Column(Integer, nullable=False, default=200)
     page_size = Column(Integer, nullable=False, default=50)
+    exhaustive = Column(Boolean, nullable=False, default=False)  # 穷尽检索模式（Scoping Review）
+
+    # PRISMA 搜索策略记录（附属功能，用于 Scoping Review 可复现性）
+    search_strategy = Column(JSON, nullable=True)  # {query, sources, date_range, boolean_syntax, timestamp, ...}
 
     # 进度状态
     current_page = Column(Integer, nullable=False, default=0)
@@ -71,6 +75,8 @@ class CrawlJob(Base):
             "year_to": self.year_to,
             "max_results": self.max_results,
             "page_size": self.page_size,
+            "exhaustive": self.exhaustive,
+            "search_strategy": self.search_strategy,
             "current_page": self.current_page,
             "fetched_count": self.fetched_count,
             "failed_count": self.failed_count,

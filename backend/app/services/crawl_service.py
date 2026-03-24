@@ -22,7 +22,22 @@ orchestrator = MultiSourceOrchestrator()
 def create_crawl_job(db: Session, payload: CrawlJobCreate) -> CrawlJob:
     """
     创建抓取任务，只记录参数，不立即抓完所有数据。
+    同时记录 PRISMA 搜索策略元数据，用于 Scoping Review 的可复现性。
     """
+    # 构建搜索策略元数据（PRISMA 附属功能）
+    search_strategy = {
+        "query_keywords": payload.keywords,
+        "sources": payload.sources,
+        "year_range": {
+            "from": payload.year_from,
+            "to": payload.year_to,
+        },
+        "max_results": payload.max_results,
+        "exhaustive": payload.exhaustive,
+        "boolean_syntax": " ".join(payload.keywords) if payload.keywords else "",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
     job = CrawlJob(
         keywords=payload.keywords,
         sources=payload.sources,
@@ -30,6 +45,8 @@ def create_crawl_job(db: Session, payload: CrawlJobCreate) -> CrawlJob:
         year_to=payload.year_to,
         max_results=payload.max_results,
         page_size=payload.page_size,
+        exhaustive=payload.exhaustive,
+        search_strategy=search_strategy,
         status="pending",
         current_page=0,
         fetched_count=0,
@@ -107,23 +124,29 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
     job.updated_at = datetime.utcnow()
     db.commit()
 
-    # 计算剩余数量
+    # ━━━ 穷尽检索模式判定 ━━━
+    is_exhaustive = bool(getattr(job, "exhaustive", False))
+
+    # 计算剩余数量（穷尽模式下跳过 max_results 上限检查）
     max_results = job.max_results or 0
     fetched_count = job.fetched_count or 0
-    remaining = max(max_results - fetched_count, 0)
-    
-    if remaining <= 0:
-        job.status = "completed"
-        job.append_log({
-            "ts": datetime.utcnow().isoformat(),
-            "level": "info",
-            "msg": "已达到 max_results，任务标记为 completed",
-        })
-        db.commit()
-        db.refresh(job)
-        return job, 0
 
-    limit_this_round = min(job.page_size or 50, remaining)
+    if not is_exhaustive:
+        remaining = max(max_results - fetched_count, 0)
+        if remaining <= 0:
+            job.status = "completed"
+            job.append_log({
+                "ts": datetime.utcnow().isoformat(),
+                "level": "info",
+                "msg": "已达到 max_results，任务标记为 completed",
+            })
+            db.commit()
+            db.refresh(job)
+            return job, 0
+        limit_this_round = min(job.page_size or 50, remaining)
+    else:
+        # 穷尽模式：每轮固定抓 page_size，不设上限
+        limit_this_round = job.page_size or 200
 
     # 调用多源搜索（旧管线 + 新管线），目前不做严格分页，仅按 limit 分批
     try:
@@ -155,8 +178,8 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
             legacy_sources = ["semantic_scholar", "crossref"]
             multi_sources: List[str] = []
         else:
-            legacy_supported = {"arxiv", "crossref", "semantic_scholar"}
-            multi_supported = {"scholar_serpapi", "scopus"}
+            legacy_supported = {"arxiv"}
+            multi_supported = {"scholar_serpapi", "scopus", "openalex", "crossref", "semantic_scholar"}
             legacy_sources = [s for s in normalized_sources if s in legacy_supported]
             multi_sources = [s for s in normalized_sources if s in multi_supported]
 
@@ -164,7 +187,11 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         all_source_papers: List[SourcePaper] = []
 
         # ━━━ 对每个子查询分别搜索，合并结果 ━━━
-        per_query_limit = max(limit_this_round // len(sub_queries), 10) if sub_queries else limit_this_round
+        if is_exhaustive:
+            # 穷尽模式下，每个子查询传 max_results=0 让爬虫自行耗尽
+            per_query_limit = 0
+        else:
+            per_query_limit = max(limit_this_round // len(sub_queries), 10) if sub_queries else limit_this_round
 
         for sq_idx, sub_query in enumerate(sub_queries):
             sq_keywords = [sub_query]  # 将子查询作为单个关键词传入
@@ -233,7 +260,7 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
     })
     
     # 判断是否完成
-    if (job.fetched_count or 0) >= (job.max_results or 0):
+    if not is_exhaustive and (job.fetched_count or 0) >= (job.max_results or 0):
         job.status = "completed"
     elif total_source_count == 0:
         # API 未返回任何结果，说明已穷尽可用论文

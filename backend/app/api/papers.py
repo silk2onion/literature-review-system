@@ -513,3 +513,259 @@ async def backfill_embeddings(
     except Exception as e:
         logger.error(f"Backfill embeddings failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class ChunkPaperRequest(BaseModel):
+    """PDF分块请求参数"""
+    chunk_size: int = 800
+    overlap: int = 100
+    force: bool = False  # 是否强制重新分块（覆盖已有chunks）
+
+
+@router.post("/{paper_id}/chunk")
+async def chunk_paper_pdf(
+    paper_id: int,
+    req: ChunkPaperRequest = ChunkPaperRequest(),
+    db: Session = Depends(get_db),
+):
+    """
+    对单篇文献的 PDF 进行分块 + Embedding 入库
+
+    1. 读取 PDF 文件，按页提取文本
+    2. 使用 page-aware 分块算法切分为 chunks（保留页码信息）
+    3. 写入 PaperChunk 表
+    4. 批量生成 chunk embedding
+    
+    Args:
+        paper_id: 文献 ID
+        req.chunk_size: 每个 chunk 的目标字符数（默认 800）
+        req.overlap: chunk 之间的重叠字符数（默认 100）
+        req.force: 是否强制重新分块，覆盖已有 chunks
+    """
+    from app.models.paper_chunk import PaperChunk
+    from app.services.embedding_service import get_embedding_service
+
+    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="文献不存在")
+
+    pdf_path = paper.pdf_path
+    if not pdf_path or not os.path.exists(pdf_path):
+        raise HTTPException(status_code=400, detail="PDF文件未找到，请先下载PDF")
+
+    # 检查是否已有 chunks
+    existing_count = db.query(PaperChunk).filter(PaperChunk.paper_id == paper_id).count()
+    if existing_count > 0 and not req.force:
+        return {
+            "success": True,
+            "paper_id": paper_id,
+            "chunks_created": 0,
+            "chunks_embedded": 0,
+            "message": f"该文献已有 {existing_count} 个 chunks，如需重新分块请设置 force=true",
+            "skipped": True,
+        }
+
+    # 如果 force=true，先删除旧 chunks
+    if existing_count > 0 and req.force:
+        db.query(PaperChunk).filter(PaperChunk.paper_id == paper_id).delete()
+        db.commit()
+        logger.info(f"Paper {paper_id}: 已删除 {existing_count} 个旧 chunks")
+
+    # 1. 按页提取文本
+    pdf_service = get_pdf_service()
+    try:
+        page_texts = pdf_service.extract_text_by_pages(pdf_path)
+    except Exception as e:
+        logger.error(f"PDF文本提取失败 (paper_id={paper_id}): {e}")
+        raise HTTPException(status_code=500, detail=f"PDF文本提取失败: {e}")
+
+    if not page_texts:
+        raise HTTPException(status_code=400, detail="PDF文件无法提取到文本内容")
+
+    # 2. Page-aware 分块
+    chunks_with_pages = pdf_service.chunk_text_with_pages(
+        page_texts,
+        chunk_size=req.chunk_size,
+        overlap=req.overlap,
+    )
+
+    if not chunks_with_pages:
+        raise HTTPException(status_code=400, detail="分块结果为空，PDF内容可能过短")
+
+    # 3. 写入 PaperChunk 表
+    db_chunks = []
+    for cwp in chunks_with_pages:
+        chunk = PaperChunk(
+            paper_id=paper_id,
+            chunk_index=cwp.chunk_index,
+            content=cwp.content,
+            page_number=cwp.page_number,  # 主页码
+        )
+        db.add(chunk)
+        db_chunks.append(chunk)
+
+    db.commit()
+    # 刷新获取自增 ID
+    for c in db_chunks:
+        db.refresh(c)
+
+    logger.info(f"Paper {paper_id}: 创建了 {len(db_chunks)} 个 chunks")
+
+    # 4. 批量生成 chunk embedding
+    embedding_service = get_embedding_service()
+    embedded_count = 0
+    try:
+        embedded_count = await embedding_service.embed_chunks_batch(db, db_chunks)
+        logger.info(f"Paper {paper_id}: 为 {embedded_count} 个 chunks 生成了 embedding")
+    except Exception as e:
+        logger.warning(f"Paper {paper_id}: chunk embedding 生成部分失败: {e}")
+
+    return {
+        "success": True,
+        "paper_id": paper_id,
+        "chunks_created": len(db_chunks),
+        "chunks_embedded": embedded_count,
+        "total_pages": len(page_texts),
+        "message": f"成功为文献创建 {len(db_chunks)} 个分块，{embedded_count} 个已生成 embedding",
+        "skipped": False,
+    }
+
+
+@router.post("/chunk-all")
+async def chunk_all_papers(
+    req: ChunkPaperRequest = ChunkPaperRequest(),
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """
+    批量对所有有 PDF 的文献进行分块 + Embedding
+    
+    - 仅处理有 pdf_path 且文件存在的文献
+    - 默认跳过已有 chunks 的文献（force=true 时覆盖）
+    - 通过 limit 控制单次处理数量
+    """
+    from app.models.paper_chunk import PaperChunk
+    from app.services.embedding_service import get_embedding_service
+
+    # 查询所有有 pdf_path 的文献
+    papers = db.query(Paper).filter(Paper.pdf_path.isnot(None)).limit(limit).all()
+
+    pdf_service = get_pdf_service()
+    embedding_service = get_embedding_service()
+
+    results = {
+        "total_papers": len(papers),
+        "processed": 0,
+        "skipped": 0,
+        "failed": 0,
+        "total_chunks_created": 0,
+        "total_chunks_embedded": 0,
+        "errors": [],
+    }
+
+    for paper in papers:
+        try:
+            # 检查 PDF 文件是否存在
+            if not paper.pdf_path or not os.path.exists(paper.pdf_path):
+                results["skipped"] += 1
+                continue
+
+            # 检查是否已有 chunks
+            existing = db.query(PaperChunk).filter(
+                PaperChunk.paper_id == paper.id
+            ).count()
+            if existing > 0 and not req.force:
+                results["skipped"] += 1
+                continue
+
+            # 删除旧 chunks（如果 force）
+            if existing > 0 and req.force:
+                db.query(PaperChunk).filter(
+                    PaperChunk.paper_id == paper.id
+                ).delete()
+                db.commit()
+
+            # 提取 + 分块
+            page_texts = pdf_service.extract_text_by_pages(paper.pdf_path)
+            if not page_texts:
+                results["skipped"] += 1
+                continue
+
+            chunks_with_pages = pdf_service.chunk_text_with_pages(
+                page_texts,
+                chunk_size=req.chunk_size,
+                overlap=req.overlap,
+            )
+
+            if not chunks_with_pages:
+                results["skipped"] += 1
+                continue
+
+            # 写入 DB
+            db_chunks = []
+            for cwp in chunks_with_pages:
+                chunk = PaperChunk(
+                    paper_id=paper.id,
+                    chunk_index=cwp.chunk_index,
+                    content=cwp.content,
+                    page_number=cwp.page_number,
+                )
+                db.add(chunk)
+                db_chunks.append(chunk)
+
+            db.commit()
+            for c in db_chunks:
+                db.refresh(c)
+
+            results["total_chunks_created"] += len(db_chunks)
+
+            # 生成 embedding
+            try:
+                embedded = await embedding_service.embed_chunks_batch(db, db_chunks)
+                results["total_chunks_embedded"] += embedded
+            except Exception as e:
+                logger.warning(f"Paper {paper.id} chunk embedding failed: {e}")
+
+            results["processed"] += 1
+
+        except Exception as e:
+            results["failed"] += 1
+            results["errors"].append({"paper_id": paper.id, "error": str(e)})
+            logger.error(f"Chunk processing failed for paper {paper.id}: {e}")
+
+    results["message"] = (
+        f"批量分块完成: {results['processed']} 篇处理成功, "
+        f"{results['skipped']} 篇跳过, {results['failed']} 篇失败, "
+        f"共创建 {results['total_chunks_created']} 个分块"
+    )
+
+    return results
+
+
+@router.post("/backfill-chunk-embeddings")
+async def backfill_chunk_embeddings(
+    limit: int = 500,
+    db: Session = Depends(get_db),
+):
+    """
+    为缺少 embedding 的 PaperChunk 批量生成向量
+    
+    Args:
+        limit: 本次最多处理多少条 chunk 记录
+    """
+    try:
+        from app.services.embedding_service import get_embedding_service
+
+        embedding_service = get_embedding_service()
+        updated_count = await embedding_service.backfill_missing_chunk_embeddings(
+            db, limit=limit
+        )
+
+        return {
+            "success": True,
+            "updated_count": updated_count,
+            "message": f"成功为 {updated_count} 个 chunk 生成 embedding",
+        }
+    except Exception as e:
+        logger.error(f"Backfill chunk embeddings failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
