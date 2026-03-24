@@ -12,6 +12,7 @@ import {
   FileEdit,
   Activity,
   FileText,
+  GitBranch,
 } from "lucide-react";
 import LibraryPage from "./LibraryPage";
 import StagingPapersPage from "./StagingPapersPage";
@@ -24,6 +25,7 @@ import CrawlerSearchPage from "./CrawlerSearchPage";
 import ReviewOrchestratePage from "./ReviewOrchestratePage";
 import MonitoringDashboard from "./MonitoringDashboard";
 import ReviewListPage from "./ReviewListPage";
+import PrismaFlowPage from "./PrismaFlowPage";
 
 function App() {
   // State
@@ -31,6 +33,7 @@ function App() {
     | "search"
     | "library"
     | "staging"
+    | "screening"
     | "rag"
     | "draft"
     | "orchestrate"
@@ -57,6 +60,8 @@ function App() {
         return <ReviewGenerateFromLibraryPage />;
       case "orchestrate":
         return <ReviewOrchestratePage />;
+      case "screening":
+        return <PrismaFlowPage />;
       case "monitoring":
         return <MonitoringDashboard />;
       case "reviews":
@@ -80,6 +85,8 @@ function App() {
         return "Agent Survey Draft";
       case "orchestrate":
         return "一键综述生成";
+      case "screening":
+        return "PRISMA 筛选流程";
       case "monitoring":
         return "任务进度监控";
       case "reviews":
@@ -117,6 +124,13 @@ function App() {
             >
               <Activity size={16} className="sidebar-icon green" />
               任务监控
+            </button>
+            <button
+              onClick={() => setActiveTab("screening")}
+              className={`sidebar-item ${activeTab === "screening" ? "active" : ""}`}
+            >
+              <GitBranch size={16} className="sidebar-icon blue" />
+              PRISMA 筛选
             </button>
           </div>
 

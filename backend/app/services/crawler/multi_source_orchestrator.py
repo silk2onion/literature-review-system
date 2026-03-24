@@ -6,6 +6,8 @@ from app.services.crawler.source_models import SourcePaper
 from app.services.crawler.scholar_serpapi_crawler import ScholarSerpapiCrawler
 from app.services.crawler.scopus_crawler import ScopusCrawler
 from app.services.crawler.semantic_scholar_crawler import SemanticScholarCrawler
+from app.services.crawler.openalex_crawler import OpenAlexCrawler
+from app.services.crawler.crossref_crawler import CrossRefCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,8 @@ class MultiSourceOrchestrator:
             "scholar_serpapi": ScholarSerpapiCrawler,
             "scopus": ScopusCrawler,
             "semantic_scholar": SemanticScholarCrawler,
+            "openalex": OpenAlexCrawler,
+            "crossref": CrossRefCrawler,
         }
 
     def _create_crawler(self, name: str) -> Optional[BaseCrawler]:

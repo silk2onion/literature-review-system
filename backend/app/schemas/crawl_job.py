@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +18,7 @@ class CrawlJobBase(BaseModel):
     year_to: Optional[int] = Field(default=None, description="结束年份")
     max_results: int = Field(default=200, ge=1, le=5000, description="目标抓取总数")
     page_size: int = Field(default=50, ge=1, le=200, description="每轮抓取数量")
+    exhaustive: bool = Field(default=False, description="穷尽检索模式（Scoping Review），忽略 max_results 上限，直到数据源返回空结果")
 
 
 class CrawlJobCreate(CrawlJobBase):
@@ -28,11 +29,13 @@ class CrawlJobCreate(CrawlJobBase):
 class CrawlJobResponse(CrawlJobBase):
     """抓取任务详情响应"""
     id: int
+    exhaustive: bool = False
     current_page: int
     fetched_count: int
     failed_count: int
     status: JobStatus
     log: Optional[dict] = None
+    search_strategy: Optional[Dict[str, Any]] = Field(default=None, description="PRISMA 搜索策略元数据")
     created_at: datetime
     updated_at: datetime
 
