@@ -3,6 +3,7 @@ OpenAI兼容API服务
 支持OpenAI、Claude、本地模型等多种LLM服务
 """
 import logging
+import time
 from typing import List, Optional, Dict, Any
 from openai import AsyncOpenAI
 from app.config import Settings
@@ -11,6 +12,32 @@ from app.schemas.review import LitReviewLLMResult, TimelinePoint, TopicStat
 from app.services.llm.prompts import PromptConfig, DEFAULT_LIT_REVIEW_PROMPT_CONFIG, get_discipline_profile
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_log_llm(use_model: str, caller: str, response, duration_ms: float, error: Optional[str] = None):
+    """安全地记录 LLM 调用日志，绝不抛异常影响业务。"""
+    try:
+        from app.services.api_usage_service import log_llm_usage
+        tokens_in = tokens_out = None
+        if not error and not isinstance(response, str) and response:
+            try:
+                usage = response.usage
+                if usage:
+                    tokens_in = usage.prompt_tokens
+                    tokens_out = usage.completion_tokens
+            except Exception:
+                pass
+        log_llm_usage(
+            model=use_model,
+            caller=caller,
+            duration_ms=duration_ms,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            success=error is None,
+            error=error,
+        )
+    except Exception:
+        pass  # 监控绝不影响业务
 
 
 class OpenAIService:
@@ -67,6 +94,8 @@ class OpenAIService:
         Returns:
             综述框架文本
         """
+        _t0 = time.perf_counter()
+        _resp = None
         try:
             # 获取学科配置
             profile = get_discipline_profile(db) if db else get_discipline_profile(None)
@@ -82,7 +111,7 @@ class OpenAIService:
                 f"你是一位资深的学术研究专家，擅长撰写{profile.field_name}相关的文献综述。"
             )
 
-            response = await self.client.chat.completions.create(
+            _resp = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
@@ -97,6 +126,7 @@ class OpenAIService:
                 temperature=0.7,
                 max_tokens=16000
             )
+            response = _resp
             
             framework = self._extract_content(response)
             finish_reason = getattr(getattr(getattr(response, 'choices', [None])[0] if not isinstance(response, str) else None, 'finish_reason', None), '__str__', lambda: 'unknown')()
@@ -112,9 +142,11 @@ class OpenAIService:
                     raise ValueError(f"LLM returned empty response for framework generation. Finish reason: {finish_reason}. Model: {self.model}")
                 
             logger.info(f"综述框架生成成功，长度: {len(framework)}")
+            _safe_log_llm(self.model, "generate_review_framework", _resp, (time.perf_counter() - _t0) * 1000)
             return framework
             
         except Exception as e:
+            _safe_log_llm(self.model, "generate_review_framework", _resp, (time.perf_counter() - _t0) * 1000, error=str(e))
             logger.error(f"生成综述框架失败: {e}")
             raise
     
@@ -135,6 +167,8 @@ class OpenAIService:
         Returns:
             详细综述内容
         """
+        _t0 = time.perf_counter()
+        _resp = None
         try:
             # 获取学科配置
             profile = get_discipline_profile(db) if db else get_discipline_profile(None)
@@ -148,7 +182,7 @@ class OpenAIService:
             )
 
             # 调用LLM
-            response = await self.client.chat.completions.create(
+            _resp = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
@@ -164,11 +198,13 @@ class OpenAIService:
                 max_tokens=16000
             )
             
-            content = self._extract_content(response)
+            content = self._extract_content(_resp)
             logger.info(f"综述内容生成成功，长度: {len(content)}")
+            _safe_log_llm(self.model, "generate_review_content", _resp, (time.perf_counter() - _t0) * 1000)
             return content
             
         except Exception as e:
+            _safe_log_llm(self.model, "generate_review_content", _resp, (time.perf_counter() - _t0) * 1000, error=str(e))
             logger.error(f"生成综述内容失败: {e}")
             raise
     
@@ -193,9 +229,11 @@ class OpenAIService:
         Returns:
             str: LLM 返回的文本
         """
+        _t0 = time.perf_counter()
+        _resp = None
         try:
             use_model = model_override or self.model
-            response = await self.client.chat.completions.create(
+            _resp = await self.client.chat.completions.create(
                 model=use_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -204,10 +242,12 @@ class OpenAIService:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            content = self._extract_content(response)
+            content = self._extract_content(_resp)
             logger.info(f"文本补全成功 (Model: {use_model})，长度: {len(content)}")
+            _safe_log_llm(use_model, "complete", _resp, (time.perf_counter() - _t0) * 1000)
             return content
         except Exception as e:
+            _safe_log_llm(model_override or self.model, "complete", _resp, (time.perf_counter() - _t0) * 1000, error=str(e))
             logger.error(f"文本补全失败: {e}")
             raise
 
@@ -230,8 +270,10 @@ class OpenAIService:
         Returns:
             Dict[str, Any]: LLM 返回的 JSON 对象
         """
+        _t0 = time.perf_counter()
+        _resp = None
         try:
-            response = await self.client.chat.completions.create(
+            _resp = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -241,11 +283,13 @@ class OpenAIService:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            content = self._extract_content(response) or "{}"
+            content = self._extract_content(_resp) or "{}"
             logger.info(f"JSON 补全成功 (Model: {self.model})，内容: %s...", content[:100])
             import json
+            _safe_log_llm(self.model, "complete_json", _resp, (time.perf_counter() - _t0) * 1000)
             return json.loads(content)
         except Exception as e:
+            _safe_log_llm(self.model, "complete_json", _resp, (time.perf_counter() - _t0) * 1000, error=str(e))
             logger.error(f"JSON 补全失败: {e}")
             raise
 
@@ -365,8 +409,10 @@ class OpenAIService:
                 .replace("{{paper_summaries}}", paper_summaries)
             )
 
+        _t0 = time.perf_counter()
+        _resp = None
         try:
-            response = await self.client.chat.completions.create(
+            _resp = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": cfg.system_prompt},
@@ -376,10 +422,13 @@ class OpenAIService:
                 max_tokens=6000,
             )
         except Exception as e:
+            _safe_log_llm(self.model, "generate_lit_review", _resp, (time.perf_counter() - _t0) * 1000, error=str(e))
             logger.error(f"生成结构化文献综述失败: {e}")
             raise
 
+        response = _resp
         full_text = self._extract_content(response)
+        _safe_log_llm(self.model, "generate_lit_review", _resp, (time.perf_counter() - _t0) * 1000)
         logger.info(f"Lit review LLM 调用成功 (Model: {self.model}), 长度: %d", len(full_text))
 
         # 4. 从返回中解析 Markdown 正文与 JSON 区块
@@ -605,6 +654,8 @@ class OpenAIService:
         Returns:
             文献摘要
         """
+        _t0 = time.perf_counter()
+        _resp = None
         try:
             abstract_value: Any = getattr(paper, "abstract", None)
             if not abstract_value:
@@ -617,7 +668,7 @@ class OpenAIService:
 
 要求：简洁、准确、突出创新点。"""
             
-            response = await self.client.chat.completions.create(
+            _resp = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "你是一位专业的学术文献分析专家。"},
@@ -627,7 +678,8 @@ class OpenAIService:
                 max_tokens=200
             )
             
-            summary = self._extract_content(response)
+            summary = self._extract_content(_resp)
+            _safe_log_llm(self.model, "summarize_paper", _resp, (time.perf_counter() - _t0) * 1000)
             if summary:
                 return summary
             
@@ -636,6 +688,7 @@ class OpenAIService:
             return abstract_text[:200] if abstract_text else "暂无摘要"
             
         except Exception as e:
+            _safe_log_llm(self.model, "summarize_paper", _resp, (time.perf_counter() - _t0) * 1000, error=str(e))
             logger.error(f"总结文献失败: {e}")
             abstract_value: Any = getattr(paper, "abstract", None)
             abstract_text = str(abstract_value) if abstract_value is not None else ""

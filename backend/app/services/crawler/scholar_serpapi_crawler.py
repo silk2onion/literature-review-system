@@ -12,6 +12,8 @@ SerpAPI 文档: https://serpapi.com/google-scholar-api
 - 注意：摘要通常只是片段（snippet），非完整摘要
 """
 import logging
+import random
+import re
 import time
 from typing import List, Optional
 
@@ -182,39 +184,77 @@ class ScholarSerpapiCrawler(BaseCrawler):
     def _request_with_retry(
         self,
         params: dict,
-        max_retries: int = 3,
+        max_retries: int = 4,
     ) -> Optional[httpx.Response]:
-        """带重试的 HTTP 请求"""
+        """带重试的 HTTP 请求（含随机抖动防撞墙）"""
+        from app.services.api_usage_service import log_crawler_usage, ApiTimer
+
         for attempt in range(max_retries):
             self._rate_limit()
+            timer = ApiTimer()
             try:
                 resp = self.client.get(self.BASE_URL, params=params)
                 resp.raise_for_status()
+                log_crawler_usage(
+                    source="scholar_serpapi", endpoint=self.BASE_URL, method="GET",
+                    status_code=resp.status_code, duration_ms=timer.elapsed_ms(),
+                    success=True, caller="ScholarSerpapiCrawler._request_with_retry",
+                    metadata_json={"query": params.get("q", "")[:200]},
+                )
                 return resp
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 if status == 429:
-                    delay = (2 ** attempt) + 3
+                    if attempt == max_retries - 1:
+                        logger.error("[ScholarSerpapiCrawler] 429 达到最大重试次数，放弃")
+                        log_crawler_usage(
+                            source="scholar_serpapi", endpoint=self.BASE_URL, method="GET",
+                            status_code=429, duration_ms=timer.elapsed_ms(),
+                            success=False, error=str(e)[:500],
+                            caller="ScholarSerpapiCrawler._request_with_retry",
+                        )
+                        return None
+                    delay = (2 ** attempt) + random.uniform(2.0, 5.0)
                     logger.warning(
-                        "[ScholarSerpapiCrawler] 速率限制 (429)，等待 %d 秒后重试",
-                        delay,
+                        "[ScholarSerpapiCrawler] 速率限制 (429)，等待 %.1f 秒后重试 (%d/%d)",
+                        delay, attempt + 1, max_retries,
                     )
                     time.sleep(delay)
                 elif status in (500, 502, 503, 504):
-                    delay = (2 ** attempt) + 2
+                    delay = (2 ** attempt) + random.uniform(1.0, 3.0)
                     logger.warning(
                         "[ScholarSerpapiCrawler] 服务器错误 (%d)，第 %d 次重试",
                         status, attempt + 1,
                     )
+                    if attempt == max_retries - 1:
+                        log_crawler_usage(
+                            source="scholar_serpapi", endpoint=self.BASE_URL, method="GET",
+                            status_code=status, duration_ms=timer.elapsed_ms(),
+                            success=False, error=str(e)[:500],
+                            caller="ScholarSerpapiCrawler._request_with_retry",
+                        )
+                        return None
                     time.sleep(delay)
                 else:
                     logger.error("[ScholarSerpapiCrawler] HTTP 错误: %s", e)
+                    log_crawler_usage(
+                        source="scholar_serpapi", endpoint=self.BASE_URL, method="GET",
+                        status_code=status, duration_ms=timer.elapsed_ms(),
+                        success=False, error=str(e)[:500],
+                        caller="ScholarSerpapiCrawler._request_with_retry",
+                    )
                     return None
             except Exception as e:
                 logger.error("[ScholarSerpapiCrawler] 请求异常: %s", e)
                 if attempt < max_retries - 1:
-                    time.sleep(2)
+                    time.sleep(random.uniform(1.0, 3.0))
                 else:
+                    log_crawler_usage(
+                        source="scholar_serpapi", endpoint=self.BASE_URL, method="GET",
+                        status_code=0, duration_ms=timer.elapsed_ms(),
+                        success=False, error=str(e)[:500],
+                        caller="ScholarSerpapiCrawler._request_with_retry",
+                    )
                     return None
 
         logger.error("[ScholarSerpapiCrawler] 达到最大重试次数 %d，放弃", max_retries)
@@ -262,6 +302,9 @@ class ScholarSerpapiCrawler(BaseCrawler):
                 pdf_url = res_link
                 break
 
+        # DOI 提取：Google Scholar 不直接返回 DOI，需从 URL 链接中解析
+        doi = self._extract_doi_from_urls(url, pdf_url, resources)
+
         # result_id 作为 source_id
         source_id = item.get("result_id")
 
@@ -276,6 +319,7 @@ class ScholarSerpapiCrawler(BaseCrawler):
             source="scholar_serpapi",
             abstract=abstract,
             year=year,
+            doi=doi,
             source_id=source_id,
             journal=journal,
             url=url,
@@ -283,6 +327,44 @@ class ScholarSerpapiCrawler(BaseCrawler):
         )
 
         return paper
+
+    @staticmethod
+    def _extract_doi_from_urls(
+        url: Optional[str],
+        pdf_url: Optional[str],
+        resources: list,
+    ) -> Optional[str]:
+        """
+        从 Google Scholar 结果的各种 URL 中尝试提取 DOI。
+
+        DOI 通常嵌在以下位置：
+        - link: "https://doi.org/10.1016/j.ufug.2024.128345"
+        - link: "https://www.sciencedirect.com/science/article/pii/..." (无 DOI)
+        - resources[].link: PDF 链接有时包含 DOI 路径
+        - link: "https://link.springer.com/article/10.1007/s11069-024-..."
+
+        DOI 正则: 10.XXXX/后续任意非空白字符
+        """
+        doi_pattern = re.compile(r'(10\.\d{4,9}/[^\s&?#]+)')
+
+        # 优先从主链接提取
+        for candidate in [url, pdf_url]:
+            if candidate:
+                match = doi_pattern.search(candidate)
+                if match:
+                    doi = match.group(1).rstrip(".,;)")
+                    return doi
+
+        # 从 resources 链接中提取
+        for res in resources:
+            res_link = res.get("link", "")
+            if res_link:
+                match = doi_pattern.search(res_link)
+                if match:
+                    doi = match.group(1).rstrip(".,;)")
+                    return doi
+
+        return None
 
     @staticmethod
     def _parse_publication_summary(summary: str):
@@ -319,7 +401,6 @@ class ScholarSerpapiCrawler(BaseCrawler):
             journal_year_part = parts[1].strip()
 
             # 尝试提取年份（四位数字）
-            import re
             year_match = re.search(r'\b(19|20)\d{2}\b', journal_year_part)
             if year_match:
                 year = int(year_match.group())
@@ -330,7 +411,6 @@ class ScholarSerpapiCrawler(BaseCrawler):
 
         if len(parts) >= 3 and year is None:
             # 第三部分有时包含年份
-            import re
             year_match = re.search(r'\b(19|20)\d{2}\b', parts[2])
             if year_match:
                 year = int(year_match.group())

@@ -4,7 +4,7 @@ Review 相关 API 路由
 import asyncio
 import json
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from typing import List, Any
+from typing import List
 import logging
 import time
 
@@ -27,7 +27,6 @@ from app.schemas.review import (
 from app.models import Review
 from app.database import SessionLocal, get_db
 from app.config import settings
-from app.utils.cache import review_cache
 from app.services.review import generate_review as core_generate_review
 from app.services.review import SectionReviewPipelineService
 from app.services.llm.openai_service import OpenAIService
@@ -127,7 +126,6 @@ async def orchestrate_review(
 )
 async def generate_framework(
     payload: dict,
-    db: Session = Depends(get_db),
 ):
     """
     Standalone framework generation (Step 0 of enhanced PhD pipeline).
@@ -753,18 +751,6 @@ async def resume_pipeline_task(task_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"恢复任务失败: {e}")
 
 
-def get_db_local():
-    """
-    保留一个本文件内的 Session 获取器（兼容你现在的写法）。
-    但后续新的导出接口会优先使用全局的 get_db 依赖。
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 @router.post(
     "/{review_id}/export",
     response_model=ReviewFullExport,
@@ -877,11 +863,10 @@ def export_review(
 
 
 @router.get("/latest", response_model=ReviewResponse)
-def get_latest_review():
+def get_latest_review(db: Session = Depends(get_db)):
     """
     获取最新一条综述（按 created_at 排序）
     """
-    db = next(get_db_local())
     review = db.query(Review).order_by(Review.created_at.desc()).first()
     if not review:
         raise HTTPException(status_code=404, detail="No reviews found")
@@ -1368,13 +1353,11 @@ def validate_citations(
 
 
 @router.get("/{review_id}", response_model=ReviewResponse)
-def get_review_by_id(review_id: int):
+def get_review_by_id(review_id: int, db: Session = Depends(get_db)):
     """
     根据 ID 获取单条综述信息（包括 framework）
     方便你在没有前端页面的情况下，直接通过 /api/docs 查看 JSON 结果。
     """
-    # 手动管理 session，避免依赖额外的 DI 代码
-    db = next(get_db_local())
     review = db.query(Review).filter(Review.id == review_id).first()
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")

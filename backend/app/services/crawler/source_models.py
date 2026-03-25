@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import List, Optional
 
@@ -40,8 +40,8 @@ class SourcePaper:
     pdf_url: Optional[str] = None
 
     # 主题/分类信息
-    keywords: List[str] = None
-    categories: List[str] = None
+    keywords: Optional[List[str]] = field(default=None)
+    categories: Optional[List[str]] = field(default=None)
 
     # 期刊评价指标 (新增)
     journal_impact_factor: Optional[float] = None

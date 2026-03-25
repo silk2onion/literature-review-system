@@ -1,5 +1,5 @@
 """
-期刊信息相关 API 路由（占位实现）
+期刊信息相关 API 路由
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.paper import Paper
 from app.services.journal_info_service import get_journal_info_service
 
 
@@ -21,18 +22,18 @@ router = APIRouter(
 
 
 class JournalInfoLookupResponse(BaseModel):
-    """期刊信息查询结果（当前为占位结构）"""
+    """期刊信息查询结果"""
 
     name: Optional[str] = None
     issn: Optional[str] = None
     impact_factor: Optional[float] = None
     quartile: Optional[str] = None
     indexing: Optional[List[str]] = None
-    source: str = "placeholder"
+    source: str = "local_library"
 
 
 class PaperJournalEnrichResponse(BaseModel):
-    """针对单篇论文的期刊信息增强结果（占位）"""
+    """针对单篇论文的期刊信息增强结果"""
 
     paper_id: int
     updated: bool
@@ -43,32 +44,39 @@ class PaperJournalEnrichResponse(BaseModel):
 def lookup_journal_info(
     issn: Optional[str] = None,
     name: Optional[str] = None,
+    db: Session = Depends(get_db),
 ) -> JournalInfoLookupResponse:
     """
-    按 ISSN 或期刊名查询期刊信息的占位接口。
+    按 ISSN 或期刊名查询期刊信息。
 
-    当前实现：
-    - 如果未提供 issn 与 name，则返回 400；
-    - 内部调用 JournalInfoService 的占位方法以便后续扩展；
-    - 返回一个仅带有输入信息的占位结果。
+    当前最小实现：
+    - 优先按 ISSN 在本地 Paper 表中查找已有期刊元信息；
+    - 若未提供 ISSN，则退化为按期刊名匹配；
+    - 未找到时返回 not_found，而非占位结果。
     """
     if not issn and not name:
         raise HTTPException(status_code=400, detail="必须提供 issn 或 name 之一")
 
     service = get_journal_info_service()
-    # 当前实现仅作为占位：调用服务以记录日志，但忽略其返回值
-    if issn:
-        _ = service.lookup_by_issn(issn)
-    elif name:
-        _ = service.lookup_by_name(name)
+    info = service.lookup_by_issn(db, issn) if issn else service.lookup_by_name(db, name or "")
+
+    if info is None:
+        return JournalInfoLookupResponse(
+            name=name or None,
+            issn=issn or None,
+            impact_factor=None,
+            quartile=None,
+            indexing=None,
+            source="not_found",
+        )
 
     return JournalInfoLookupResponse(
-        name=name or None,
-        issn=issn or None,
-        impact_factor=None,
-        quartile=None,
-        indexing=None,
-        source="placeholder",
+        name=info.name or name or None,
+        issn=info.issn or issn or None,
+        impact_factor=info.impact_factor,
+        quartile=info.quartile,
+        indexing=info.indexing,
+        source="local_library",
     )
 
 
@@ -78,18 +86,22 @@ def enrich_paper_journal_info(
     db: Session = Depends(get_db),
 ) -> PaperJournalEnrichResponse:
     """
-    为单篇论文预留的“期刊信息增强”占位接口。
+    为单篇论文执行期刊信息增强。
 
-    当前实现：
-    - 仅获取 JournalInfoService 实例以便后续扩展；
-    - 不修改数据库中的任何内容；
-    - 返回占位结果，提示功能尚未真正实现。
+    当前最小实现：
+    - 优先用论文自身 ISSN 匹配本地文献库中的同刊记录；
+    - 无 ISSN 时退化为按期刊名匹配；
+    - 仅回填当前论文缺失的期刊元信息字段。
     """
-    _ = get_journal_info_service()
-    _ = db  # 占位使用，避免未使用参数告警
+    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    if paper is None:
+        raise HTTPException(status_code=404, detail=f"未找到论文: paper_id={paper_id}")
+
+    service = get_journal_info_service()
+    result = service.enrich_paper(db, paper)
 
     return PaperJournalEnrichResponse(
         paper_id=paper_id,
-        updated=False,
-        message="期刊信息增强功能尚未实现（占位接口）",
+        updated=result.updated,
+        message=result.message,
     )

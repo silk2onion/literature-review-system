@@ -13,6 +13,7 @@ import {
   Activity,
   FileText,
   GitBranch,
+  BarChart3,
 } from "lucide-react";
 import LibraryPage from "./LibraryPage";
 import StagingPapersPage from "./StagingPapersPage";
@@ -26,6 +27,7 @@ import ReviewOrchestratePage from "./ReviewOrchestratePage";
 import MonitoringDashboard from "./MonitoringDashboard";
 import ReviewListPage from "./ReviewListPage";
 import PrismaFlowPage from "./PrismaFlowPage";
+import ApiUsagePage from "./ApiUsagePage";
 
 function App() {
   // State
@@ -38,6 +40,7 @@ function App() {
     | "draft"
     | "orchestrate"
     | "monitoring"
+    | "apiUsage"
     | "reviews"
   >("search");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -62,6 +65,8 @@ function App() {
         return <ReviewOrchestratePage />;
       case "screening":
         return <PrismaFlowPage />;
+      case "apiUsage":
+        return <ApiUsagePage />;
       case "monitoring":
         return <MonitoringDashboard />;
       case "reviews":
@@ -87,6 +92,8 @@ function App() {
         return "一键综述生成";
       case "screening":
         return "PRISMA 筛选流程";
+      case "apiUsage":
+        return "API 使用监控";
       case "monitoring":
         return "任务进度监控";
       case "reviews":
@@ -124,6 +131,13 @@ function App() {
             >
               <Activity size={16} className="sidebar-icon green" />
               任务监控
+            </button>
+            <button
+              onClick={() => setActiveTab("apiUsage")}
+              className={`sidebar-item ${activeTab === "apiUsage" ? "active" : ""}`}
+            >
+              <BarChart3 size={16} className="sidebar-icon orange" />
+              API 监控
             </button>
             <button
               onClick={() => setActiveTab("screening")}

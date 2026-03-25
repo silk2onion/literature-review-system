@@ -309,12 +309,27 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
     setError(null);
     setDebugResult(null);
 
+    const payload: DataSourcesConfig = {
+      ...config,
+      serpapi: {
+        ...config.serpapi,
+        api_key: (config.serpapi.api_key || "").trim(),
+      },
+      scopus: {
+        ...config.scopus,
+        api_key: (config.scopus.api_key || "").trim(),
+      },
+      rag: {
+        ...config.rag,
+      },
+    };
+
     fetch(`${API_BASE_URL}/api/settings/data-sources`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(config),
+      body: JSON.stringify(payload),
     })
       .then(async (res) => {
         if (!res.ok) {
