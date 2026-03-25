@@ -103,25 +103,6 @@ def search_staging_papers(
     )
 
 
-@router.get("/{staging_paper_id}", response_model=StagingPaperResponse)
-def get_staging_paper(
-    staging_paper_id: int,
-    db: Session = Depends(get_db),
-) -> StagingPaperResponse:
-    """
-    获取单条暂存文献详情
-    """
-    paper = (
-        db.query(StagingPaper)
-        .filter(StagingPaper.id == staging_paper_id)
-        .first()
-    )
-    if not paper:
-        raise HTTPException(status_code=404, detail="暂存文献不存在")
-
-    return StagingPaperResponse.model_validate(paper)
-
-
 @router.post("/promote", response_model=List[PaperResponse])
 async def promote_staging_papers_endpoint(
     payload: StagingPaperPromoteRequest,
@@ -345,3 +326,24 @@ def get_prisma_stats(
         exclusion_reasons=exclusion_reasons,
         search_strategy=search_strategy,
     )
+
+
+# ========== 动态路径端点（必须放在所有固定路径之后） ==========
+
+@router.get("/{staging_paper_id}", response_model=StagingPaperResponse)
+def get_staging_paper(
+    staging_paper_id: int,
+    db: Session = Depends(get_db),
+) -> StagingPaperResponse:
+    """
+    获取单条暂存文献详情
+    """
+    paper = (
+        db.query(StagingPaper)
+        .filter(StagingPaper.id == staging_paper_id)
+        .first()
+    )
+    if not paper:
+        raise HTTPException(status_code=404, detail="暂存文献不存在")
+
+    return StagingPaperResponse.model_validate(paper)

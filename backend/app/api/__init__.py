@@ -11,6 +11,7 @@ from app.api.citation_analysis import router as citation_analysis_router
 from app.api.journal_info import router as journal_info_router
 from app.api.recall_logs import router as recall_logs_router
 from app.api.groups import router as groups_router
+from app.api.api_usage import router as api_usage_router
 
 __all__ = [
     "papers_router",
@@ -23,4 +24,5 @@ __all__ = [
     "journal_info_router",
     "recall_logs_router",
     "groups_router",
+    "api_usage_router",
 ]

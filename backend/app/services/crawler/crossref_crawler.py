@@ -14,8 +14,10 @@ CrossRef API 文档: https://api.crossref.org/swagger-ui/index.html
   这些高级期刊指标需要通过外部 Journal/Index 数据库进行补充。
 """
 import logging
+import random
 import re
 import time
+from datetime import date as date_type
 from typing import List, Optional
 
 import httpx
@@ -205,40 +207,80 @@ class CrossRefCrawler(BaseCrawler):
     def _request_with_retry(
         self,
         params: dict,
-        max_retries: int = 3,
+        max_retries: int = 4,
     ) -> Optional[httpx.Response]:
-        """带重试的 HTTP 请求"""
+        """带随机抖动重试的 HTTP 请求"""
+        from app.services.api_usage_service import log_crawler_usage, ApiTimer
+
         for attempt in range(max_retries):
             self._rate_limit()
+            timer = ApiTimer()
             try:
                 resp = self.client.get(self.BASE_URL, params=params)
                 resp.raise_for_status()
+                log_crawler_usage(
+                    source="crossref", endpoint=self.BASE_URL, method="GET",
+                    status_code=resp.status_code, duration_ms=timer.elapsed_ms(),
+                    success=True, caller="CrossRefCrawler._request_with_retry",
+                    metadata_json={"query": params.get("query", "")[:200]},
+                )
                 return resp
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 if status == 429:
-                    retry_after = e.response.headers.get("Retry-After", "5")
-                    delay = int(retry_after) if retry_after.isdigit() else 5
+                    retry_after_raw = e.response.headers.get("Retry-After", "5")
+                    retry_after = int(retry_after_raw) if retry_after_raw.isdigit() else 5
+                    delay = min(retry_after, 60) + random.uniform(1.0, 3.0)
                     logger.warning(
-                        "[CrossRefCrawler] 速率限制 (429)，等待 %d 秒后重试",
-                        delay,
+                        "[CrossRefCrawler] 速率限制 (429)，第 %d/%d 次重试，等待 %.1f 秒",
+                        attempt + 1, max_retries, delay,
                     )
+                    if attempt == max_retries - 1:
+                        logger.error("[CrossRefCrawler] 429 达到最大重试次数，放弃")
+                        log_crawler_usage(
+                            source="crossref", endpoint=self.BASE_URL, method="GET",
+                            status_code=429, duration_ms=timer.elapsed_ms(),
+                            success=False, error=str(e)[:500],
+                            caller="CrossRefCrawler._request_with_retry",
+                        )
+                        return None
                     time.sleep(delay)
                 elif status in (500, 502, 503, 504):
-                    delay = (2 ** attempt) + 2
+                    delay = (2 ** attempt) + random.uniform(1.0, 3.0)
                     logger.warning(
-                        "[CrossRefCrawler] 服务器错误 (%d)，第 %d 次重试，等待 %d 秒",
-                        status, attempt + 1, delay,
+                        "[CrossRefCrawler] 服务器错误 (%d)，第 %d/%d 次重试，等待 %.1f 秒",
+                        status, attempt + 1, max_retries, delay,
                     )
+                    if attempt == max_retries - 1:
+                        logger.error("[CrossRefCrawler] 达到最大重试次数，放弃")
+                        log_crawler_usage(
+                            source="crossref", endpoint=self.BASE_URL, method="GET",
+                            status_code=status, duration_ms=timer.elapsed_ms(),
+                            success=False, error=str(e)[:500],
+                            caller="CrossRefCrawler._request_with_retry",
+                        )
+                        return None
                     time.sleep(delay)
                 else:
                     logger.error("[CrossRefCrawler] HTTP 错误: %s", e)
+                    log_crawler_usage(
+                        source="crossref", endpoint=self.BASE_URL, method="GET",
+                        status_code=status, duration_ms=timer.elapsed_ms(),
+                        success=False, error=str(e)[:500],
+                        caller="CrossRefCrawler._request_with_retry",
+                    )
                     return None
             except Exception as e:
                 logger.error("[CrossRefCrawler] 请求异常: %s", e)
                 if attempt < max_retries - 1:
-                    time.sleep(2)
+                    time.sleep(2 + random.uniform(0.5, 1.5))
                 else:
+                    log_crawler_usage(
+                        source="crossref", endpoint=self.BASE_URL, method="GET",
+                        status_code=0, duration_ms=timer.elapsed_ms(),
+                        success=False, error=str(e)[:500],
+                        caller="CrossRefCrawler._request_with_retry",
+                    )
                     return None
 
         logger.error("[CrossRefCrawler] 达到最大重试次数 %d，放弃", max_retries)
@@ -275,7 +317,6 @@ class CrossRefCrawler(BaseCrawler):
                 parts = v.get("date-parts", [[]])[0]
                 if parts and len(parts) >= 3:
                     try:
-                        from datetime import date as date_type
                         published_date = date_type(int(parts[0]), int(parts[1]), int(parts[2]))
                         break
                     except (ValueError, IndexError):

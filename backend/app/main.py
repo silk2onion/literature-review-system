@@ -22,6 +22,7 @@ from app.api import (
     journal_info_router,
     recall_logs_router,
     groups_router,
+    api_usage_router,
 )
 from app.api import settings as settings_api
 from app.api.agent import router as agent_router
@@ -123,6 +124,7 @@ app.include_router(recall_logs_router)
 app.include_router(groups_router)
 app.include_router(settings_api.router)
 app.include_router(agent_router)
+app.include_router(api_usage_router)
 
 
 # 全局异常处理

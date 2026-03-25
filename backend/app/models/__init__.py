@@ -12,6 +12,7 @@ from app.models.pipeline_task import PipelineTask
 from .citation import PaperCitation
 from .recall_log import RecallLog
 from .group import PaperGroup, PaperGroupAssociation
+from .api_usage_log import ApiUsageLog
 
 __all__ = [
     "Paper",
@@ -28,4 +29,5 @@ __all__ = [
     "PaperGroup",
     "PaperGroupAssociation",
     "PipelineTask",
+    "ApiUsageLog",
 ]

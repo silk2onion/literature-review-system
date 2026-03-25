@@ -16,7 +16,7 @@ import {
   Plus,
   MessageCircle,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
 } from "lucide-react";
 
 const API_BASE_URL = "http://localhost:5444";
@@ -49,7 +49,10 @@ type ChatSession = {
 
 // ── 工具图标和标签 ──────────────────────────────────
 
-const TOOL_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
+const TOOL_LABELS: Record<
+  string,
+  { label: string; emoji: string; color: string }
+> = {
   search_papers: { label: "搜索文献", emoji: "🔍", color: "#3b82f6" },
   list_staging: { label: "查看暂存库", emoji: "📋", color: "#8b5cf6" },
   promote_papers: { label: "提升文献", emoji: "⬆️", color: "#22c55e" },
@@ -88,27 +91,48 @@ function ActionCard({ action }: { action: ActionResult }) {
       }}
     >
       <div
-        style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: 6,
+        }}
       >
         <Zap size={14} style={{ color: toolInfo.color }} />
         <span style={{ fontWeight: 600, color: toolInfo.color, fontSize: 12 }}>
           {toolInfo.emoji} {toolInfo.label}
         </span>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 6,
+          alignItems: "center",
+        }}
+      >
         {action.result.error ? (
-          <span style={{ color: "#ef4444" }}>❌ {action.result.error as string}</span>
+          <span style={{ color: "#ef4444" }}>
+            ❌ {action.result.error as string}
+          </span>
         ) : (
           <>
             {typeof action.result.total === "number" && (
               <span style={styles.badge}>{action.result.total} 条</span>
             )}
-            {(action.result.task_id || action.result.id || action.result.job_id) && (
+            {(action.result.task_id ||
+              action.result.id ||
+              action.result.job_id) && (
               <>
                 <span style={styles.badge}>
-                  🚀 ID: {String(action.result.task_id || action.result.id || action.result.job_id)}
+                  🚀 ID:{" "}
+                  {String(
+                    action.result.task_id ||
+                      action.result.id ||
+                      action.result.job_id,
+                  )}
                 </span>
-                <button 
+                <button
                   onClick={() => {
                     const nav = (window as any).onAgentNavigate;
                     if (nav) nav("monitoring");
@@ -151,7 +175,7 @@ const styles = {
     fontWeight: 500 as const,
     border: "none",
     cursor: "pointer",
-  }
+  },
 };
 
 // ── persistence ─────────────────────────────────────
@@ -188,7 +212,7 @@ function createNewSession(mode: ChatMode = "agent"): ChatSession {
     title: "新对话",
     updatedAt: new Date().toISOString(),
     mode,
-    messages: [makeWelcomeMsg(mode)]
+    messages: [makeWelcomeMsg(mode)],
   };
 }
 
@@ -200,42 +224,52 @@ function loadSessions(): ChatSession[] {
       return [createNewSession("agent")];
     }
     const parsed = JSON.parse(raw);
-    
+
     // Legacy migration: If it's an array of messages (old format)
-    if (Array.isArray(parsed) && parsed.length > 0 && !('messages' in parsed[0])) {
-      const mode = (sessionStorage.getItem("agent_chat_mode") as ChatMode) || "agent";
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      !("messages" in parsed[0])
+    ) {
+      const mode =
+        (sessionStorage.getItem("agent_chat_mode") as ChatMode) || "agent";
       const migratedSession: ChatSession = {
         id: `sess-legacy-${Date.now()}`,
         title: "之前的对话",
         updatedAt: new Date().toISOString(),
         mode,
-        messages: parsed
+        messages: parsed,
       };
       saveSessions([migratedSession]);
       return [migratedSession];
     }
-    
+
     // Legacy migration from old flat history logic to session
     // Just in case we also have 'agent_chat_history' around
     const oldHistoryRaw = localStorage.getItem("agent_chat_history");
     let legacySessions: ChatSession[] = [];
     if (oldHistoryRaw && (!Array.isArray(parsed) || parsed.length === 0)) {
-         const oldHistory = JSON.parse(oldHistoryRaw);
-         if (Array.isArray(oldHistory) && oldHistory.length > 0 && !('messages' in oldHistory[0])) {
-             const mode = (sessionStorage.getItem("agent_chat_mode") as ChatMode) || "agent";
-             const migratedSession: ChatSession = {
-                id: `sess-legacy-${Date.now()}`,
-                title: "之前的对话",
-                updatedAt: new Date().toISOString(),
-                mode,
-                messages: oldHistory
-             };
-             legacySessions.push(migratedSession);
-             localStorage.removeItem("agent_chat_history"); // delete old
-         }
+      const oldHistory = JSON.parse(oldHistoryRaw);
+      if (
+        Array.isArray(oldHistory) &&
+        oldHistory.length > 0 &&
+        !("messages" in oldHistory[0])
+      ) {
+        const mode =
+          (sessionStorage.getItem("agent_chat_mode") as ChatMode) || "agent";
+        const migratedSession: ChatSession = {
+          id: `sess-legacy-${Date.now()}`,
+          title: "之前的对话",
+          updatedAt: new Date().toISOString(),
+          mode,
+          messages: oldHistory,
+        };
+        legacySessions.push(migratedSession);
+        localStorage.removeItem("agent_chat_history"); // delete old
+      }
     }
 
-    if (Array.isArray(parsed) && parsed.length > 0 && 'messages' in parsed[0]) {
+    if (Array.isArray(parsed) && parsed.length > 0 && "messages" in parsed[0]) {
       return [...legacySessions, ...parsed];
     }
     if (legacySessions.length > 0) return legacySessions;
@@ -258,10 +292,10 @@ function saveSessions(sessions: ChatSession[]) {
 async function callAgent(
   message: string,
   history: { role: string; content: string }[],
-  mode: ChatMode = "agent"
+  mode: ChatMode = "agent",
 ): Promise<{ reply: string; action: ActionResult | null }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 300_000);  // 5 min for multi-step agent
+  const timeout = setTimeout(() => controller.abort(), 300_000); // 5 min for multi-step agent
 
   try {
     const resp = await fetch(`${API_BASE_URL}/api/agent/chat`, {
@@ -287,10 +321,23 @@ async function callAgent(
 interface AgentChatPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  onNavigate?: (tab: "search" | "library" | "staging" | "rag" | "draft" | "orchestrate" | "monitoring") => void;
+  onNavigate?: (
+    tab:
+      | "search"
+      | "library"
+      | "staging"
+      | "rag"
+      | "draft"
+      | "orchestrate"
+      | "monitoring",
+  ) => void;
 }
 
-export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentChatPanelProps) {
+export default function AgentChatPanel({
+  isOpen,
+  onClose,
+  onNavigate,
+}: AgentChatPanelProps) {
   useEffect(() => {
     (window as any).onAgentNavigate = onNavigate;
     return () => {
@@ -300,11 +347,14 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
 
   // Session State
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions());
-  const [activeSessionId, setActiveSessionId] = useState<string>(() => sessions[0]?.id);
+  const [activeSessionId, setActiveSessionId] = useState<string>(
+    () => sessions[0]?.id,
+  );
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Current session derived state
-  const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
+  const activeSession =
+    sessions.find((s) => s.id === activeSessionId) || sessions[0];
   const mode = activeSession.mode;
   const messages = activeSession.messages;
 
@@ -337,7 +387,7 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
     let reconnectTimer: number;
 
     const connect = () => {
-      const wsUrl = API_BASE_URL.replace(/^http/, 'ws') + '/api/agent/ws';
+      const wsUrl = API_BASE_URL.replace(/^http/, "ws") + "/api/agent/ws";
       ws = new WebSocket(wsUrl);
 
       ws.onmessage = (event) => {
@@ -350,16 +400,18 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
               content: data.content,
               timestamp: data.timestamp || new Date().toISOString(),
             };
-            
+
             // Append the message to the active session
-            setSessions(prevSessions => {
-              const targetIdx = prevSessions.findIndex(s => s.id === activeSessionId);
+            setSessions((prevSessions) => {
+              const targetIdx = prevSessions.findIndex(
+                (s) => s.id === activeSessionId,
+              );
               if (targetIdx < 0) return prevSessions;
               const newSessions = [...prevSessions];
               newSessions[targetIdx] = {
                 ...newSessions[targetIdx],
                 messages: [...newSessions[targetIdx].messages, proactiveMsg],
-                updatedAt: new Date().toISOString()
+                updatedAt: new Date().toISOString(),
               };
               return newSessions;
             });
@@ -389,14 +441,14 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
 
   const handleNewChat = () => {
     const newSession = createNewSession("agent");
-    setSessions(prev => [newSession, ...prev]);
+    setSessions((prev) => [newSession, ...prev]);
     setActiveSessionId(newSession.id);
   };
 
   const handleDeleteSession = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    setSessions(prev => {
-      const updated = prev.filter(s => s.id !== id);
+    setSessions((prev) => {
+      const updated = prev.filter((s) => s.id !== id);
       if (updated.length === 0) {
         const fresh = createNewSession("agent");
         setActiveSessionId(fresh.id);
@@ -409,9 +461,11 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
     });
   };
 
-  const updateActiveSession = (updateFn: (session: ChatSession) => ChatSession) => {
-    setSessions(prev => {
-      const targetIdx = prev.findIndex(s => s.id === activeSessionId);
+  const updateActiveSession = (
+    updateFn: (session: ChatSession) => ChatSession,
+  ) => {
+    setSessions((prev) => {
+      const targetIdx = prev.findIndex((s) => s.id === activeSessionId);
       if (targetIdx < 0) return prev;
       const newSessions = [...prev];
       newSessions[targetIdx] = updateFn(newSessions[targetIdx]);
@@ -434,18 +488,18 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
 
       const base = historyOverride ?? messages;
       const updatedMessages = [...base, userMsg];
-      
+
       let newTitle = activeSession.title;
       // Auto name if it's the first real user message
       if (newTitle === "新对话" && base.length <= 1) {
-         newTitle = text.length > 15 ? text.slice(0, 15) + "..." : text;
+        newTitle = text.length > 15 ? text.slice(0, 15) + "..." : text;
       }
 
-      updateActiveSession(s => ({
+      updateActiveSession((s) => ({
         ...s,
         title: newTitle,
         messages: updatedMessages,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       }));
 
       setInput("");
@@ -466,43 +520,46 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
           timestamp: new Date().toISOString(),
         };
 
-        updateActiveSession(s => ({
+        updateActiveSession((s) => ({
           ...s,
           messages: [...s.messages, aiMsg],
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
         }));
-
       } catch (err) {
         const errName =
-          (err as Error).name === "AbortError" ? "请求超时（5分钟），请检查后端日志" : (err as Error).message;
+          (err as Error).name === "AbortError"
+            ? "请求超时（5分钟），请检查后端日志"
+            : (err as Error).message;
         const errorMsg: ChatMessage = {
           id: `err-${Date.now()}`,
           role: "assistant",
           content: `请求失败 😥：${errName}\n\n💡 提示：请检查后端是否正在运行（端口 5444）`,
           timestamp: new Date().toISOString(),
         };
-        updateActiveSession(s => ({
+        updateActiveSession((s) => ({
           ...s,
           messages: [...s.messages, errorMsg],
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
         }));
       } finally {
         setLoading(false);
       }
     },
-    [loading, messages, activeSession.title, activeSessionId, mode] // activeSessionId used over activeSession.id
+    [loading, messages, activeSession.title, activeSessionId, mode], // activeSessionId used over activeSession.id
   );
 
   // ── 重新生成最后一条 AI 回复 ──────────────────────
 
   const regenerate = useCallback(() => {
-    const lastUserIdx = messages.findLastIndex((m) => m.role === "user");
+    const lastUserIdx = messages.findLastIndex(
+      (m: ChatMessage) => m.role === "user",
+    );
     if (lastUserIdx < 0) return;
 
     const lastUserMsg = messages[lastUserIdx];
     const truncated = messages.slice(0, lastUserIdx);
-    
-    updateActiveSession(s => ({ ...s, messages: truncated }));
+
+    updateActiveSession((s) => ({ ...s, messages: truncated }));
     sendMessage(lastUserMsg.content, truncated);
   }, [messages, sendMessage]);
 
@@ -519,34 +576,34 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
       if (idx < 0) return;
 
       const truncated = messages.slice(0, idx);
-      updateActiveSession(s => ({ ...s, messages: truncated }));
+      updateActiveSession((s) => ({ ...s, messages: truncated }));
       setEditingId(null);
 
       sendMessage(editText, truncated);
     },
-    [messages, editText, sendMessage]
+    [messages, editText, sendMessage],
   );
 
   // ── 删除及模式切换 ────────────────────────────────
 
   const deleteMessage = (msgId: string) => {
-    updateActiveSession(s => ({
+    updateActiveSession((s) => ({
       ...s,
-      messages: s.messages.filter(m => m.id !== msgId)
+      messages: s.messages.filter((m) => m.id !== msgId),
     }));
   };
 
   const clearHistory = () => {
-    updateActiveSession(s => ({
+    updateActiveSession((s) => ({
       ...s,
       messages: [makeWelcomeMsg(s.mode)],
-      title: "新对话"
+      title: "新对话",
     }));
   };
 
   const switchMode = (newMode: ChatMode) => {
     if (newMode === mode) return;
-    updateActiveSession(s => {
+    updateActiveSession((s) => {
       let newMessages = s.messages;
       if (s.messages.length === 1 && s.messages[0].id === "welcome") {
         newMessages = [makeWelcomeMsg(newMode)];
@@ -569,25 +626,30 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
       {/* 侧边栏: Chat History (Antigravity Style) */}
       {sidebarOpen && (
         <div className="agent-sidebar">
-          <div className="agent-sidebar-header">
-            历史对话
-          </div>
-          
+          <div className="agent-sidebar-header">历史对话</div>
+
           <button className="agent-new-chat-btn" onClick={handleNewChat}>
             <Plus size={16} /> 新建对话
           </button>
-          
+
           <div className="agent-session-list">
-            {sessions.map(sess => (
-              <div 
+            {sessions.map((sess) => (
+              <div
                 key={sess.id}
-                className={`agent-session-item ${sess.id === activeSessionId ? 'active' : ''}`}
+                className={`agent-session-item ${sess.id === activeSessionId ? "active" : ""}`}
                 onClick={() => setActiveSessionId(sess.id)}
               >
-                <MessageCircle size={14} style={{ color: "var(--text-secondary)", marginRight: 8, flexShrink: 0 }} />
+                <MessageCircle
+                  size={14}
+                  style={{
+                    color: "var(--text-secondary)",
+                    marginRight: 8,
+                    flexShrink: 0,
+                  }}
+                />
                 <span className="agent-session-title">{sess.title}</span>
-                <button 
-                  className="agent-session-delete" 
+                <button
+                  className="agent-session-delete"
                   onClick={(e) => handleDeleteSession(e, sess.id)}
                   title="删除对话"
                 >
@@ -604,12 +666,16 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
         {/* Header */}
         <div className="agent-header">
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button 
+            <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="agent-close-btn"
               title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"}
             >
-              {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+              {sidebarOpen ? (
+                <PanelLeftClose size={18} />
+              ) : (
+                <PanelLeftOpen size={18} />
+              )}
             </button>
             <Bot size={18} />
             <span style={{ fontWeight: 600, fontSize: 14 }}>AI 助手</span>
@@ -672,7 +738,9 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
 
                 {/* Text or Edit Mode */}
                 {editingId === msg.id ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                  >
                     <textarea
                       value={editText}
                       onChange={(e) => setEditText(e.target.value)}
@@ -768,7 +836,9 @@ export default function AgentChatPanel({ isOpen, onClose, onNavigate }: AgentCha
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={mode === "ask" ? "问我任何学术问题..." : "输入你的指令..."}
+            placeholder={
+              mode === "ask" ? "问我任何学术问题..." : "输入你的指令..."
+            }
             rows={1}
             className="agent-input"
             disabled={loading}

@@ -8,6 +8,7 @@ Embedding 服务
 from __future__ import annotations
 
 import logging
+import time
 from typing import List, Optional
 
 from openai import AsyncOpenAI
@@ -18,6 +19,24 @@ from app.models.paper import Paper
 from app.models.paper_chunk import PaperChunk
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_log_embedding(model: str, caller: str, duration_ms: float, tokens_in: Optional[int] = None,
+                         count: int = 1, success: bool = True, error: Optional[str] = None):
+    """安全地记录 Embedding 调用日志，绝不抛异常。"""
+    try:
+        from app.services.api_usage_service import log_embedding_usage
+        log_embedding_usage(
+            model=model,
+            caller=caller,
+            duration_ms=duration_ms,
+            tokens_in=tokens_in,
+            count=count,
+            success=success,
+            error=error,
+        )
+    except Exception:
+        pass
 
 # 尝试从 Settings 读取 EMBEDDING_MODEL，若无则回退到一个常见默认值
 EMBEDDING_MODEL_NAME = getattr(settings, "EMBEDDING_MODEL", "text-embedding-3-small")
@@ -54,14 +73,16 @@ class EmbeddingService:
         # 简单裁剪，避免输入过长导致超限
         if len(text) > 6000:
             text = text[:6000]
+        _t0 = time.perf_counter()
+        model_name = getattr(settings, "EMBEDDING_MODEL", None) or self.default_model
         try:
             # 每次调用时优先读取最新的 settings.EMBEDDING_MODEL，以支持运行时模型切换
-            model_name = getattr(settings, "EMBEDDING_MODEL", None) or self.default_model
             resp = await self.client.embeddings.create(
                 model=model_name,
                 input=[text],
             )
         except Exception as exc:
+            _safe_log_embedding(model_name, "embed_text", (time.perf_counter() - _t0) * 1000, count=1, success=False, error=str(exc))
             logger.error("调用 embedding 接口失败: %s", exc)
             return None
         try:
@@ -69,6 +90,14 @@ class EmbeddingService:
         except Exception as exc:
             logger.error("解析 embedding 返回结果失败: %s", exc)
             return None
+        # 提取 token 用量
+        tokens_in = None
+        try:
+            if resp.usage:
+                tokens_in = resp.usage.prompt_tokens
+        except Exception:
+            pass
+        _safe_log_embedding(model_name, "embed_text", (time.perf_counter() - _t0) * 1000, tokens_in=tokens_in, count=1)
         return list(vector)
 
     async def embed_texts(self, texts: List[str]) -> List[Optional[List[float]]]:
@@ -80,9 +109,10 @@ class EmbeddingService:
             
         # 简单裁剪
         cleaned_texts = [t[:6000] for t in texts]
+        _t0 = time.perf_counter()
+        model_name = getattr(settings, "EMBEDDING_MODEL", None) or self.default_model
         
         try:
-            model_name = getattr(settings, "EMBEDDING_MODEL", None) or self.default_model
             resp = await self.client.embeddings.create(
                 model=model_name,
                 input=cleaned_texts,
@@ -92,10 +122,19 @@ class EmbeddingService:
             embeddings = [None] * len(texts)
             for item in resp.data:
                 embeddings[item.index] = list(item.embedding) # type: ignore
-                
+            
+            # 提取 token 用量
+            tokens_in = None
+            try:
+                if resp.usage:
+                    tokens_in = resp.usage.prompt_tokens
+            except Exception:
+                pass
+            _safe_log_embedding(model_name, "embed_texts", (time.perf_counter() - _t0) * 1000, tokens_in=tokens_in, count=len(texts))
             return embeddings
             
         except Exception as exc:
+            _safe_log_embedding(model_name, "embed_texts", (time.perf_counter() - _t0) * 1000, count=len(texts), success=False, error=str(exc))
             logger.error("批量调用 embedding 接口失败: %s", exc)
             return [None] * len(texts)
 

@@ -46,6 +46,8 @@ class ArxivCrawler:
         Returns:
             Paper对象列表
         """
+        from app.services.api_usage_service import log_crawler_usage, ApiTimer
+
         try:
             # 构建查询字符串
             query = self._build_query(keywords, year_from, year_to)
@@ -59,17 +61,31 @@ class ArxivCrawler:
                 sort_order=arxiv.SortOrder.Descending
             )
             
+            timer = ApiTimer()
             papers = []
             for result in self.client.results(search):
                 paper = self._parse_result(result)
                 if paper:
                     papers.append(paper)
             
+            log_crawler_usage(
+                source="arxiv", endpoint="https://export.arxiv.org/api/query",
+                method="GET", status_code=200, duration_ms=timer.elapsed_ms(),
+                result_count=len(papers), success=True,
+                caller="ArxivCrawler.search",
+                metadata_json={"query": query[:200], "max_results": max_results},
+            )
             logger.info(f"Arxiv搜索完成，找到 {len(papers)} 篇文献")
             return papers
             
         except Exception as e:
             logger.error(f"Arxiv搜索失败: {e}")
+            log_crawler_usage(
+                source="arxiv", endpoint="https://export.arxiv.org/api/query",
+                method="GET", status_code=0, duration_ms=0,
+                success=False, error=str(e)[:500],
+                caller="ArxivCrawler.search",
+            )
             raise
     
     def _build_query(
@@ -164,15 +180,38 @@ class ArxivCrawler:
         Returns:
             Paper对象或None
         """
+        from app.services.api_usage_service import log_crawler_usage, ApiTimer
+
+        timer = ApiTimer()
         try:
             search = arxiv.Search(id_list=[arxiv_id])
             result = next(self.client.results(search))
-            return self._parse_result(result)
+            paper = self._parse_result(result)
+            log_crawler_usage(
+                source="arxiv", endpoint="https://export.arxiv.org/api/query",
+                method="GET", status_code=200, duration_ms=timer.elapsed_ms(),
+                result_count=1 if paper else 0, success=True,
+                caller="ArxivCrawler.get_paper_by_id",
+                metadata_json={"arxiv_id": arxiv_id},
+            )
+            return paper
         except StopIteration:
             logger.warning(f"未找到Arxiv ID: {arxiv_id}")
+            log_crawler_usage(
+                source="arxiv", endpoint="https://export.arxiv.org/api/query",
+                method="GET", status_code=404, duration_ms=timer.elapsed_ms(),
+                result_count=0, success=False, error="Paper not found (StopIteration)",
+                caller="ArxivCrawler.get_paper_by_id",
+            )
             return None
         except Exception as e:
             logger.error(f"获取Arxiv文献失败 (ID: {arxiv_id}): {e}")
+            log_crawler_usage(
+                source="arxiv", endpoint="https://export.arxiv.org/api/query",
+                method="GET", status_code=0, duration_ms=timer.elapsed_ms(),
+                success=False, error=str(e)[:500],
+                caller="ArxivCrawler.get_paper_by_id",
+            )
             return None
     
     def download_pdf(self, paper: Paper, download_dir: str) -> Optional[str]:

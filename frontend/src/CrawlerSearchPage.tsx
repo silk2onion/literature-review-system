@@ -94,7 +94,7 @@ export default function CrawlerSearchPage() {
   // Jobs State
   const [jobs, setJobs] = useState<CrawlJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
-  const [jobsError, setJobsError] = useState<string | null>(null);
+  const [_jobsError, setJobsError] = useState<string | null>(null);
   const [actioningJobId, setActioningJobId] = useState<number | null>(null);
 
   // 持久化表单状态到 sessionStorage
@@ -777,7 +777,7 @@ export default function CrawlerSearchPage() {
                       </th>
                     </tr>
                   </thead>
-                  <tbody style={{ divideY: "1px solid #f3f4f6" }}>
+                  <tbody>
                     {jobs.map((job) => (
                       <tr
                         key={job.id}
