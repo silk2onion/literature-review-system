@@ -258,7 +258,7 @@ def init_db():
     # 导入所有模型以确保它们被注册
     from app import models  # noqa: F401
     
-    # 创建所有表
+    # 创建所有表（包括新增的 api_usage_logs）
     Base.metadata.create_all(bind=engine)
     print("✅ 数据库表创建成功！")
 
@@ -269,6 +269,8 @@ def init_db():
 
     # 回填旧数据
     _backfill_review_data()
+
+    logger.info("✅ api_usage_logs 表已就绪（由 create_all 自动管理）")
 
 
 def drop_db():

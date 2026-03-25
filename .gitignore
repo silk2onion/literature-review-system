@@ -142,6 +142,11 @@ scraper.md
 tech-stack-options.md
 V2-RULES-TODO.md
 workflow-diagrams.md
+
+# Development docs naming patterns (keep README*.md as public docs)
+*_SOP*.md
+DEBUG_*.md
+PROGRESS*.md
 backend/add_archived_columns.py
 backend/calculate_workspace_hash.py
 backend/check_api_task.py
@@ -183,4 +188,7 @@ backend/test_search.py
 backend/verify_repair.py
 backend/verify_restoration.py
 backend/debug_checkpoint.json
+
+# Server runtime logs
+backend/server5444.*
 backend/app/1

@@ -16,7 +16,6 @@ from app.services.paper_ingest import (
 )
 
 settings = get_settings()
-orchestrator = MultiSourceOrchestrator()
 
 
 def create_crawl_job(db: Session, payload: CrawlJobCreate) -> CrawlJob:
@@ -149,6 +148,7 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         limit_this_round = job.page_size or 200
 
     # 调用多源搜索（旧管线 + 新管线），目前不做严格分页，仅按 limit 分批
+    orchestrator = MultiSourceOrchestrator()
     try:
         # 显式转换为 Python 类型以避免 Pylance 错误
         keywords: List[str] = job.keywords or []
@@ -174,9 +174,9 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         # - multi_sources: 走新的 MultiSourceOrchestrator + paper_ingest 管线
         normalized_sources = [s.strip().lower() for s in (sources_all or []) if s and s.strip()]
         if not normalized_sources:
-            # 兼容旧逻辑：未显式指定时默认只用 semantic_scholar 和 crossref
-            legacy_sources = ["semantic_scholar", "crossref"]
-            multi_sources: List[str] = []
+            # 未指定数据源时默认走新管线（semantic_scholar + crossref）
+            legacy_sources: List[str] = []
+            multi_sources: List[str] = ["semantic_scholar", "crossref"]
         else:
             legacy_supported = {"arxiv"}
             multi_supported = {"scholar_serpapi", "scopus", "openalex", "crossref", "semantic_scholar"}
@@ -240,6 +240,9 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         db.commit()
         db.refresh(job)
         raise
+    finally:
+        # 每轮释放 crawler cache，确保下轮可读取最新 settings（如新 API Key）
+        orchestrator.close()
 
     # 本轮新增数量（包含旧管线与新管线）
     new_count = total_new_count

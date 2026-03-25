@@ -1,7 +1,8 @@
 from typing import Any, Dict, List, Optional, Tuple
 import json
+import re
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 import requests
@@ -168,8 +169,34 @@ def update_data_sources_config(
     """
     更新运行时数据源配置并持久化到数据库
     """
-    _set_setting(db, "data_sources_config", payload.model_dump())
-    return payload
+    serpapi_key = (payload.serpapi.api_key or "").strip()
+    scopus_key = (payload.scopus.api_key or "").strip()
+
+    # Elsevier API Key 一般为 32 位字母数字。这里做基础校验，防止复制时丢字符。
+    if payload.scopus.enabled and scopus_key:
+        if not re.fullmatch(r"[A-Za-z0-9]{32}", scopus_key):
+            raise HTTPException(
+                status_code=400,
+                detail="Scopus API key 格式不正确（应为 32 位字母数字）",
+            )
+
+    sanitized = payload.model_dump()
+    sanitized["serpapi"]["api_key"] = serpapi_key
+    sanitized["scopus"]["api_key"] = scopus_key
+
+    _set_setting(db, "data_sources_config", sanitized)
+
+    # 立即同步到运行时 settings，避免“已保存但爬虫仍读取旧值”。
+    setattr(settings, "SERPAPI_SCHOLAR_ENABLED", payload.serpapi.enabled)
+    setattr(settings, "SERPAPI_API_KEY", serpapi_key)
+    setattr(settings, "SERPAPI_SCHOLAR_ENGINE", payload.serpapi.engine or "google_scholar")
+
+    setattr(settings, "SCOPUS_ENABLED", payload.scopus.enabled)
+    setattr(settings, "SCOPUS_API_KEY", scopus_key)
+
+    setattr(settings, "RAG_ENABLED", payload.rag.enabled)
+
+    return DataSourcesConfig(**sanitized)
 
 
 def _get_upstream_model_lists(api_key: str, base_url: str) -> Tuple[List[str], List[str]]:

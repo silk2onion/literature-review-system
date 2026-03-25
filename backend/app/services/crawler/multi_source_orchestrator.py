@@ -18,15 +18,19 @@ class MultiSourceOrchestrator:
 
     用法示例：
         orchestrator = MultiSourceOrchestrator()
-        papers = orchestrator.search_all(
-            query="urban design",
-            sources=["scholar_serpapi", "scopus"],
-            max_results_per_source=10,
-        )
+        try:
+            papers = orchestrator.search_all(
+                query="urban design",
+                sources=["scholar_serpapi", "scopus"],
+                max_results_per_source=10,
+            )
+        finally:
+            orchestrator.close()
 
     注意：
-    - 这里只做“调用各个数据源并合并 SourcePaper 列表”，不做去重/入库；
+    - 这里只做"调用各个数据源并合并 SourcePaper 列表"，不做去重/入库；
     - 各具体 crawler 内部已经有自己的启用开关（enabled flag + API key 判定）；
+    - crawler 实例会被缓存复用，调用 close() 释放所有 HTTP 连接。
     """
 
     def __init__(self) -> None:
@@ -38,19 +42,36 @@ class MultiSourceOrchestrator:
             "openalex": OpenAlexCrawler,
             "crossref": CrossRefCrawler,
         }
+        # 缓存已创建的 crawler 实例，避免重复创建 httpx.Client
+        self._crawler_cache: Dict[str, BaseCrawler] = {}
 
-    def _create_crawler(self, name: str) -> Optional[BaseCrawler]:
+    def _get_crawler(self, name: str) -> Optional[BaseCrawler]:
+        """获取 crawler 实例（缓存复用）"""
+        if name in self._crawler_cache:
+            return self._crawler_cache[name]
+
         factory = self._crawler_factories.get(name)
         if not factory:
             logger.warning("[MultiSourceOrchestrator] unknown source: %s", name)
             return None
         try:
-            return factory()
+            crawler = factory()
+            self._crawler_cache[name] = crawler
+            return crawler
         except Exception as e:
             logger.error(
                 "[MultiSourceOrchestrator] failed to init crawler %s: %s", name, e
             )
             return None
+
+    def close(self) -> None:
+        """关闭所有缓存的 crawler 实例，释放 HTTP 连接"""
+        for name, crawler in self._crawler_cache.items():
+            try:
+                crawler.close()
+            except Exception as e:
+                logger.debug("[MultiSourceOrchestrator] close crawler %s: %s", name, e)
+        self._crawler_cache.clear()
 
     def search_all(
         self,
@@ -59,7 +80,7 @@ class MultiSourceOrchestrator:
         max_results_per_source: int = 10,
     ) -> Dict[str, List[SourcePaper]]:
         """
-        按给定 sources 列表并行（顺序）调用各个 crawler，返回按 source 分组的结果。
+        按给定 sources 列表顺序调用各个 crawler，返回按 source 分组的结果。
 
         返回结构：
         {
@@ -74,7 +95,7 @@ class MultiSourceOrchestrator:
 
         results: Dict[str, List[SourcePaper]] = {}
         for s in normalized_sources:
-            crawler = self._create_crawler(s)
+            crawler = self._get_crawler(s)
             if not crawler:
                 continue
             try:

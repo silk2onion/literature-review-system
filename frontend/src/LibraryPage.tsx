@@ -13,6 +13,7 @@ type PaperResponse = {
   publication_date?: string;
   year?: number;
   journal?: string | null;
+  journal_issn?: string | null;
   venue?: string | null;
   journal_impact_factor?: number | null;
   journal_quartile?: string | null;
@@ -81,6 +82,7 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
   const [selectedPaperId, setSelectedPaperId] = useState<number | null>(null);
   const [selectedPaperTitle, setSelectedPaperTitle] = useState<string>("");
   const [downloadingIds, setDownloadingIds] = useState<Set<number>>(new Set());
+  const [enrichingIds, setEnrichingIds] = useState<Set<number>>(new Set());
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [deleting, setDeleting] = useState<boolean>(false);
@@ -97,9 +99,16 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
 
   const [groups, setGroups] = useState<LiteratureGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
-  const [searchContext, setSearchContext] = useState<SearchLocalResponse["search_context"]>(undefined);
-  const [message, setMessage] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
-  const [showConfirmModal, setShowConfirmModal] = useState<{ show: boolean; count: number }>({
+  const [searchContext, setSearchContext] =
+    useState<SearchLocalResponse["search_context"]>(undefined);
+  const [message, setMessage] = useState<{
+    text: string;
+    type: "success" | "error" | "info";
+  } | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState<{
+    show: boolean;
+    count: number;
+  }>({
     show: false,
     count: 0,
   });
@@ -122,7 +131,9 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
       }
 
       const result = await response.json();
-      alert(`上传成功！\n识别 DOI: ${result.doi || "无"}\n标题: ${result.title}`);
+      alert(
+        `上传成功！\n识别 DOI: ${result.doi || "无"}\n标题: ${result.title}`,
+      );
       setShowUploadModal(false);
       // 刷新列表
       setPage(1);
@@ -139,16 +150,20 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
       // 算了，直接用 window.location.reload() 最稳妥作为 fallback，或者 just alert.
       // 更好的方式是：
       window.location.reload();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Upload error:", error);
-      alert(`上传失败: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : "未知错误";
+      alert(`上传失败: ${errorMessage}`);
     } finally {
       setUploading(false);
     }
   };
 
   useEffect(() => {
-    groupsApi.getGroups().then(data => setGroups(data.groups)).catch(console.error);
+    groupsApi
+      .getGroups()
+      .then((data) => setGroups(data.groups))
+      .catch(console.error);
   }, [showGroupManager]); // Refresh groups when manager closes/updates
 
   const logInteraction = async (paperId: number, action: string) => {
@@ -164,7 +179,7 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
           query_keywords: searchContext?.query_keywords,
           extra: {
             action,
-            expanded_keywords: searchContext?.expanded_keywords
+            expanded_keywords: searchContext?.expanded_keywords,
           },
         }),
       });
@@ -210,7 +225,10 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
       }
 
       const data = await resp.json();
-      setMessage({ text: `成功删除 ${data.deleted_count} 篇文献`, type: "success" });
+      setMessage({
+        text: `成功删除 ${data.deleted_count} 篇文献`,
+        type: "success",
+      });
       setTimeout(() => setMessage(null), 3000);
       setSelectedIds(new Set());
       fetchData({ resetPage: false });
@@ -299,9 +317,9 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
       const data = await resp.json();
       alert(
         `同步完成\n` +
-        `处理文献: ${data.processed_count}\n` +
-        `匹配引用: ${data.matched_references}\n` +
-        `新增关系: ${data.created_edges}`
+          `处理文献: ${data.processed_count}\n` +
+          `匹配引用: ${data.matched_references}\n` +
+          `新增关系: ${data.created_edges}`,
       );
       // Refresh to show updated citation counts if any
       fetchData({ resetPage: false });
@@ -314,21 +332,28 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
   };
 
   const handleAnalyzeCitations = async () => {
-    if (!confirm("确定要对全库文献执行引用网络分析吗？这将生成新的标签（世代、影响力、聚类）。")) {
+    if (
+      !confirm(
+        "确定要对全库文献执行引用网络分析吗？这将生成新的标签（世代、影响力、聚类）。",
+      )
+    ) {
       return;
     }
     setAnalyzing(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/citations/analysis/analyze`, {
-        method: "POST",
-      });
+      const resp = await fetch(
+        `${API_BASE_URL}/api/citations/analysis/analyze`,
+        {
+          method: "POST",
+        },
+      );
       if (!resp.ok) throw new Error("Analysis failed");
       const data = await resp.json();
       alert(
         `分析完成\n` +
-        `世代标签: ${data.generation_tags}\n` +
-        `影响力标签: ${data.impact_tags}\n` +
-        `聚类标签: ${data.cluster_tags}`
+          `世代标签: ${data.generation_tags}\n` +
+          `影响力标签: ${data.impact_tags}\n` +
+          `聚类标签: ${data.cluster_tags}`,
       );
       // Refresh to show new tags if we display them
       fetchData({ resetPage: false });
@@ -359,11 +384,15 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
 
   const handleRemoveFromGroup = async () => {
     if (selectedIds.size === 0 || !selectedGroupId) return;
-    if (!confirm(`确定要从当前分组移除选中的 ${selectedIds.size} 篇文献吗？`)) return;
+    if (!confirm(`确定要从当前分组移除选中的 ${selectedIds.size} 篇文献吗？`))
+      return;
 
     setRemovingFromGroup(true);
     try {
-      await groupsApi.removePapersFromGroup(selectedGroupId, Array.from(selectedIds));
+      await groupsApi.removePapersFromGroup(
+        selectedGroupId,
+        Array.from(selectedIds),
+      );
       alert(`已从分组移除 ${selectedIds.size} 篇文献`);
       setSelectedIds(new Set());
       fetchData({ resetPage: false });
@@ -376,11 +405,14 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
   };
 
   const handleDownloadPdf = async (paperId: number) => {
-    setDownloadingIds(prev => new Set(prev).add(paperId));
+    setDownloadingIds((prev) => new Set(prev).add(paperId));
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/papers/${paperId}/download-pdf`, {
-        method: "POST",
-      });
+      const resp = await fetch(
+        `${API_BASE_URL}/api/papers/${paperId}/download-pdf`,
+        {
+          method: "POST",
+        },
+      );
       if (!resp.ok) throw new Error("Download failed");
 
       // Refresh data to update PDF status
@@ -391,13 +423,64 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
       console.error(err);
       alert("下载请求失败");
     } finally {
-      setDownloadingIds(prev => {
+      setDownloadingIds((prev) => {
         const next = new Set(prev);
         next.delete(paperId);
         return next;
       });
     }
   };
+
+  const handleEnrichJournalInfo = async (paper: PaperResponse) => {
+    setEnrichingIds((prev) => new Set(prev).add(paper.id));
+    try {
+      const resp = await fetch(
+        `${API_BASE_URL}/api/journal-info/enrich-paper/${paper.id}`,
+        {
+          method: "POST",
+        },
+      );
+
+      const data = await resp.json().catch(() => null);
+
+      if (!resp.ok) {
+        throw new Error(data?.detail || data?.message || "期刊信息增强失败");
+      }
+
+      setMessage({
+        text: data?.message || `已处理《${paper.title}》的期刊信息增强请求`,
+        type: "success",
+      });
+      setTimeout(() => setMessage(null), 3000);
+
+      if (data?.updated) {
+        await fetchData({ resetPage: false });
+      }
+    } catch (err) {
+      console.error(err);
+      setMessage({
+        text: `期刊增强失败：${(err as { message?: string })?.message || "未知错误"}`,
+        type: "error",
+      });
+      setTimeout(() => setMessage(null), 3000);
+    } finally {
+      setEnrichingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(paper.id);
+        return next;
+      });
+    }
+  };
+
+  const canEnrichJournalInfo = (paper: PaperResponse) =>
+    Boolean(paper.journal || paper.journal_issn);
+
+  const needsJournalEnrichment = (paper: PaperResponse) =>
+    !(
+      paper.journal_impact_factor != null &&
+      Boolean(paper.journal_quartile) &&
+      Boolean(paper.indexing && paper.indexing.length > 0)
+    );
 
   // 排序 & 筛选状态
   const [sortField, setSortField] = useState<SortField>("year");
@@ -499,7 +582,11 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
     // showArchived is handled in fetchData payload, not client-side filtering
   ]);
 
-  const fetchData = async (opts?: { resetPage?: boolean; page?: number; pageSize?: number }) => {
+  const fetchData = async (opts?: {
+    resetPage?: boolean;
+    page?: number;
+    pageSize?: number;
+  }) => {
     try {
       setLoading(true);
       setTaskStatus("running");
@@ -507,11 +594,7 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
 
       // 目标页优先由显式传入的 page 决定，其次是 resetPage，再其次是当前状态中的 page
       const effectivePage =
-        typeof opts?.page === "number"
-          ? opts.page
-          : opts?.resetPage
-            ? 1
-            : page;
+        typeof opts?.page === "number" ? opts.page : opts?.resetPage ? 1 : page;
 
       const effectivePageSize = opts?.pageSize ?? pageSize;
       const payload: SearchLocalRequest = {
@@ -556,8 +639,7 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
       console.error("search-local error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `检索失败：${(err as { message?: string })?.message || "未知错误"
-        }`,
+        `检索失败：${(err as { message?: string })?.message || "未知错误"}`,
       );
     } finally {
       setLoading(false);
@@ -715,7 +797,6 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                 disabled={deleting}
                 className="action-button danger"
               >
-
                 {deleting ? "删除中..." : `删除选中 (${selectedIds.size})`}
               </button>
 
@@ -763,7 +844,8 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                 padding: "6px 12px",
                 borderRadius: 6,
                 fontSize: 13,
-                backgroundColor: message.type === "success" ? "#dcfce7" : "#fee2e2",
+                backgroundColor:
+                  message.type === "success" ? "#dcfce7" : "#fee2e2",
                 color: message.type === "success" ? "#166534" : "#991b1b",
                 border: `1px solid ${message.type === "success" ? "#bbf7d0" : "#fecaca"}`,
                 animation: "fadeIn 0.3s ease-in-out",
@@ -777,7 +859,8 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                   width: 8,
                   height: 8,
                   borderRadius: "50%",
-                  backgroundColor: message.type === "success" ? "#22c55e" : "#ef4444",
+                  backgroundColor:
+                    message.type === "success" ? "#22c55e" : "#ef4444",
                 }}
               />
               {message.text}
@@ -797,9 +880,18 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
         }}
       >
         {/* Top Row: Primary Search & Group */}
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>分组</label>
+            <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
+              分组
+            </label>
             <select
               value={selectedGroupId || ""}
               onChange={(e) => {
@@ -827,9 +919,24 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
             </select>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
-            <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>关键词</label>
-            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              flex: 1,
+            }}
+          >
+            <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
+              关键词
+            </label>
+            <div
+              style={{
+                position: "relative",
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -871,7 +978,9 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>年份范围</label>
+            <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
+              年份范围
+            </label>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input
                 value={yearFrom}
@@ -933,7 +1042,14 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
         </div>
 
         {/* Bottom Row: Secondary Filters */}
-        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <label style={{ fontSize: 12, color: "#64748b" }}>排序:</label>
             <select
@@ -1079,7 +1195,16 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
 
           <div style={{ flex: 1 }} />
 
-          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#64748b" }}>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              cursor: "pointer",
+              fontSize: 12,
+              color: "#64748b",
+            }}
+          >
             <input
               type="checkbox"
               checked={showArchived}
@@ -1105,7 +1230,9 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                 <th style={{ width: 40, textAlign: "center" }}>
                   <input
                     type="checkbox"
-                    checked={items.length > 0 && selectedIds.size === items.length}
+                    checked={
+                      items.length > 0 && selectedIds.size === items.length
+                    }
                     onChange={handleSelectAll}
                     style={{ cursor: "pointer" }}
                   />
@@ -1167,7 +1294,10 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                         {p.title}
                       </a>
                       {p.abstract && (
-                        <span className="paper-abstract" style={{ fontSize: 12 }}>
+                        <span
+                          className="paper-abstract"
+                          style={{ fontSize: 12 }}
+                        >
                           {p.abstract}
                         </span>
                       )}
@@ -1176,17 +1306,31 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                   <td>
                     {p.authors && p.authors.length > 0
                       ? p.authors.slice(0, 3).join(", ") +
-                      (p.authors.length > 3 ? " ..." : "")
+                        (p.authors.length > 3 ? " ..." : "")
                       : "-"}
                   </td>
+                  <td>{p.year ?? "-"}</td>
+                  <td>{p.source || "-"}</td>
                   <td>
-                    {p.year ?? "-"}
-                  </td>
-                  <td>
-                    {p.source || "-"}
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 2,
+                      }}
+                    >
+                      {p.journal && (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: "#94a3b8",
+                            lineHeight: 1.3,
+                          }}
+                          title={p.journal}
+                        >
+                          {p.journal}
+                        </span>
+                      )}
                       {p.journal_quartile && (
                         <span
                           style={{
@@ -1213,13 +1357,20 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                           {p.journal_quartile}
                         </span>
                       )}
-                      {p.journal_impact_factor && (
+                      {p.journal_impact_factor != null && (
                         <span style={{ fontSize: 11, color: "#cbd5e1" }}>
                           IF: {p.journal_impact_factor.toFixed(1)}
                         </span>
                       )}
                       {p.indexing && p.indexing.length > 0 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 2, marginTop: 2 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 2,
+                            marginTop: 2,
+                          }}
+                        >
                           {p.indexing.map((idx) => (
                             <span
                               key={idx}
@@ -1237,7 +1388,36 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                           ))}
                         </div>
                       )}
-                      {!p.journal_quartile && !p.journal_impact_factor && (!p.indexing || p.indexing.length === 0) && "-"}
+                      {canEnrichJournalInfo(p) && needsJournalEnrichment(p) && (
+                        <button
+                          type="button"
+                          onClick={() => handleEnrichJournalInfo(p)}
+                          disabled={enrichingIds.has(p.id)}
+                          style={{
+                            marginTop: 4,
+                            width: "fit-content",
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                            border: "1px solid #38bdf8",
+                            backgroundColor: "rgba(56, 189, 248, 0.1)",
+                            color: "#38bdf8",
+                            fontSize: 10,
+                            cursor: enrichingIds.has(p.id)
+                              ? "not-allowed"
+                              : "pointer",
+                            opacity: enrichingIds.has(p.id) ? 0.7 : 1,
+                          }}
+                        >
+                          {enrichingIds.has(p.id)
+                            ? "增强中..."
+                            : "补全期刊信息"}
+                        </button>
+                      )}
+                      {!p.journal_quartile &&
+                        p.journal_impact_factor == null &&
+                        (!p.indexing || p.indexing.length === 0) &&
+                        !canEnrichJournalInfo(p) &&
+                        "-"}
                     </div>
                   </td>
                   <td
@@ -1247,7 +1427,13 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                       color: "#9ca3af",
                     }}
                   >
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
                       {p.doi ? (
                         <a
                           href={`https://doi.org/${p.doi}`}
@@ -1290,7 +1476,7 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                             color: "#4ade80",
                             display: "flex",
                             alignItems: "center",
-                            gap: 2
+                            gap: 2,
                           }}
                         >
                           <span>📄 查看 PDF</span>
@@ -1306,14 +1492,20 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                             background: "transparent",
                             border: "1px solid #334155",
                             borderRadius: 4,
-                            color: downloadingIds.has(p.id) ? "#9ca3af" : "#94a3b8",
+                            color: downloadingIds.has(p.id)
+                              ? "#9ca3af"
+                              : "#94a3b8",
                             fontSize: 10,
                             padding: "2px 6px",
-                            cursor: downloadingIds.has(p.id) ? "not-allowed" : "pointer",
-                            width: "fit-content"
+                            cursor: downloadingIds.has(p.id)
+                              ? "not-allowed"
+                              : "pointer",
+                            width: "fit-content",
                           }}
                         >
-                          {downloadingIds.has(p.id) ? "下载中..." : "⬇️ 下载 PDF"}
+                          {downloadingIds.has(p.id)
+                            ? "下载中..."
+                            : "⬇️ 下载 PDF"}
                         </button>
                       ) : null}
                     </div>
@@ -1343,7 +1535,13 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
           </table>
         </div>
 
-        <div className="table-header-info" style={{ borderTop: "1px solid var(--border-color)", borderBottom: "none" }}>
+        <div
+          className="table-header-info"
+          style={{
+            borderTop: "1px solid var(--border-color)",
+            borderBottom: "none",
+          }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ color: "var(--text-secondary)" }}>
               显示第 {(page - 1) * pageSize + 1} -{" "}
@@ -1357,8 +1555,8 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                   const newSize = Number(e.target.value) || 20;
                   setPage(1);
                   setPageSize(newSize);
-                  fetchData({ resetPage: true, pageSize: newSize }).catch((err) =>
-                    console.error("change page size error", err),
+                  fetchData({ resetPage: true, pageSize: newSize }).catch(
+                    (err) => console.error("change page size error", err),
                   );
                 }}
                 className="filter-select"
@@ -1398,7 +1596,10 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
 
       {/* Group Manager Drawer */}
       {showGroupManager && (
-        <div className="drawer-overlay" onClick={() => setShowGroupManager(false)}>
+        <div
+          className="drawer-overlay"
+          onClick={() => setShowGroupManager(false)}
+        >
           <div className="drawer-content" onClick={(e) => e.stopPropagation()}>
             <div className="drawer-header">
               <button
@@ -1415,11 +1616,17 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
 
       {/* Add to Group Modal */}
       {showAddToGroupModal && (
-        <div className="modal-overlay" onClick={() => setShowAddToGroupModal(false)}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowAddToGroupModal(false)}
+        >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>选择要加入的分组</h3>
-              <button onClick={() => setShowAddToGroupModal(false)} className="close-button">
+              <button
+                onClick={() => setShowAddToGroupModal(false)}
+                className="close-button"
+              >
                 ×
               </button>
             </div>
@@ -1431,9 +1638,15 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
       {/* RAG Debug Drawer */}
       {showRagDebug && (
         <div className="drawer-overlay" onClick={() => setShowRagDebug(false)}>
-          <div className="drawer-content wide" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="drawer-content wide"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="drawer-header">
-              <button onClick={() => setShowRagDebug(false)} className="close-button">
+              <button
+                onClick={() => setShowRagDebug(false)}
+                className="close-button"
+              >
                 ×
               </button>
             </div>
@@ -1444,11 +1657,15 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
 
       {/* Upload Modal */}
       {showUploadModal && (
-        <div className="modal-overlay" onClick={() => !uploading && setShowUploadModal(false)}>
+        <div
+          className="modal-overlay"
+          onClick={() => !uploading && setShowUploadModal(false)}
+        >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h3 className="modal-title">上传本地 PDF</h3>
             <p className="modal-description">
-              系统将自动解析 PDF 内容、识别 DOI 并尝试获取元数据。同时会生成全文向量索引以支持 RAG 问答。
+              系统将自动解析 PDF 内容、识别 DOI
+              并尝试获取元数据。同时会生成全文向量索引以支持 RAG 问答。
             </p>
 
             <div style={{ marginBottom: 20 }}>
@@ -1486,48 +1703,65 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
 
       {/* Confirmation Modal */}
       {showConfirmModal.show && (
-        <div 
-          className="modal-overlay" 
-          style={{ 
+        <div
+          className="modal-overlay"
+          style={{
             zIndex: 9999,
-            position: 'fixed',
+            position: "fixed",
             top: 0,
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
-          <div 
-            className="modal-content" 
-            style={{ 
+          <div
+            className="modal-content"
+            style={{
               maxWidth: 400,
-              backgroundColor: 'white',
-              padding: '24px',
-              borderRadius: '12px',
-              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
+              backgroundColor: "white",
+              padding: "24px",
+              borderRadius: "12px",
+              boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
             }}
           >
             <h3 style={{ color: "#ef4444", marginTop: 0 }}>⚠️ 确认永久删除</h3>
-            <p style={{ margin: "16px 0", color: "#4b5563", fontSize: '14px', lineHeight: 1.6 }}>
-              确定要删除选中的 <strong>{showConfirmModal.count}</strong> 篇文献吗？
+            <p
+              style={{
+                margin: "16px 0",
+                color: "#4b5563",
+                fontSize: "14px",
+                lineHeight: 1.6,
+              }}
+            >
+              确定要删除选中的 <strong>{showConfirmModal.count}</strong>{" "}
+              篇文献吗？
               <br />
-              <span style={{ fontSize: "0.9em", color: "#ef4444" }}>※ 此操作将从数据库和向量库中永久移除，不可恢复。</span>
+              <span style={{ fontSize: "0.9em", color: "#ef4444" }}>
+                ※ 此操作将从数据库和向量库中永久移除，不可恢复。
+              </span>
             </p>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 24 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 12,
+                marginTop: 24,
+              }}
+            >
               <button
                 className="action-button"
                 onClick={() => setShowConfirmModal({ show: false, count: 0 })}
                 disabled={deleting}
                 style={{
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  border: '1px solid #d1d5db',
-                  backgroundColor: 'white',
-                  cursor: 'pointer'
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  border: "1px solid #d1d5db",
+                  backgroundColor: "white",
+                  cursor: "pointer",
                 }}
               >
                 取消
@@ -1537,13 +1771,13 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                 onClick={executeDelete}
                 disabled={deleting}
                 style={{
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: '#ef4444',
-                  color: 'white',
+                  padding: "8px 16px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: "#ef4444",
+                  color: "white",
                   fontWeight: 500,
-                  cursor: 'pointer'
+                  cursor: "pointer",
                 }}
               >
                 {deleting ? "正在执行..." : "确认删除"}

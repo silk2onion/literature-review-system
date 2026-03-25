@@ -12,7 +12,9 @@ OpenAlex 文献爬虫服务
 API 文档：https://docs.openalex.org/api-entities/works
 """
 import logging
+import random
 import time
+from datetime import date as date_type
 from typing import List, Optional, Dict, Any
 
 import httpx
@@ -298,32 +300,77 @@ class OpenAlexCrawler(BaseCrawler):
     def _request_with_retry(
         self,
         params: Dict[str, Any],
-        max_retries: int = 3,
+        max_retries: int = 4,
     ) -> Optional[httpx.Response]:
-        """带重试的 HTTP 请求"""
+        """带随机抖动重试的 HTTP 请求"""
+        from app.services.api_usage_service import log_crawler_usage, ApiTimer
+
         for attempt in range(max_retries):
             self._rate_limit()
+            timer = ApiTimer()
             try:
                 resp = self.client.get(self.BASE_URL, params=params)
                 resp.raise_for_status()
+                # 埋点：成功
+                log_crawler_usage(
+                    source="openalex",
+                    endpoint=self.BASE_URL,
+                    method="GET",
+                    status_code=resp.status_code,
+                    duration_ms=timer.elapsed_ms(),
+                    success=True,
+                    caller="OpenAlexCrawler._request_with_retry",
+                    metadata_json={"query": params.get("search", "")[:200]},
+                )
                 return resp
             except httpx.HTTPStatusError as e:
                 status = e.response.status_code
                 if status in (429, 500, 502, 503, 504):
-                    delay = (2 ** attempt) + 1
+                    delay = (2 ** attempt) + random.uniform(1.0, 3.0)
                     logger.warning(
-                        "[OpenAlexCrawler] HTTP %d，第 %d 次重试，等待 %ds",
-                        status, attempt + 1, delay,
+                        "[OpenAlexCrawler] HTTP %d，第 %d/%d 次重试，等待 %.1fs",
+                        status, attempt + 1, max_retries, delay,
                     )
                     if attempt == max_retries - 1:
                         logger.error("[OpenAlexCrawler] 达到最大重试次数")
+                        # 埋点：最终失败
+                        log_crawler_usage(
+                            source="openalex",
+                            endpoint=self.BASE_URL,
+                            method="GET",
+                            status_code=status,
+                            duration_ms=timer.elapsed_ms(),
+                            success=False,
+                            error=str(e)[:500],
+                            caller="OpenAlexCrawler._request_with_retry",
+                        )
                         return None
                     time.sleep(delay)
                 else:
                     logger.error("[OpenAlexCrawler] HTTP 请求失败: %s", e)
+                    log_crawler_usage(
+                        source="openalex",
+                        endpoint=self.BASE_URL,
+                        method="GET",
+                        status_code=status,
+                        duration_ms=timer.elapsed_ms(),
+                        success=False,
+                        error=str(e)[:500],
+                        caller="OpenAlexCrawler._request_with_retry",
+                    )
                     return None
             except Exception as e:
                 logger.error("[OpenAlexCrawler] 请求异常: %s", e)
+                log_crawler_usage(
+                    source="openalex",
+                    endpoint=self.BASE_URL,
+                    method="GET",
+                    status_code=0,
+                    duration_ms=timer.elapsed_ms(),
+                    success=False,
+                    error=str(e)[:500],
+                    caller="OpenAlexCrawler._request_with_retry",
+                )
                 return None
         return None
 
@@ -400,7 +447,6 @@ class OpenAlexCrawler(BaseCrawler):
         pub_date_str = item.get("publication_date")
         if pub_date_str:
             try:
-                from datetime import date as date_type
                 parts = pub_date_str.split("-")
                 if len(parts) >= 3:
                     published_date = date_type(int(parts[0]), int(parts[1]), int(parts[2]))

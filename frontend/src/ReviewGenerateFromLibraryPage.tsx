@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import PhdPipelinePage from "./PhdPipelinePage";
 
-
 type PaperResponse = {
   id: number;
   title: string;
@@ -38,7 +37,9 @@ export default function ReviewGenerateFromLibraryPage() {
   const [papers, setPapers] = useState<PaperResponse[]>([]);
   // const [total, setTotal] = useState(0); // unused for now
   const [loadingPapers, setLoadingPapers] = useState(false);
-  const [selectedPaperIds, setSelectedPaperIds] = useState<Set<number>>(new Set());
+  const [selectedPaperIds, setSelectedPaperIds] = useState<Set<number>>(
+    new Set(),
+  );
 
   // --- Group Selection State ---
   // const [groups, setGroups] = useState<LiteratureGroup[]>([]);
@@ -49,7 +50,8 @@ export default function ReviewGenerateFromLibraryPage() {
   const [customPrompt, setCustomPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [generatedReview, setGeneratedReview] = useState<ReviewGenerateResponse | null>(null);
+  const [generatedReview, setGeneratedReview] =
+    useState<ReviewGenerateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch papers (simplified version of LibraryPage)
@@ -105,7 +107,10 @@ export default function ReviewGenerateFromLibraryPage() {
 
     try {
       const payload = {
-        keywords: keywords.split(/[,，]/).map(k => k.trim()).filter(k => k),
+        keywords: keywords
+          .split(/[,，]/)
+          .map((k) => k.trim())
+          .filter((k) => k),
         paper_ids: Array.from(selectedPaperIds),
         paper_limit: selectedPaperIds.size, // Explicitly use all selected
         custom_prompt: customPrompt.trim() || undefined,
@@ -131,29 +136,32 @@ export default function ReviewGenerateFromLibraryPage() {
     }
   };
 
-  const handleExport = async (format: 'markdown' | 'docx' | 'pdf') => {
+  const handleExport = async (format: "markdown" | "docx" | "pdf") => {
     if (!generatedReview?.review_id) return;
     setExporting(true);
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/reviews/${generatedReview.review_id}/export`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ format, include_references: true }),
-      });
-      if (!resp.ok) throw new Error('Export failed');
+      const resp = await fetch(
+        `${API_BASE_URL}/api/reviews/${generatedReview.review_id}/export`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ format, include_references: true }),
+        },
+      );
+      if (!resp.ok) throw new Error("Export failed");
 
       const blob = await resp.blob();
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
-      a.download = `review-${generatedReview.review_id}.${format === 'markdown' ? 'md' : format}`;
+      a.download = `review-${generatedReview.review_id}.${format === "markdown" ? "md" : format}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
       console.error(err);
-      alert('导出失败');
+      alert("导出失败");
     } finally {
       setExporting(false);
     }
@@ -215,12 +223,17 @@ export default function ReviewGenerateFromLibraryPage() {
                     <th style={{ width: "40px", textAlign: "center" }}>
                       <input
                         type="checkbox"
-                        checked={papers.length > 0 && selectedPaperIds.size === papers.length}
+                        checked={
+                          papers.length > 0 &&
+                          selectedPaperIds.size === papers.length
+                        }
                         onChange={() => {
                           if (selectedPaperIds.size === papers.length) {
                             setSelectedPaperIds(new Set());
                           } else {
-                            setSelectedPaperIds(new Set(papers.map((p) => p.id)));
+                            setSelectedPaperIds(
+                              new Set(papers.map((p) => p.id)),
+                            );
                           }
                         }}
                         style={{ cursor: "pointer" }}
@@ -242,7 +255,7 @@ export default function ReviewGenerateFromLibraryPage() {
                         <input
                           type="checkbox"
                           checked={selectedPaperIds.has(p.id)}
-                          onChange={() => { }} // Handled by row click
+                          onChange={() => {}} // Handled by row click
                           style={{ cursor: "pointer" }}
                         />
                       </td>
@@ -267,78 +280,65 @@ export default function ReviewGenerateFromLibraryPage() {
         <div className="config-panel">
           {mode === "standard" ? (
             <>
-              {mode === "standard" ? (
-                <>
-                  {/* Config Card */}
-                  {/* Config Card */}
-                  <div className="config-card">
-                    <h3>生成设置</h3>
+              {/* Config Card */}
+              <div className="config-card">
+                <h3>生成设置</h3>
 
-                    <div className="form-group">
-                      <label>综述关键词 (必填)</label>
-                      <input
-                        value={keywords}
-                        onChange={(e) => setKeywords(e.target.value)}
-                        placeholder="例如: Urban Design, AI, Public Space"
-                        className="form-input"
-                      />
+                <div className="form-group">
+                  <label>综述关键词 (必填)</label>
+                  <input
+                    value={keywords}
+                    onChange={(e) => setKeywords(e.target.value)}
+                    placeholder="例如: Urban Design, AI, Public Space"
+                    className="form-input"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>自定义提示词 (可选)</label>
+                  <textarea
+                    value={customPrompt}
+                    onChange={(e) => setCustomPrompt(e.target.value)}
+                    placeholder="例如: 请重点关注这些文献中的方法论部分..."
+                    rows={3}
+                    className="form-textarea"
+                  />
+                </div>
+
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating}
+                  className="action-button primary full-width"
+                >
+                  {generating ? "正在生成综述..." : "开始生成"}
+                </button>
+
+                {error && <div className="error-message">{error}</div>}
+              </div>
+
+              {/* Output Preview */}
+              {generatedReview && (
+                <div className="output-preview-card">
+                  <div className="card-header">
+                    <h3 className="success-title">生成成功!</h3>
+                    <div className="card-actions">
+                      <span className="review-id">
+                        ID: {generatedReview.review_id}
+                      </span>
+                      <button
+                        onClick={() => handleExport("markdown")}
+                        disabled={exporting}
+                        className="action-button small secondary"
+                      >
+                        {exporting ? "导出中..." : "导出 MD"}
+                      </button>
                     </div>
-
-                    <div className="form-group">
-                      <label>自定义提示词 (可选)</label>
-                      <textarea
-                        value={customPrompt}
-                        onChange={(e) => setCustomPrompt(e.target.value)}
-                        placeholder="例如: 请重点关注这些文献中的方法论部分..."
-                        rows={3}
-                        className="form-textarea"
-                      />
-                    </div>
-
-                    <button
-                      onClick={handleGenerate}
-                      disabled={generating}
-                      className="action-button primary full-width"
-                    >
-                      {generating ? "正在生成综述..." : "开始生成"}
-                    </button>
-
-                    {error && (
-                      <div className="error-message">
-                        {error}
-                      </div>
-                    )}
                   </div>
 
-                  {/* Output Preview */}
-                  {generatedReview && (
-                    <div className="output-preview-card">
-                      <div className="card-header">
-                        <h3 className="success-title">生成成功!</h3>
-                        <div className="card-actions">
-                          <span className="review-id">ID: {generatedReview.review_id}</span>
-                          <button
-                            onClick={() => handleExport("markdown")}
-                            disabled={exporting}
-                            className="action-button small secondary"
-                          >
-                            {exporting ? "导出中..." : "导出 MD"}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="markdown-preview">
-                        {generatedReview.preview_markdown}
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <PhdPipelinePage
-                  embedded={true}
-                  initialPaperIds={Array.from(selectedPaperIds)}
-                  initialKeywords={keywords ? keywords.split(/[,，]/).map(k => k.trim()).filter(k => k) : []}
-                />
+                  <div className="markdown-preview">
+                    {generatedReview.preview_markdown}
+                  </div>
+                </div>
               )}
             </>
           ) : (

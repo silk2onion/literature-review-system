@@ -8,6 +8,7 @@ Semantic Scholar 文献爬虫服务
 - 返回高质量元数据：标题、摘要、作者、引用量、DOI、开放获取 PDF 等
 """
 import logging
+import random
 import time
 from typing import List, Optional
 
@@ -102,10 +103,11 @@ class SemanticScholarCrawler(BaseCrawler):
 
         papers: List[SourcePaper] = []
         current_offset = offset
+        is_exhaustive = (max_results == 0)
         # S2 API 单次最多返回 100 条
-        page_size = min(max_results, 100)
+        page_size = 100 if is_exhaustive else min(max_results, 100)
 
-        while len(papers) < max_results:
+        while is_exhaustive or len(papers) < max_results:
             params = {
                 "query": query,
                 "offset": current_offset,
@@ -114,34 +116,65 @@ class SemanticScholarCrawler(BaseCrawler):
             }
 
             logger.info(
-                "[SemanticScholarCrawler] 请求 %s offset=%d limit=%d",
-                self.BASE_URL, current_offset, page_size,
+                "[SemanticScholarCrawler] 请求 %s offset=%d limit=%d (exhaustive=%s)",
+                self.BASE_URL, current_offset, page_size, is_exhaustive,
             )
 
+            from app.services.api_usage_service import log_crawler_usage, ApiTimer
+
             resp = None
-            max_retries = 3
+            max_retries = 4
+            timer = ApiTimer()
             for attempt in range(max_retries):
                 self._rate_limit()
+                timer = ApiTimer()  # reset per attempt
                 try:
                     resp = self.client.get(self.BASE_URL, params=params)
                     resp.raise_for_status()
+                    log_crawler_usage(
+                        source="semantic_scholar", endpoint=self.BASE_URL, method="GET",
+                        status_code=resp.status_code, duration_ms=timer.elapsed_ms(),
+                        success=True, caller="SemanticScholarCrawler.search_raw",
+                        metadata_json={"query": query[:200], "offset": current_offset},
+                    )
                     break
                 except httpx.HTTPStatusError as e:
                     status = e.response.status_code
                     if status in (429, 500, 502, 503, 504):
-                        delay = (2 ** attempt) + 2  # 3s, 4s, 6s
-                        logger.warning(f"[SemanticScholarCrawler] API 错误 ({status})，第 {attempt + 1} 次重试，等待 {delay} 秒")
+                        delay = (2 ** attempt) + random.uniform(1.0, 3.0)
+                        logger.warning(
+                            "[SemanticScholarCrawler] API 错误 (%d)，第 %d/%d 次重试，等待 %.1f 秒",
+                            status, attempt + 1, max_retries, delay,
+                        )
                         if attempt == max_retries - 1:
                             logger.error("[SemanticScholarCrawler] 达到最大重试次数，放弃当前页面")
+                            log_crawler_usage(
+                                source="semantic_scholar", endpoint=self.BASE_URL, method="GET",
+                                status_code=status, duration_ms=timer.elapsed_ms(),
+                                success=False, error=str(e)[:500],
+                                caller="SemanticScholarCrawler.search_raw",
+                            )
                             resp = None
                             break
                         time.sleep(delay)
                     else:
-                        logger.error(f"[SemanticScholarCrawler] 请求失败: {e}")
+                        logger.error("[SemanticScholarCrawler] 请求失败: %s", e)
+                        log_crawler_usage(
+                            source="semantic_scholar", endpoint=self.BASE_URL, method="GET",
+                            status_code=status, duration_ms=timer.elapsed_ms(),
+                            success=False, error=str(e)[:500],
+                            caller="SemanticScholarCrawler.search_raw",
+                        )
                         resp = None
                         break
                 except Exception as e:
-                    logger.error(f"[SemanticScholarCrawler] 未知请求失败: {e}")
+                    logger.error("[SemanticScholarCrawler] 未知请求失败: %s", e)
+                    log_crawler_usage(
+                        source="semantic_scholar", endpoint=self.BASE_URL, method="GET",
+                        status_code=0, duration_ms=timer.elapsed_ms(),
+                        success=False, error=str(e)[:500],
+                        caller="SemanticScholarCrawler.search_raw",
+                    )
                     resp = None
                     break
 
@@ -164,7 +197,7 @@ class SemanticScholarCrawler(BaseCrawler):
                 except Exception as e:
                     logger.error("[SemanticScholarCrawler] 解析单条记录失败: %s", e)
 
-                if len(papers) >= max_results:
+                if not is_exhaustive and len(papers) >= max_results:
                     break
 
             current_offset += len(items)
@@ -174,8 +207,8 @@ class SemanticScholarCrawler(BaseCrawler):
                 break
 
         logger.info(
-            "[SemanticScholarCrawler] 返回 %d 条文献（请求 max_results=%d）",
-            len(papers), max_results,
+            "[SemanticScholarCrawler] 返回 %d 条文献（请求 max_results=%d, exhaustive=%s）",
+            len(papers), max_results, is_exhaustive,
         )
         return papers
 
@@ -191,19 +224,40 @@ class SemanticScholarCrawler(BaseCrawler):
 
         logger.info("[SemanticScholarCrawler] 获取单篇: %s", url)
 
+        from app.services.api_usage_service import log_crawler_usage, ApiTimer
+
         self._rate_limit()
+        timer = ApiTimer()
 
         try:
             resp = self.client.get(url, params=params)
             if resp.status_code == 404:
                 logger.warning("[SemanticScholarCrawler] 论文未找到: %s", paper_id)
+                log_crawler_usage(
+                    source="semantic_scholar", endpoint=url, method="GET",
+                    status_code=404, duration_ms=timer.elapsed_ms(),
+                    success=False, error="Paper not found",
+                    caller="SemanticScholarCrawler.get_paper_by_s2id",
+                )
                 return None
             resp.raise_for_status()
+
+            log_crawler_usage(
+                source="semantic_scholar", endpoint=url, method="GET",
+                status_code=resp.status_code, duration_ms=timer.elapsed_ms(),
+                success=True, caller="SemanticScholarCrawler.get_paper_by_s2id",
+            )
 
             data = resp.json()
             return self._parse_item(data)
         except Exception as e:
             logger.error("[SemanticScholarCrawler] 获取单篇失败: %s", e)
+            log_crawler_usage(
+                source="semantic_scholar", endpoint=url, method="GET",
+                status_code=0, duration_ms=timer.elapsed_ms(),
+                success=False, error=str(e)[:500],
+                caller="SemanticScholarCrawler.get_paper_by_s2id",
+            )
             return None
 
     def _parse_item(self, item: dict) -> Optional[SourcePaper]:

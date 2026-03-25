@@ -1,5 +1,9 @@
 """
 爬虫服务模块
+
+Legacy pipeline（search_across_sources）仅保留 ArxivCrawler。
+CrossRef / SemanticScholar / Scopus / OpenAlex / ScholarSerpAPI
+已迁移至 MultiSourceOrchestrator 新管线（BaseCrawler + SourcePaper）。
 """
 from typing import List, Optional, Dict, Tuple
 import logging
@@ -7,8 +11,6 @@ import logging
 from app.config import settings
 from app.models.paper import Paper
 from app.services.crawler.arxiv_crawler import ArxivCrawler
-from app.services.crawler.crossref_crawler import CrossRefCrawler
-from app.services.crawler.semantic_scholar_crawler import SemanticScholarCrawler
 
 
 # 数据源优先级配置：数值越小优先级越高
@@ -16,7 +18,7 @@ SOURCE_PRIORITY: Dict[str, int] = {
     "scopus": 1,
     "web_of_science": 2,
     "crossref": 3,
-    "semantic_scholar": 3,  # 高质量学术数据源，与 crossref 同级
+    "semantic_scholar": 3,
     "google_scholar": 4,
     "pubmed": 5,
     "arxiv": 10,  # 预印本，优先级较低
@@ -25,9 +27,7 @@ SOURCE_PRIORITY: Dict[str, int] = {
 
 
 def _get_source_priority(source: Optional[str]) -> int:
-    """
-    获取数据源优先级
-    """
+    """获取数据源优先级"""
     if not source:
         return SOURCE_PRIORITY["unknown"]
     return SOURCE_PRIORITY.get(source.lower(), SOURCE_PRIORITY["unknown"])
@@ -43,33 +43,27 @@ def search_across_sources(
     year_to: Optional[int] = None,
 ) -> List[Paper]:
     """
-    在多个数据源上统一检索文献的 Orchestrator
+    Legacy pipeline — 仅支持 ArxivCrawler。
 
-    - 根据 sources 列表选择具体 crawler（arxiv, crossref 等）
-    - 聚合各源结果并做轻量去重（优先使用 DOI，其次使用 title+year）
-    - 截断为指定的 limit 数量
-
-    注意：本函数只负责“跨源检索策略”，不执行入库操作。
+    CrossRef / SemanticScholar 等已迁移至 MultiSourceOrchestrator，
+    通过 crawl_service.py 路由调用。
     """
     normalized_sources = [s.lower() for s in (sources or ["arxiv"])]
     crawlers = []
 
     if "arxiv" in normalized_sources:
         crawlers.append(ArxivCrawler(settings=settings))
-    if "crossref" in normalized_sources:
-        try:
-            crawlers.append(CrossRefCrawler(settings=settings))
-        except Exception as e:
-            logger.error("初始化 CrossRefCrawler 失败: %s", e)
-    if "semantic_scholar" in normalized_sources:
-        try:
-            crawlers.append(SemanticScholarCrawler())
-        except Exception as e:
-            logger.error("初始化 SemanticScholarCrawler 失败: %s", e)
+
+    # CrossRef / SemanticScholar 已迁移至新管线，此处不再初始化
+    unsupported = [s for s in normalized_sources if s not in ("arxiv",)]
+    if unsupported:
+        logger.info(
+            "search_across_sources: 源 %s 已迁移至 MultiSourceOrchestrator，跳过",
+            unsupported,
+        )
 
     if not crawlers:
-        # 如果没有任何合法的数据源，直接返回空列表
-        logger.warning("search_across_sources: 未指定合法的数据源 %s", sources)
+        logger.warning("search_across_sources: 未指定合法的 legacy 数据源 %s", sources)
         return []
 
     raw_results: List[Paper] = []
@@ -83,18 +77,11 @@ def search_across_sources(
             )
             raw_results.extend(part)
         except Exception as e:
-            # 调试阶段：如果某个数据源失败，直接抛出异常，方便在 API 层看到具体错误信息
             logger.error("Crawler %s 调用失败: %s", type(crawler).__name__, e)
             raise
 
-    # 轻量去重 + 主版本选择：
-    # - 先按 "作品 identity" 聚合（优先使用 DOI；若无 DOI，则用 (title.lower(), year)）
-    # - 同一作品可能有多个来源（arxiv / crossref / scholar 等）
-    # - 从中选择“来源优先级最高”的那条作为主版本
-    #   （例如 crossref > google_scholar > arxiv）
+    # 轻量去重 + 主版本选择
     buckets: Dict[Tuple[str, str], List[Paper]] = {}
-
-    # 将不同来源的记录按 identity 分桶
     for p in raw_results:
         doi = getattr(p, "doi", None)
         title = str(getattr(p, "title", "") or "").strip().lower()
@@ -107,22 +94,18 @@ def search_across_sources(
 
         buckets.setdefault(key, []).append(p)
 
-    # 在每个桶内，根据 SOURCE_PRIORITY 选择主版本
     deduped: List[Paper] = []
     for key, candidates in buckets.items():
         if not candidates:
             continue
-
-        # 按来源优先级排序，优先级数值越小越优先
         candidates_sorted = sorted(
             candidates,
             key=lambda p: _get_source_priority(getattr(p, "source", None)),
         )
-        primary = candidates_sorted[0]
-        deduped.append(primary)
+        deduped.append(candidates_sorted[0])
 
     if len(deduped) > limit:
         return deduped[:limit]
     return deduped
 
-__all__ = ["ArxivCrawler", "CrossRefCrawler", "SemanticScholarCrawler", "search_across_sources"]
+__all__ = ["ArxivCrawler", "search_across_sources"]
