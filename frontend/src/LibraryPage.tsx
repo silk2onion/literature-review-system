@@ -1,9 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import CitationGraphPanel from "./CitationGraphPanel";
 import GroupManager from "./GroupManager";
 import SemanticSearchDebugPanel from "./SemanticSearchDebugPanel";
 import { groupsApi } from "./api/groups";
 import type { LiteratureGroup } from "./types";
+
+/* ── A5: Journal Info Hover Tooltip types & cache ── */
+type JournalInfoLookup = {
+  name: string | null;
+  issn: string | null;
+  impact_factor: number | null;
+  quartile: string | null;
+  indexing: string[] | null;
+  source: "local_library" | "not_found";
+};
+
+// Module-level cache so it persists across re-renders but not page reloads
+const journalInfoCache = new Map<
+  string,
+  JournalInfoLookup | "loading" | "error"
+>();
 
 type PaperResponse = {
   id: number;
@@ -64,9 +80,17 @@ const API_BASE_URL = "http://localhost:5444";
 
 interface LibraryPageProps {
   onGenerateReview?: (groupId: number) => void;
+  /** A3: 从外部（如 GroupManager）传入的初始分组 ID */
+  initialGroupId?: number;
+  /** A3: 从外部传入的导航回调（分组管理 → 文献库） */
+  onNavigateToLibraryWithGroup?: (groupId: number) => void;
 }
 
-export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
+export default function LibraryPage({
+  onGenerateReview,
+  initialGroupId,
+  onNavigateToLibraryWithGroup,
+}: LibraryPageProps) {
   const [query, setQuery] = useState<string>("");
   const [yearFrom, setYearFrom] = useState<string>("");
   const [yearTo, setYearTo] = useState<string>("");
@@ -112,6 +136,74 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
     show: false,
     count: 0,
   });
+
+  /* ── A5: Journal Info Hover Tooltip state ── */
+  const [hoveredJournal, setHoveredJournal] = useState<string | null>(null);
+  const [journalTooltipData, setJournalTooltipData] =
+    useState<JournalInfoLookup | null>(null);
+  const [journalTooltipLoading, setJournalTooltipLoading] = useState(false);
+  const journalHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  const handleJournalMouseEnter = useCallback((journalName: string) => {
+    // Clear any pending leave timer
+    if (journalHoverTimerRef.current) {
+      clearTimeout(journalHoverTimerRef.current);
+      journalHoverTimerRef.current = null;
+    }
+    // Debounce: wait 400ms before fetching
+    journalHoverTimerRef.current = setTimeout(async () => {
+      setHoveredJournal(journalName);
+
+      // Check cache first
+      const cached = journalInfoCache.get(journalName);
+      if (cached && cached !== "loading" && cached !== "error") {
+        setJournalTooltipData(cached);
+        setJournalTooltipLoading(false);
+        return;
+      }
+      if (cached === "loading") {
+        setJournalTooltipLoading(true);
+        return;
+      }
+
+      // Fetch from API
+      journalInfoCache.set(journalName, "loading");
+      setJournalTooltipLoading(true);
+      setJournalTooltipData(null);
+      try {
+        const resp = await fetch(
+          `${API_BASE_URL}/api/journal-info/lookup?name=${encodeURIComponent(journalName)}`,
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data: JournalInfoLookup = await resp.json();
+        journalInfoCache.set(journalName, data);
+        // Only update if still hovering same journal
+        setHoveredJournal((curr) => {
+          if (curr === journalName) {
+            setJournalTooltipData(data);
+            setJournalTooltipLoading(false);
+          }
+          return curr;
+        });
+      } catch (err) {
+        console.error("Journal info lookup failed:", err);
+        journalInfoCache.set(journalName, "error");
+        setJournalTooltipLoading(false);
+      }
+    }, 400);
+  }, []);
+
+  const handleJournalMouseLeave = useCallback(() => {
+    if (journalHoverTimerRef.current) {
+      clearTimeout(journalHoverTimerRef.current);
+      journalHoverTimerRef.current = null;
+    }
+    setHoveredJournal(null);
+    setJournalTooltipData(null);
+    setJournalTooltipLoading(false);
+  }, []);
 
   const handleUploadPdf = async (file: File) => {
     if (!file) return;
@@ -645,6 +737,13 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
       setLoading(false);
     }
   };
+
+  // A3: 从外部传入的 initialGroupId 初始化分组过滤
+  useEffect(() => {
+    if (initialGroupId !== undefined) {
+      setSelectedGroupId(initialGroupId);
+    }
+  }, [initialGroupId]);
 
   useEffect(() => {
     fetchData({ resetPage: true }).catch((e) =>
@@ -1325,10 +1424,161 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                             fontSize: 11,
                             color: "#94a3b8",
                             lineHeight: 1.3,
+                            position: "relative",
+                            cursor: "help",
+                            borderBottom: "1px dotted #64748b",
                           }}
-                          title={p.journal}
+                          onMouseEnter={() =>
+                            handleJournalMouseEnter(p.journal!)
+                          }
+                          onMouseLeave={handleJournalMouseLeave}
                         >
                           {p.journal}
+                          {/* A5: Journal Info Hover Tooltip */}
+                          {hoveredJournal === p.journal && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                bottom: "calc(100% + 6px)",
+                                left: 0,
+                                zIndex: 1000,
+                                minWidth: 220,
+                                maxWidth: 300,
+                                padding: "10px 12px",
+                                borderRadius: 8,
+                                backgroundColor: "#1e293b",
+                                color: "#e2e8f0",
+                                fontSize: 11,
+                                lineHeight: 1.5,
+                                boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                                border: "1px solid #334155",
+                                pointerEvents: "none",
+                              }}
+                              onMouseEnter={(e) => e.stopPropagation()}
+                            >
+                              {journalTooltipLoading && (
+                                <span style={{ color: "#94a3b8" }}>
+                                  查询中...
+                                </span>
+                              )}
+                              {!journalTooltipLoading &&
+                                journalTooltipData &&
+                                journalTooltipData.source === "not_found" && (
+                                  <span style={{ color: "#94a3b8" }}>
+                                    未找到期刊信息
+                                  </span>
+                                )}
+                              {!journalTooltipLoading &&
+                                journalTooltipData &&
+                                journalTooltipData.source !== "not_found" && (
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: 4,
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        fontWeight: 600,
+                                        color: "#f1f5f9",
+                                        marginBottom: 2,
+                                      }}
+                                    >
+                                      {journalTooltipData.name || p.journal}
+                                    </div>
+                                    {journalTooltipData.issn && (
+                                      <div>
+                                        <span style={{ color: "#64748b" }}>
+                                          ISSN:
+                                        </span>{" "}
+                                        {journalTooltipData.issn}
+                                      </div>
+                                    )}
+                                    {journalTooltipData.impact_factor !=
+                                      null && (
+                                      <div>
+                                        <span style={{ color: "#64748b" }}>
+                                          Impact Factor:
+                                        </span>{" "}
+                                        <span
+                                          style={{
+                                            color: "#fbbf24",
+                                            fontWeight: 600,
+                                          }}
+                                        >
+                                          {journalTooltipData.impact_factor.toFixed(
+                                            3,
+                                          )}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {journalTooltipData.quartile && (
+                                      <div>
+                                        <span style={{ color: "#64748b" }}>
+                                          Quartile:
+                                        </span>{" "}
+                                        <span
+                                          style={{
+                                            padding: "1px 6px",
+                                            borderRadius: 3,
+                                            fontWeight: 600,
+                                            backgroundColor:
+                                              journalTooltipData.quartile ===
+                                              "Q1"
+                                                ? "rgba(34,197,94,0.2)"
+                                                : journalTooltipData.quartile ===
+                                                    "Q2"
+                                                  ? "rgba(56,189,248,0.2)"
+                                                  : "rgba(148,163,184,0.2)",
+                                            color:
+                                              journalTooltipData.quartile ===
+                                              "Q1"
+                                                ? "#4ade80"
+                                                : journalTooltipData.quartile ===
+                                                    "Q2"
+                                                  ? "#38bdf8"
+                                                  : "#94a3b8",
+                                          }}
+                                        >
+                                          {journalTooltipData.quartile}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {journalTooltipData.indexing &&
+                                      journalTooltipData.indexing.length >
+                                        0 && (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            flexWrap: "wrap",
+                                            gap: 3,
+                                            marginTop: 2,
+                                          }}
+                                        >
+                                          {journalTooltipData.indexing.map(
+                                            (idx) => (
+                                              <span
+                                                key={idx}
+                                                style={{
+                                                  fontSize: 10,
+                                                  padding: "1px 5px",
+                                                  borderRadius: 3,
+                                                  backgroundColor:
+                                                    "rgba(139,92,246,0.2)",
+                                                  color: "#a78bfa",
+                                                }}
+                                              >
+                                                {idx}
+                                              </span>
+                                            ),
+                                          )}
+                                        </div>
+                                      )}
+                                  </div>
+                                )}
+                            </div>
+                          )}
                         </span>
                       )}
                       {p.journal_quartile && (
@@ -1609,7 +1859,7 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
                 ×
               </button>
             </div>
-            <GroupManager />
+            <GroupManager onNavigateToLibrary={onNavigateToLibraryWithGroup} />
           </div>
         </div>
       )}
@@ -1708,7 +1958,6 @@ export default function LibraryPage({ onGenerateReview }: LibraryPageProps) {
           style={{
             zIndex: 9999,
             position: "fixed",
-            top: 0,
             left: 0,
             right: 0,
             bottom: 0,

@@ -13,7 +13,7 @@ from app.schemas.group import (
 from app.schemas.paper import PaperResponse
 from app.services.group_service import group_service
 
-router = APIRouter()
+router = APIRouter(prefix="/api/groups", tags=["groups"])
 
 @router.get("/", response_model=PaperGroupList)
 def get_groups(
