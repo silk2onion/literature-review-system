@@ -152,7 +152,7 @@ class ScopusCrawler(BaseCrawler):
             return []
 
         # ── Phase 1: Search API ──
-        papers = self._phase1_search(query, max_results)
+        papers = self._phase1_search(query, max_results, offset=offset)
 
         if not papers:
             return papers
@@ -166,6 +166,7 @@ class ScopusCrawler(BaseCrawler):
         self,
         query: str,
         max_results: int,
+        offset: int = 0,
     ) -> List[SourcePaper]:
         """
         Phase 1: 使用 Search API 获取文献元数据（不含摘要）
@@ -180,7 +181,12 @@ class ScopusCrawler(BaseCrawler):
         papers: List[SourcePaper] = []
         cursor = "*"  # 初始 cursor
         page_count = 0
-        use_cursor = self._prefer_cursor and (self._api_key not in self._cursor_restricted_keys)
+        # offset-based 步进分页与 cursor 语义不兼容；只在 offset=0 时允许 cursor。
+        use_cursor = (
+            self._prefer_cursor
+            and offset == 0
+            and (self._api_key not in self._cursor_restricted_keys)
+        )
 
         while True:
             # 穷尽模式或还未达到 max_results
@@ -200,13 +206,14 @@ class ScopusCrawler(BaseCrawler):
             if use_cursor:
                 params["cursor"] = cursor
             else:
-                # 兼容低权限 key：使用 start/count 偏移分页
-                params["start"] = page_count * count
+                # 兼容低权限 key：使用 start/count 偏移分页，并支持上层步进 offset
+                params["start"] = offset + (page_count * count)
 
             logger.info(
-                "[ScopusCrawler] Phase1 请求 page=%d mode=%s cursor=%s query=%s",
+                "[ScopusCrawler] Phase1 请求 page=%d mode=%s start_offset=%d cursor=%s query=%s",
                 page_count,
                 "cursor" if use_cursor else "start/count",
+                offset + (page_count * count) if not use_cursor else offset,
                 cursor[:20] + "..." if len(cursor) > 20 else cursor,
                 scopus_query[:80],
             )
@@ -705,13 +712,6 @@ class ScopusCrawler(BaseCrawler):
         if not url:
             url = entry.get("prism:url")
 
-        # 被引次数
-        cited_count = 0
-        try:
-            cited_count = int(entry.get("citedby-count", 0))
-        except (ValueError, TypeError):
-            pass
-
         # ISSN
         issn = entry.get("prism:issn")
 
@@ -721,9 +721,6 @@ class ScopusCrawler(BaseCrawler):
         if auth_keywords and isinstance(auth_keywords, str):
             # Scopus 返回的关键词以 " | " 分隔
             keywords = [k.strip() for k in auth_keywords.split("|") if k.strip()]
-
-        # Open Access 状态
-        open_access = entry.get("openaccess")
 
         return SourcePaper(
             source="scopus",
@@ -736,13 +733,7 @@ class ScopusCrawler(BaseCrawler):
             url=url,
             journal=journal,
             conference=conference,
+            issn=issn,
             keywords=keywords,
-            cited_by_count=cited_count,
             published_date=published_date,
-            extra={
-                "issn": issn,
-                "aggregation_type": aggregation_type,
-                "open_access": open_access,
-                "subtype": entry.get("subtypeDescription"),
-            },
         )

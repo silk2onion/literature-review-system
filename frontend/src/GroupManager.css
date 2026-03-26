@@ -113,6 +113,11 @@
   gap: 8px;
 }
 
+.group-item-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
 .group-item {
   background: #0f172a;
   border: 1px solid #374151;
@@ -138,6 +143,8 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
 .group-name {
@@ -151,6 +158,48 @@
   color: #9ca3af;
 }
 
+/* Action buttons row */
+.group-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.group-item:hover .group-actions {
+  opacity: 1;
+}
+
+.group-action-btn {
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.group-action-btn:hover {
+  color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.group-action-btn.edit-btn:hover {
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.1);
+}
+
+.group-action-btn.navigate-btn:hover {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.1);
+}
+
 .delete-group-btn {
   background: transparent;
   border: none;
@@ -159,12 +208,7 @@
   font-size: 18px;
   padding: 4px;
   border-radius: 4px;
-  opacity: 0;
   transition: all 0.2s;
-}
-
-.group-item:hover .delete-group-btn {
-  opacity: 1;
 }
 
 .delete-group-btn:hover {
@@ -172,9 +216,58 @@
   background: rgba(239, 68, 68, 0.1);
 }
 
-.loading-text, .empty-text {
+/* A1: Inline edit form */
+.group-edit-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.group-edit-input {
+  margin-bottom: 0 !important;
+  padding: 6px 8px !important;
+  font-size: 13px !important;
+}
+
+/* A2: Detail panel */
+.group-detail-panel {
+  background: #0c1322;
+  border: 1px solid #374151;
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.detail-label {
+  color: #6b7280;
+  min-width: 48px;
+  flex-shrink: 0;
+}
+
+.detail-value {
+  color: #d1d5db;
+  word-break: break-word;
+}
+
+.detail-loading {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.loading-text,
+.empty-text {
   text-align: center;
   color: #6b7280;
   font-size: 14px;
-  padding: 20px 0;
 }

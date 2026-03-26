@@ -1,10 +1,13 @@
 from datetime import datetime
+import json
+import logging
 from typing import Any, Tuple, Optional, List, cast
 
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import CrawlJob, Paper
+from app.models.system_setting import SystemSetting
 from app.schemas import CrawlJobCreate, LatestJobStatusResponse
 from app.services.crawler import search_across_sources
 from app.services.crawler.multi_source_orchestrator import MultiSourceOrchestrator
@@ -16,6 +19,43 @@ from app.services.paper_ingest import (
 )
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+def _sync_runtime_data_sources_from_db(db: Session) -> None:
+    """
+    从 system_settings 读取 data_sources_config，并同步到运行时 settings。
+
+    背景：数据源配置会持久化到 DB，但服务重启后 settings 会回退到 .env 默认值。
+    若此处不回填，可能出现前端显示已启用 scopus/serpapi、实际抓取却一直 0 结果。
+    """
+    row = db.query(SystemSetting).filter(SystemSetting.key == "data_sources_config").first()
+    if row is None or not row.value:
+        return
+
+    try:
+        cfg = json.loads(row.value)
+    except Exception as e:
+        logger.warning("[crawl_service] data_sources_config 解析失败: %s", e)
+        return
+
+    if not isinstance(cfg, dict):
+        return
+
+    serpapi_cfg = cfg.get("serpapi") if isinstance(cfg.get("serpapi"), dict) else {}
+    scopus_cfg = cfg.get("scopus") if isinstance(cfg.get("scopus"), dict) else {}
+
+    setattr(settings, "SERPAPI_SCHOLAR_ENABLED", bool(serpapi_cfg.get("enabled", False)))
+    # 只在 DB 中存储了非空 API key 时才覆盖 .env 值，避免清空有效配置
+    serpapi_key = (serpapi_cfg.get("api_key") or "").strip()
+    if serpapi_key:
+        setattr(settings, "SERPAPI_API_KEY", serpapi_key)
+    setattr(settings, "SERPAPI_SCHOLAR_ENGINE", serpapi_cfg.get("engine") or "google_scholar")
+
+    setattr(settings, "SCOPUS_ENABLED", bool(scopus_cfg.get("enabled", False)))
+    scopus_key = (scopus_cfg.get("api_key") or "").strip()
+    if scopus_key:
+        setattr(settings, "SCOPUS_API_KEY", scopus_key)
 
 
 def create_crawl_job(db: Session, payload: CrawlJobCreate) -> CrawlJob:
@@ -100,7 +140,7 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
     2. 计算本轮要抓的数量：min(page_size, max_results - fetched_count)
        - 若 remaining <= 0 → 标记 completed，返回 (job, 0)
     3. 调用 search_across_sources / MultiSourceOrchestrator 获取一批文献
-       （当前不做严格 offset，仅做分批 limit）
+       （按 current_page 计算 offset，执行分批分页抓取）
     4. 将所有来源的结果统一转换为 SourcePaper，并写入 StagingPaper 暂存库
        （insert_or_update_staging_from_sources），得到本轮新增暂存记录数 new_count
     5. 更新 job.current_page / job.fetched_count / job.status / job.log / job.updated_at
@@ -122,6 +162,9 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
     job.status = "running"
     job.updated_at = datetime.utcnow()
     db.commit()
+
+    # 每次执行抓取前，从 DB 回填运行时数据源配置，避免服务重启后配置丢失。
+    _sync_runtime_data_sources_from_db(db)
 
     # ━━━ 穷尽检索模式判定 ━━━
     is_exhaustive = bool(getattr(job, "exhaustive", False))
@@ -147,7 +190,7 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         # 穷尽模式：每轮固定抓 page_size，不设上限
         limit_this_round = job.page_size or 200
 
-    # 调用多源搜索（旧管线 + 新管线），目前不做严格分页，仅按 limit 分批
+    # 调用多源搜索（旧管线 + 新管线），按当前轮次的 offset/limit 执行分页抓取
     orchestrator = MultiSourceOrchestrator()
     try:
         # 显式转换为 Python 类型以避免 Pylance 错误
@@ -187,11 +230,18 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         all_source_papers: List[SourcePaper] = []
 
         # ━━━ 对每个子查询分别搜索，合并结果 ━━━
+        query_count = len(sub_queries) if sub_queries else 1
+
         if is_exhaustive:
             # 穷尽模式下，每个子查询传 max_results=0 让爬虫自行耗尽
             per_query_limit = 0
+            per_query_offset = 0
         else:
-            per_query_limit = max(limit_this_round // len(sub_queries), 10) if sub_queries else limit_this_round
+            # 当前前端的 run_once 是“按轮步进”，因此每一轮对子查询都要向后推进固定窗口。
+            # 注意：offset 不能基于本轮 remaining 计算，否则最后一轮 limit 缩小时会回退到旧页面。
+            base_page_limit_per_query = max((job.page_size or 50) // query_count, 10)
+            per_query_limit = max(limit_this_round // query_count, 10)
+            per_query_offset = (job.current_page or 0) * base_page_limit_per_query
 
         for sq_idx, sub_query in enumerate(sub_queries):
             sq_keywords = [sub_query]  # 将子查询作为单个关键词传入
@@ -215,6 +265,7 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
                     query=sub_query,
                     sources=multi_sources,
                     max_results_per_source=per_query_limit,
+                    offset=per_query_offset,
                 )
                 for _, items in multi_results.items():
                     all_source_papers.extend(items)
