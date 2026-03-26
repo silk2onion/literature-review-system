@@ -1349,7 +1349,7 @@ export default function LibraryPage({
               {filteredAndSortedItems.length === 0 && !loading && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={8}
                     style={{
                       padding: "16px 12px",
                       textAlign: "center",
