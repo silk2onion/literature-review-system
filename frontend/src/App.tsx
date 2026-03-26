@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Search,
   BookOpen,
@@ -29,23 +29,74 @@ import ReviewListPage from "./ReviewListPage";
 import PrismaFlowPage from "./PrismaFlowPage";
 import ApiUsagePage from "./ApiUsagePage";
 
+type TabName =
+  | "search"
+  | "library"
+  | "staging"
+  | "screening"
+  | "rag"
+  | "draft"
+  | "orchestrate"
+  | "monitoring"
+  | "apiUsage"
+  | "reviews";
+
+/** A4: 全局爬取状态 */
+interface CrawlStatusInfo {
+  id: number;
+  status: "pending" | "running" | "completed" | "failed" | "paused";
+  keywords: string[];
+  sources: string[];
+  fetched_count: number;
+  max_results: number;
+  progress_percent: number;
+  created_at: string;
+  updated_at: string;
+}
+
 function App() {
   // State
-  const [activeTab, setActiveTab] = useState<
-    | "search"
-    | "library"
-    | "staging"
-    | "screening"
-    | "rag"
-    | "draft"
-    | "orchestrate"
-    | "monitoring"
-    | "apiUsage"
-    | "reviews"
-  >("search");
+  const [activeTab, setActiveTab] = useState<TabName>("search");
+  /** A3: 跨页面参数 —— 切换到 library 时预设 groupId */
+  const [libraryInitGroupId, setLibraryInitGroupId] = useState<
+    number | undefined
+  >(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+
+  /** A4: 全局爬取状态 */
+  const [crawlStatus, setCrawlStatus] = useState<CrawlStatusInfo | null>(null);
+
+  // A4: 轮询最新爬取状态
+  const fetchCrawlStatus = useCallback(async () => {
+    try {
+      const res = await fetch(
+        "http://localhost:5444/api/crawl/jobs/latest_status",
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      setCrawlStatus(data);
+    } catch {
+      // 静默失败
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCrawlStatus();
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        fetchCrawlStatus();
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [fetchCrawlStatus]);
+
+  /** A3: 导航到文献库并预设分组过滤 — 暴露给 LibraryPage 内的 GroupManager */
+  const navigateToLibraryWithGroup = useCallback((groupId: number) => {
+    setLibraryInitGroupId(groupId);
+    setActiveTab("library");
+  }, []);
 
   // Render content based on active tab
   const renderContent = () => {
@@ -53,7 +104,12 @@ function App() {
       case "search":
         return <CrawlerSearchPage />;
       case "library":
-        return <LibraryPage />;
+        return (
+          <LibraryPage
+            initialGroupId={libraryInitGroupId}
+            onNavigateToLibraryWithGroup={navigateToLibraryWithGroup}
+          />
+        );
       case "staging":
         // Staging uses the same page but conceptually is the "Staging Library"
         return <StagingPapersPage />;
@@ -242,6 +298,47 @@ function App() {
           </div>
 
           <div className="toolbar-right">
+            {/* A4: 全局爬取状态指示器 */}
+            {crawlStatus &&
+              (crawlStatus.status === "running" ||
+                crawlStatus.status === "pending") && (
+                <button
+                  onClick={() => setActiveTab("monitoring")}
+                  title="点击查看任务详情"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "4px 12px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(59, 130, 246, 0.3)",
+                    background: "rgba(59, 130, 246, 0.08)",
+                    color: "#3b82f6",
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      backgroundColor:
+                        crawlStatus.status === "running"
+                          ? "#3b82f6"
+                          : "#f59e0b",
+                    }}
+                  />
+                  <span>
+                    {crawlStatus.status === "running" ? "爬取中" : "等待中"}{" "}
+                    {crawlStatus.fetched_count}/{crawlStatus.max_results}
+                  </span>
+                  <span style={{ color: "#94a3b8" }}>
+                    {crawlStatus.progress_percent}%
+                  </span>
+                </button>
+              )}
             {activeTab === "search" && (
               <button className="icon-button" title="Filter">
                 <Filter size={16} />

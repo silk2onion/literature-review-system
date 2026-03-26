@@ -78,6 +78,7 @@ class MultiSourceOrchestrator:
         query: str,
         sources: List[str],
         max_results_per_source: int = 10,
+        offset: int = 0,
     ) -> Dict[str, List[SourcePaper]]:
         """
         按给定 sources 列表顺序调用各个 crawler，返回按 source 分组的结果。
@@ -100,15 +101,16 @@ class MultiSourceOrchestrator:
                 continue
             try:
                 logger.info(
-                    "[MultiSourceOrchestrator] search source=%s query=%s limit=%s",
+                    "[MultiSourceOrchestrator] search source=%s query=%s limit=%s offset=%s",
                     s,
                     query,
                     max_results_per_source,
+                    offset,
                 )
                 papers = crawler.search_raw(
                     query=query,
                     max_results=max_results_per_source,
-                    offset=0,
+                    offset=offset,
                 )
                 results[s] = papers
                 logger.info(

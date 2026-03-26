@@ -2,9 +2,15 @@
 应用配置管理
 使用pydantic-settings进行环境变量管理
 """
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 import os
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = BACKEND_DIR.parent
+DEFAULT_ENV_FILE = BACKEND_DIR / ".env"
+DEFAULT_SQLITE_DB_PATH = PROJECT_ROOT / "literature.db"
 
 
 class Settings(BaseSettings):
@@ -18,7 +24,8 @@ class Settings(BaseSettings):
     PORT: int = 5444
     
     # 数据库配置
-    DATABASE_URL: str = "sqlite:///./literature.db"
+    # 使用项目根目录下的绝对路径，避免因启动工作目录不同而生成多份 SQLite
+    DATABASE_URL: str = f"sqlite:///{DEFAULT_SQLITE_DB_PATH.as_posix()}"
     
     # Redis配置
     REDIS_HOST: str = "localhost"
@@ -123,7 +130,7 @@ class Settings(BaseSettings):
     
     # Pydantic v2配置
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(DEFAULT_ENV_FILE),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore"
