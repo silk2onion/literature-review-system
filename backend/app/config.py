@@ -10,7 +10,7 @@ import os
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = BACKEND_DIR.parent
 DEFAULT_ENV_FILE = BACKEND_DIR / ".env"
-DEFAULT_SQLITE_DB_PATH = PROJECT_ROOT / "literature.db"
+DEFAULT_SQLITE_DB_PATH = BACKEND_DIR / "literature.db"
 
 
 class Settings(BaseSettings):

@@ -295,7 +295,6 @@ function App() {
             >
               <Sidebar size={18} />
             </button>
-            <span className="toolbar-title">{getPageTitle()}</span>
           </div>
 
           <div className="toolbar-right">

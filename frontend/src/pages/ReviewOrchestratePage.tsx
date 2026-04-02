@@ -54,8 +54,8 @@ const STAGE_LABELS: Record<PipelineStage, string> = {
   embedding: "正在生成文献向量…",
   generating: "正在按节生成综述（RAG + LLM）…",
   references: "正在生成参考文献列表…",
-  done: "生成完成 ✓",
-  error: "生成失败 ✗",
+  done: "生成完成",
+  error: "生成失败",
 };
 
 export default function ReviewOrchestratePage() {
@@ -117,7 +117,6 @@ export default function ReviewOrchestratePage() {
       setResult(data);
       setStage("done");
 
-      // Scroll to result
       setTimeout(() => {
         resultRef.current?.scrollIntoView({ behavior: "smooth" });
       }, 200);
@@ -139,17 +138,16 @@ export default function ReviewOrchestratePage() {
     <div style={styles.container}>
       {/* === 输入区域 === */}
       <div style={styles.inputCard}>
-        <h2 style={styles.cardTitle}>📝 一键生成文献综述</h2>
+        <h2 style={styles.cardTitle}>一键生成文献综述</h2>
         <p style={styles.subtitle}>
-          输入研究主题 → 自动生成框架 → 批量检索文献 → RAG 召回 → 生成带引用标注的综述
+          输入研究主题，自动完成框架生成、文献检索、RAG 召回与带引用标注的综述写作
         </p>
 
         <div style={styles.formGrid}>
           {/* 主题 */}
           <div style={styles.formGroup}>
-            <label style={styles.label}>研究主题 *</label>
+            <label style={styles.label}>研究主题</label>
             <input
-              id="orchestrate-topic"
               style={styles.input}
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
@@ -160,9 +158,8 @@ export default function ReviewOrchestratePage() {
 
           {/* 关键词 */}
           <div style={styles.formGroup}>
-            <label style={styles.label}>关键词 * (逗号分隔)</label>
+            <label style={styles.label}>关键词（逗号分隔）</label>
             <input
-              id="orchestrate-keywords"
               style={styles.input}
               value={keywords}
               onChange={(e) => setKeywords(e.target.value)}
@@ -176,7 +173,6 @@ export default function ReviewOrchestratePage() {
             <div style={styles.configItem}>
               <label style={styles.label}>文献数</label>
               <input
-                id="orchestrate-paper-limit"
                 type="number"
                 style={{ ...styles.input, width: 80 }}
                 value={paperLimit}
@@ -190,8 +186,7 @@ export default function ReviewOrchestratePage() {
             <div style={styles.configItem}>
               <label style={styles.label}>语言</label>
               <select
-                id="orchestrate-language"
-                style={{ ...styles.input, width: 100 }}
+                style={{ ...styles.input, width: 110 }}
                 value={language}
                 onChange={(e) => setLanguage(e.target.value as "zh-CN" | "en")}
                 disabled={isRunning}
@@ -204,13 +199,12 @@ export default function ReviewOrchestratePage() {
             <div style={styles.configItem}>
               <label style={styles.label}>引用格式</label>
               <select
-                id="orchestrate-citation-style"
-                style={{ ...styles.input, width: 140 }}
+                style={{ ...styles.input, width: 150 }}
                 value={citationStyle}
                 onChange={(e) => setCitationStyle(e.target.value)}
                 disabled={isRunning}
               >
-                <option value="harvard">Harvard (默认)</option>
+                <option value="harvard">Harvard</option>
                 <option value="apa">APA 7th</option>
                 <option value="ieee">IEEE [1]</option>
                 <option value="chicago">Chicago</option>
@@ -221,7 +215,6 @@ export default function ReviewOrchestratePage() {
             <div style={styles.configItem}>
               <label style={styles.label}>起始年</label>
               <input
-                id="orchestrate-year-from"
                 type="number"
                 style={{ ...styles.input, width: 90 }}
                 value={yearFrom}
@@ -234,7 +227,6 @@ export default function ReviewOrchestratePage() {
             <div style={styles.configItem}>
               <label style={styles.label}>截止年</label>
               <input
-                id="orchestrate-year-to"
                 type="number"
                 style={{ ...styles.input, width: 90 }}
                 value={yearTo}
@@ -245,13 +237,12 @@ export default function ReviewOrchestratePage() {
             </div>
 
             <div style={styles.configItem}>
-              <label style={styles.label}>
+              <label style={{ ...styles.label, display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                 <input
                   type="checkbox"
                   checked={useLocalOnly}
                   onChange={(e) => setUseLocalOnly(e.target.checked)}
                   disabled={isRunning}
-                  style={{ marginRight: 6 }}
                 />
                 仅本地库
               </label>
@@ -260,10 +251,9 @@ export default function ReviewOrchestratePage() {
 
           {/* 自定义指令 */}
           <div style={styles.formGroup}>
-            <label style={styles.label}>自定义指令 (可选)</label>
+            <label style={styles.label}>自定义指令（可选）</label>
             <textarea
-              id="orchestrate-instructions"
-              style={{ ...styles.input, minHeight: 60 }}
+              style={{ ...styles.input, minHeight: 60, resize: "vertical" as const }}
               value={customInstructions}
               onChange={(e) => setCustomInstructions(e.target.value)}
               placeholder="例如：请重点关注亚洲案例"
@@ -274,7 +264,6 @@ export default function ReviewOrchestratePage() {
 
         {/* 提交按钮 */}
         <button
-          id="orchestrate-submit"
           onClick={handleSubmit}
           disabled={isRunning}
           style={{
@@ -283,7 +272,7 @@ export default function ReviewOrchestratePage() {
             cursor: isRunning ? "not-allowed" : "pointer",
           }}
         >
-          {isRunning ? "⏳ 正在生成中…" : "🚀 一键生成综述"}
+          {isRunning ? "正在生成中…" : "一键生成综述"}
         </button>
 
         {/* Pipeline 进度 */}
@@ -294,14 +283,14 @@ export default function ReviewOrchestratePage() {
                 ...styles.progressFill,
                 width: stage === "done" ? "100%" : stage === "error" ? "100%" : "60%",
                 backgroundColor:
-                  stage === "done" ? "#22c55e" : stage === "error" ? "#ef4444" : "#6366f1",
+                  stage === "done" ? "#22c55e" : stage === "error" ? "#ef4444" : "#007AFF",
               }}
             />
             <span style={styles.progressLabel}>{STAGE_LABELS[stage]}</span>
           </div>
         )}
 
-        {error && <div style={styles.errorMsg}>❌ {error}</div>}
+        {error && <div style={styles.errorMsg}>{error}</div>}
       </div>
 
       {/* === 结果区域 === */}
@@ -309,40 +298,21 @@ export default function ReviewOrchestratePage() {
         <div ref={resultRef} style={styles.resultCard}>
           {/* Tab Bar */}
           <div style={styles.tabBar}>
-            <button
-              id="result-tab-preview"
-              onClick={() => setActiveResultTab("preview")}
-              style={{
-                ...styles.tab,
-                ...(activeResultTab === "preview" ? styles.tabActive : {}),
-              }}
-            >
-              📄 综述预览
-            </button>
-            <button
-              id="result-tab-framework"
-              onClick={() => setActiveResultTab("framework")}
-              style={{
-                ...styles.tab,
-                ...(activeResultTab === "framework" ? styles.tabActive : {}),
-              }}
-            >
-              🏗️ 框架
-            </button>
-            <button
-              id="result-tab-stats"
-              onClick={() => setActiveResultTab("stats")}
-              style={{
-                ...styles.tab,
-                ...(activeResultTab === "stats" ? styles.tabActive : {}),
-              }}
-            >
-              📊 统计
-            </button>
-
+            {(["preview", "framework", "stats"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveResultTab(tab)}
+                style={{
+                  ...styles.tab,
+                  ...(activeResultTab === tab ? styles.tabActive : {}),
+                }}
+              >
+                {tab === "preview" ? "综述预览" : tab === "framework" ? "框架" : "统计"}
+              </button>
+            ))}
             <div style={{ flex: 1 }} />
-            <button id="result-copy-btn" onClick={handleCopy} style={styles.copyBtn}>
-              📋 复制 Markdown
+            <button onClick={handleCopy} style={styles.copyBtn}>
+              复制 Markdown
             </button>
           </div>
 
@@ -356,8 +326,10 @@ export default function ReviewOrchestratePage() {
 
             {activeResultTab === "framework" && (
               <div>
-                <h3 style={{ color: "#e2e8f0", marginBottom: 12 }}>{result.framework.title}</h3>
-                <p style={{ color: "#94a3b8", marginBottom: 16 }}>
+                <h3 style={{ color: "#1C1C1E", margin: "0 0 8px", fontSize: 18, fontWeight: 600 }}>
+                  {result.framework.title}
+                </h3>
+                <p style={{ color: "#8E8E93", marginBottom: 20, fontSize: 14 }}>
                   {result.framework.abstract_description}
                 </p>
                 {result.framework.sections.map((s) => (
@@ -379,33 +351,25 @@ export default function ReviewOrchestratePage() {
             )}
 
             {activeResultTab === "stats" && (
-              <div style={{ color: "#cbd5e1" }}>
-                <div style={styles.statRow}>
-                  <span>Review ID</span>
-                  <span style={styles.statValue}>{result.review_id}</span>
-                </div>
-                <div style={styles.statRow}>
-                  <span>总检索文献数</span>
-                  <span style={styles.statValue}>{result.stats.total_papers_searched}</span>
-                </div>
-                <div style={styles.statRow}>
-                  <span>实际引用文献数</span>
-                  <span style={styles.statValue}>{result.stats.total_papers_cited}</span>
-                </div>
-                <div style={styles.statRow}>
-                  <span>章节数</span>
-                  <span style={styles.statValue}>{result.stats.sections_count}</span>
-                </div>
-                <div style={styles.statRow}>
-                  <span>引用映射</span>
-                  <span style={styles.statValue}>
-                    {Object.keys(result.citation_map).length} 条
-                  </span>
-                </div>
+              <div>
+                {[
+                  ["Review ID", result.review_id],
+                  ["总检索文献数", result.stats.total_papers_searched],
+                  ["实际引用文献数", result.stats.total_papers_cited],
+                  ["章节数", result.stats.sections_count],
+                  ["引用映射", `${Object.keys(result.citation_map).length} 条`],
+                ].map(([label, value]) => (
+                  <div key={String(label)} style={styles.statRow}>
+                    <span style={{ color: "#3C3C43" }}>{label}</span>
+                    <span style={styles.statValue}>{String(value)}</span>
+                  </div>
+                ))}
 
                 {Object.keys(result.citation_map).length > 0 && (
-                  <div style={{ marginTop: 16 }}>
-                    <h4 style={{ color: "#e2e8f0", marginBottom: 8 }}>引用映射表</h4>
+                  <div style={{ marginTop: 20 }}>
+                    <h4 style={{ color: "#1C1C1E", margin: "0 0 10px", fontSize: 14, fontWeight: 600 }}>
+                      引用映射表
+                    </h4>
                     <div style={{ maxHeight: 300, overflow: "auto" }}>
                       {Object.entries(result.citation_map).map(([key, info]) => (
                         <div key={key} style={styles.citationRow}>
@@ -427,7 +391,7 @@ export default function ReviewOrchestratePage() {
   );
 }
 
-// --- Inline Styles ---
+// --- Inline Styles (Mac Light Theme) ---
 const styles: Record<string, React.CSSProperties> = {
   container: {
     padding: "24px 32px",
@@ -435,46 +399,46 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "0 auto",
   },
   inputCard: {
-    background: "rgba(30, 41, 59, 0.7)",
-    borderRadius: 12,
-    padding: "24px 28px",
-    border: "1px solid rgba(148, 163, 184, 0.15)",
+    background: "#FFFFFF",
+    borderRadius: 14,
+    padding: "28px 28px",
+    border: "1px solid #E5E5EA",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
     marginBottom: 24,
   },
   cardTitle: {
-    color: "#e2e8f0",
-    fontSize: 20,
+    color: "#1C1C1E",
+    fontSize: 22,
     fontWeight: 700,
     margin: "0 0 4px 0",
   },
   subtitle: {
-    color: "#94a3b8",
+    color: "#8E8E93",
     fontSize: 13,
-    margin: "0 0 20px 0",
+    margin: "0 0 24px 0",
+    lineHeight: 1.5,
   },
   formGrid: {
     display: "flex",
     flexDirection: "column" as const,
-    gap: 14,
+    gap: 16,
   },
   formGroup: {
     display: "flex",
     flexDirection: "column" as const,
-    gap: 4,
+    gap: 6,
   },
   label: {
-    color: "#94a3b8",
-    fontSize: 12,
-    fontWeight: 600,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.05em",
+    color: "#3C3C43",
+    fontSize: 13,
+    fontWeight: 500,
   },
   input: {
-    background: "rgba(15, 23, 42, 0.6)",
-    border: "1px solid rgba(148, 163, 184, 0.2)",
+    background: "#F5F5F7",
+    border: "1px solid #D1D1D6",
     borderRadius: 8,
-    padding: "8px 12px",
-    color: "#e2e8f0",
+    padding: "9px 12px",
+    color: "#1C1C1E",
     fontSize: 14,
     outline: "none",
     transition: "border-color 0.2s",
@@ -488,35 +452,35 @@ const styles: Record<string, React.CSSProperties> = {
   configItem: {
     display: "flex",
     flexDirection: "column" as const,
-    gap: 4,
+    gap: 6,
   },
   submitBtn: {
-    marginTop: 18,
+    marginTop: 20,
     width: "100%",
     padding: "12px 0",
     borderRadius: 10,
     border: "none",
-    background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-    color: "#fff",
+    background: "#007AFF",
+    color: "#FFFFFF",
     fontSize: 15,
-    fontWeight: 700,
-    letterSpacing: "0.05em",
+    fontWeight: 600,
     transition: "all 0.2s",
   },
   progressBar: {
-    marginTop: 14,
-    height: 28,
-    borderRadius: 14,
-    background: "rgba(15, 23, 42, 0.5)",
+    marginTop: 16,
+    height: 32,
+    borderRadius: 8,
+    background: "#F5F5F7",
     position: "relative" as const,
     overflow: "hidden",
+    border: "1px solid #E5E5EA",
   },
   progressFill: {
     position: "absolute" as const,
     top: 0,
     left: 0,
     height: "100%",
-    borderRadius: 14,
+    borderRadius: 7,
     transition: "width 0.5s ease, background-color 0.3s",
   },
   progressLabel: {
@@ -528,7 +492,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    color: "#e2e8f0",
+    color: "#1C1C1E",
     fontSize: 12,
     fontWeight: 600,
     zIndex: 1,
@@ -536,78 +500,82 @@ const styles: Record<string, React.CSSProperties> = {
   errorMsg: {
     marginTop: 12,
     padding: "10px 14px",
-    background: "rgba(239, 68, 68, 0.1)",
-    border: "1px solid rgba(239, 68, 68, 0.3)",
+    background: "#FEF2F2",
+    border: "1px solid #FECACA",
     borderRadius: 8,
-    color: "#fca5a5",
+    color: "#DC2626",
     fontSize: 13,
   },
   resultCard: {
-    background: "rgba(30, 41, 59, 0.7)",
-    borderRadius: 12,
-    border: "1px solid rgba(148, 163, 184, 0.15)",
+    background: "#FFFFFF",
+    borderRadius: 14,
+    border: "1px solid #E5E5EA",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
     overflow: "hidden",
   },
   tabBar: {
     display: "flex",
     gap: 0,
-    borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
+    borderBottom: "1px solid #E5E5EA",
     padding: "0 4px",
     alignItems: "center",
+    background: "#FAFAFA",
   },
   tab: {
-    padding: "12px 16px",
+    padding: "12px 18px",
     background: "transparent",
     border: "none",
     borderBottom: "2px solid transparent",
-    color: "#94a3b8",
+    color: "#8E8E93",
     fontSize: 13,
     fontWeight: 600,
     cursor: "pointer",
     transition: "all 0.2s",
   },
   tabActive: {
-    color: "#e2e8f0",
-    borderBottom: "2px solid #6366f1",
+    color: "#007AFF",
+    borderBottom: "2px solid #007AFF",
   },
   copyBtn: {
     padding: "6px 14px",
     borderRadius: 6,
-    border: "1px solid rgba(148, 163, 184, 0.2)",
-    background: "transparent",
-    color: "#94a3b8",
+    border: "1px solid #D1D1D6",
+    background: "#FFFFFF",
+    color: "#3C3C43",
     fontSize: 12,
+    fontWeight: 500,
     cursor: "pointer",
     marginRight: 8,
   },
   tabContent: {
-    padding: "20px 24px",
+    padding: "24px 28px",
     minHeight: 300,
     maxHeight: "70vh",
     overflow: "auto",
   },
   markdownBody: {
-    color: "#cbd5e1",
+    color: "#1C1C1E",
     fontSize: 14,
     lineHeight: 1.8,
   },
   frameworkSection: {
-    background: "rgba(15, 23, 42, 0.4)",
-    borderRadius: 8,
+    background: "#F5F5F7",
+    borderRadius: 10,
     padding: "14px 16px",
     marginBottom: 10,
-    border: "1px solid rgba(148, 163, 184, 0.08)",
+    border: "1px solid #E5E5EA",
   },
   sectionTitle: {
-    color: "#e2e8f0",
-    fontWeight: 700,
+    color: "#1C1C1E",
+    fontWeight: 600,
     fontSize: 14,
     marginBottom: 4,
   },
   sectionDesc: {
-    color: "#94a3b8",
+    color: "#8E8E93",
     fontSize: 13,
     marginBottom: 8,
+    lineHeight: 1.5,
   },
   sectionKeywords: {
     display: "flex",
@@ -615,38 +583,41 @@ const styles: Record<string, React.CSSProperties> = {
     flexWrap: "wrap" as const,
   },
   keywordTag: {
-    background: "rgba(99, 102, 241, 0.15)",
-    color: "#a5b4fc",
+    background: "rgba(99, 102, 241, 0.08)",
+    color: "#6366f1",
     fontSize: 11,
     padding: "3px 8px",
     borderRadius: 4,
-    fontWeight: 600,
+    fontWeight: 500,
   },
   statRow: {
     display: "flex",
     justifyContent: "space-between",
-    padding: "8px 0",
-    borderBottom: "1px solid rgba(148, 163, 184, 0.08)",
+    padding: "10px 0",
+    borderBottom: "1px solid #F0F0F0",
     fontSize: 14,
   },
   statValue: {
-    fontWeight: 700,
-    color: "#a5b4fc",
+    fontWeight: 600,
+    color: "#007AFF",
   },
   citationRow: {
     display: "flex",
     gap: 12,
     alignItems: "baseline",
-    padding: "4px 0",
-    borderBottom: "1px solid rgba(148, 163, 184, 0.05)",
+    padding: "6px 0",
+    borderBottom: "1px solid #F5F5F7",
   },
   citationKey: {
     color: "#6366f1",
     fontSize: 12,
     whiteSpace: "nowrap" as const,
+    background: "#F5F5F7",
+    padding: "1px 6px",
+    borderRadius: 3,
   },
   citationTitle: {
-    color: "#94a3b8",
+    color: "#8E8E93",
     fontSize: 12,
     overflow: "hidden",
     textOverflow: "ellipsis",
