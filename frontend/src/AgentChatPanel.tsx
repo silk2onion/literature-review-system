@@ -1,182 +1,25 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
-  Send,
   Bot,
-  User,
-  Zap,
   X,
   MessageSquare,
-  Loader,
-  RefreshCw,
-  Pencil,
-  Check,
   Trash2,
-  Sparkles,
-  ExternalLink,
-  Plus,
-  MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
-
-const API_BASE_URL = "http://localhost:5444";
-
-// ── 类型 ────────────────────────────────────────────
-
-type ActionResult = {
-  tool: string;
-  params: Record<string, unknown>;
-  result: Record<string, unknown>;
-};
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  action?: ActionResult | null;
-  timestamp: string; // ISO string for serialization
-};
-
-type ChatMode = "ask" | "agent";
-
-type ChatSession = {
-  id: string;
-  title: string;
-  updatedAt: string;
-  mode: ChatMode;
-  messages: ChatMessage[];
-};
-
-// ── 工具图标和标签 ──────────────────────────────────
-
-const TOOL_LABELS: Record<
-  string,
-  { label: string; emoji: string; color: string }
-> = {
-  search_papers: { label: "搜索文献", emoji: "🔍", color: "#3b82f6" },
-  list_staging: { label: "查看暂存库", emoji: "📋", color: "#8b5cf6" },
-  promote_papers: { label: "提升文献", emoji: "⬆️", color: "#22c55e" },
-  delete_staging: { label: "删除暂存", emoji: "🗑️", color: "#ef4444" },
-  search_library: { label: "搜索正式库", emoji: "📚", color: "#f59e0b" },
-  sync_citations: { label: "同步引用", emoji: "🔗", color: "#06b6d4" },
-  system_status: { label: "系统状态", emoji: "⚙️", color: "#64748b" },
-  general_chat: { label: "对话", emoji: "💬", color: "#6366f1" },
-  generate_framework: { label: "生成框架", emoji: "📝", color: "#8b5cf6" },
-  start_review_task: { label: "异步生成综述", emoji: "🚀", color: "#ec4899" },
-  run_phd_pipeline: { label: "运行管线", emoji: "🔬", color: "#14b8a6" },
-  list_reviews: { label: "查看综述", emoji: "📄", color: "#f59e0b" },
-  export_review: { label: "导出综述", emoji: "📥", color: "#22c55e" },
-  semantic_search: { label: "语义搜索", emoji: "🧠", color: "#a855f7" },
-  manage_groups: { label: "管理分组", emoji: "📁", color: "#64748b" },
-};
-
-// ── 操作卡片组件 ────────────────────────────────────
-
-function ActionCard({ action }: { action: ActionResult }) {
-  const toolInfo = TOOL_LABELS[action.tool] || {
-    label: action.tool,
-    emoji: "⚡",
-    color: "#64748b",
-  };
-
-  return (
-    <div
-      style={{
-        margin: "8px 0",
-        padding: "10px 14px",
-        borderRadius: 10,
-        border: `1px solid ${toolInfo.color}22`,
-        backgroundColor: `${toolInfo.color}08`,
-        fontSize: 13,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          marginBottom: 6,
-        }}
-      >
-        <Zap size={14} style={{ color: toolInfo.color }} />
-        <span style={{ fontWeight: 600, color: toolInfo.color, fontSize: 12 }}>
-          {toolInfo.emoji} {toolInfo.label}
-        </span>
-      </div>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 6,
-          alignItems: "center",
-        }}
-      >
-        {action.result.error ? (
-          <span style={{ color: "#ef4444" }}>
-            ❌ {action.result.error as string}
-          </span>
-        ) : (
-          <>
-            {typeof action.result.total === "number" && (
-              <span style={styles.badge}>{action.result.total} 条</span>
-            )}
-            {(action.result.task_id ||
-              action.result.id ||
-              action.result.job_id) && (
-              <>
-                <span style={styles.badge}>
-                  🚀 ID:{" "}
-                  {String(
-                    action.result.task_id ||
-                      action.result.id ||
-                      action.result.job_id,
-                  )}
-                </span>
-                <button
-                  onClick={() => {
-                    const nav = (window as any).onAgentNavigate;
-                    if (nav) nav("monitoring");
-                  }}
-                  style={styles.actionBtn}
-                >
-                  前往监控面板 <ExternalLink size={10} />
-                </button>
-              </>
-            )}
-            {/* Fallback for other results */}
-            {!action.result.task_id && !action.result.error && (
-              <span style={{ color: toolInfo.color }}>操作成功</span>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-const styles = {
-  badge: {
-    padding: "2px 8px",
-    borderRadius: 12,
-    backgroundColor: "rgba(99, 102, 241, 0.1)",
-    color: "#4f46e5",
-    fontSize: 11,
-    fontWeight: 500 as const,
-  },
-  actionBtn: {
-    display: "flex",
-    alignItems: "center",
-    gap: 4,
-    padding: "2px 8px",
-    borderRadius: 12,
-    backgroundColor: "#6366f1",
-    color: "white",
-    fontSize: 11,
-    fontWeight: 500 as const,
-    border: "none",
-    cursor: "pointer",
-  },
-};
+import { API_BASE_URL } from "./api/config";
+import {
+  ChatMessage,
+  ChatLoadingIndicator,
+  ChatSessionList,
+  ChatInput,
+} from "./components/agent";
+import type {
+  ChatMessageData,
+  ChatSession,
+  ChatMode,
+  ActionResult,
+} from "./components/agent";
 
 // ── persistence ─────────────────────────────────────
 
@@ -197,7 +40,7 @@ const WELCOME_MESSAGES: Record<ChatMode, string> = {
     "• 「如何写文献综述的理论框架」",
 };
 
-function makeWelcomeMsg(mode: ChatMode): ChatMessage {
+function makeWelcomeMsg(mode: ChatMode): ChatMessageData {
   return {
     id: "welcome",
     role: "assistant",
@@ -220,12 +63,10 @@ function loadSessions(): ChatSession[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      // Return a default new session
       return [createNewSession("agent")];
     }
     const parsed = JSON.parse(raw);
 
-    // Legacy migration: If it's an array of messages (old format)
     if (
       Array.isArray(parsed) &&
       parsed.length > 0 &&
@@ -244,8 +85,6 @@ function loadSessions(): ChatSession[] {
       return [migratedSession];
     }
 
-    // Legacy migration from old flat history logic to session
-    // Just in case we also have 'agent_chat_history' around
     const oldHistoryRaw = localStorage.getItem("agent_chat_history");
     let legacySessions: ChatSession[] = [];
     if (oldHistoryRaw && (!Array.isArray(parsed) || parsed.length === 0)) {
@@ -265,7 +104,7 @@ function loadSessions(): ChatSession[] {
           messages: oldHistory,
         };
         legacySessions.push(migratedSession);
-        localStorage.removeItem("agent_chat_history"); // delete old
+        localStorage.removeItem("agent_chat_history");
       }
     }
 
@@ -287,7 +126,7 @@ function saveSessions(sessions: ChatSession[]) {
   }
 }
 
-// ── API 调用 ────────────────────────────────────────
+// ── API ────────────────────────────────────────
 
 async function callAgent(
   message: string,
@@ -295,7 +134,7 @@ async function callAgent(
   mode: ChatMode = "agent",
 ): Promise<{ reply: string; action: ActionResult | null }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 300_000); // 5 min for multi-step agent
+  const timeout = setTimeout(() => controller.abort(), 300_000);
 
   try {
     const resp = await fetch(`${API_BASE_URL}/api/agent/chat`, {
@@ -316,7 +155,7 @@ async function callAgent(
   }
 }
 
-// ── 主面板组件 ──────────────────────────────────────
+// ── Main Panel Component ──────────────────────────────
 
 interface AgentChatPanelProps {
   isOpen: boolean;
@@ -394,14 +233,13 @@ export default function AgentChatPanel({
         try {
           const data = JSON.parse(event.data);
           if (data.type === "proactive_notification") {
-            const proactiveMsg: ChatMessage = {
+            const proactiveMsg: ChatMessageData = {
               id: `proactive-${data.task_id}-${Date.now()}`,
               role: data.role || "assistant",
               content: data.content,
               timestamp: data.timestamp || new Date().toISOString(),
             };
 
-            // Append the message to the active session
             setSessions((prevSessions) => {
               const targetIdx = prevSessions.findIndex(
                 (s) => s.id === activeSessionId,
@@ -437,7 +275,7 @@ export default function AgentChatPanel({
     };
   }, [activeSessionId]);
 
-  // ── Session 管理 ─────────────────────────────────
+  // ── Session management ─────────────────────────────
 
   const handleNewChat = () => {
     const newSession = createNewSession("agent");
@@ -473,13 +311,13 @@ export default function AgentChatPanel({
     });
   };
 
-  // ── 发送消息 ──────────────────────────────────────
+  // ── Send message ──────────────────────────────────
 
   const sendMessage = useCallback(
-    async (text: string, historyOverride?: ChatMessage[]) => {
+    async (text: string, historyOverride?: ChatMessageData[]) => {
       if (!text.trim() || loading) return;
 
-      const userMsg: ChatMessage = {
+      const userMsg: ChatMessageData = {
         id: `user-${Date.now()}`,
         role: "user",
         content: text.trim(),
@@ -490,7 +328,6 @@ export default function AgentChatPanel({
       const updatedMessages = [...base, userMsg];
 
       let newTitle = activeSession.title;
-      // Auto name if it's the first real user message
       if (newTitle === "新对话" && base.length <= 1) {
         newTitle = text.length > 15 ? text.slice(0, 15) + "..." : text;
       }
@@ -512,7 +349,7 @@ export default function AgentChatPanel({
 
         const data = await callAgent(text.trim(), historyData, mode);
 
-        const aiMsg: ChatMessage = {
+        const aiMsg: ChatMessageData = {
           id: `ai-${Date.now()}`,
           role: "assistant",
           content: data.reply || "(空回复)",
@@ -530,7 +367,7 @@ export default function AgentChatPanel({
           (err as Error).name === "AbortError"
             ? "请求超时（5分钟），请检查后端日志"
             : (err as Error).message;
-        const errorMsg: ChatMessage = {
+        const errorMsg: ChatMessageData = {
           id: `err-${Date.now()}`,
           role: "assistant",
           content: `请求失败 😥：${errName}\n\n💡 提示：请检查后端是否正在运行（端口 5444）`,
@@ -545,14 +382,12 @@ export default function AgentChatPanel({
         setLoading(false);
       }
     },
-    [loading, messages, activeSession.title, activeSessionId, mode], // activeSessionId used over activeSession.id
+    [loading, messages, activeSession.title, activeSessionId, mode],
   );
-
-  // ── 重新生成最后一条 AI 回复 ──────────────────────
 
   const regenerate = useCallback(() => {
     const lastUserIdx = messages.findLastIndex(
-      (m: ChatMessage) => m.role === "user",
+      (m: ChatMessageData) => m.role === "user",
     );
     if (lastUserIdx < 0) return;
 
@@ -563,9 +398,7 @@ export default function AgentChatPanel({
     sendMessage(lastUserMsg.content, truncated);
   }, [messages, sendMessage]);
 
-  // ── 编辑用户消息 ─────────────────────────────────
-
-  const startEdit = (msg: ChatMessage) => {
+  const startEdit = (msg: ChatMessageData) => {
     setEditingId(msg.id);
     setEditText(msg.content);
   };
@@ -583,8 +416,6 @@ export default function AgentChatPanel({
     },
     [messages, editText, sendMessage],
   );
-
-  // ── 删除及模式切换 ────────────────────────────────
 
   const deleteMessage = (msgId: string) => {
     updateActiveSession((s) => ({
@@ -623,45 +454,18 @@ export default function AgentChatPanel({
 
   return (
     <div className="agent-panel" style={{ width: sidebarOpen ? 630 : 380 }}>
-      {/* 侧边栏: Chat History (Antigravity Style) */}
+      {/* Sidebar */}
       {sidebarOpen && (
-        <div className="agent-sidebar">
-          <div className="agent-sidebar-header">历史对话</div>
-
-          <button className="agent-new-chat-btn" onClick={handleNewChat}>
-            <Plus size={16} /> 新建对话
-          </button>
-
-          <div className="agent-session-list">
-            {sessions.map((sess) => (
-              <div
-                key={sess.id}
-                className={`agent-session-item ${sess.id === activeSessionId ? "active" : ""}`}
-                onClick={() => setActiveSessionId(sess.id)}
-              >
-                <MessageCircle
-                  size={14}
-                  style={{
-                    color: "var(--text-secondary)",
-                    marginRight: 8,
-                    flexShrink: 0,
-                  }}
-                />
-                <span className="agent-session-title">{sess.title}</span>
-                <button
-                  className="agent-session-delete"
-                  onClick={(e) => handleDeleteSession(e, sess.id)}
-                  title="删除对话"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
+        <ChatSessionList
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelectSession={setActiveSessionId}
+          onNewChat={handleNewChat}
+          onDeleteSession={handleDeleteSession}
+        />
       )}
 
-      {/* 主聊天区 */}
+      {/* Main chat area */}
       <div className="agent-chat-main">
         {/* Header */}
         <div className="agent-header">
@@ -705,158 +509,46 @@ export default function AgentChatPanel({
           </div>
         </div>
 
-        {/* Mode Switcher */}
-        <div className="agent-mode-switcher">
-          <button
-            className={`agent-mode-btn ${mode === "ask" ? "active" : ""}`}
-            onClick={() => switchMode("ask")}
-          >
-            <Sparkles size={13} />
-            Ask
-          </button>
-          <button
-            className={`agent-mode-btn ${mode === "agent" ? "active" : ""}`}
-            onClick={() => switchMode("agent")}
-          >
-            <Zap size={13} />
-            Agent
-          </button>
-        </div>
-
         {/* Messages */}
         <div className="agent-messages">
           {messages.map((msg) => (
-            <div key={msg.id} className={`agent-msg ${msg.role}`}>
-              <div className="agent-msg-avatar">
-                {msg.role === "user" ? <User size={14} /> : <Bot size={14} />}
-              </div>
-              <div className="agent-msg-body">
-                {/* Action Card */}
-                {msg.action && msg.action.tool !== "general_chat" && (
-                  <ActionCard action={msg.action} />
-                )}
-
-                {/* Text or Edit Mode */}
-                {editingId === msg.id ? (
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
-                  >
-                    <textarea
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                      className="agent-input"
-                      rows={3}
-                      autoFocus
-                      style={{ minHeight: 60 }}
-                    />
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        onClick={() => confirmEdit(msg.id)}
-                        className="agent-action-btn"
-                        style={{ background: "#3b82f6", color: "white" }}
-                      >
-                        <Check size={12} /> 发送
-                      </button>
-                      <button
-                        onClick={() => setEditingId(null)}
-                        className="agent-action-btn"
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="agent-msg-text">
-                    {msg.content.split("\n").map((line, i) => (
-                      <span key={i}>
-                        {line}
-                        {i < msg.content.split("\n").length - 1 && <br />}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Action Bar (Hover) */}
-                {msg.id !== "welcome" && editingId !== msg.id && (
-                  <div className="agent-msg-actions">
-                    {msg.role === "user" && (
-                      <button
-                        onClick={() => startEdit(msg)}
-                        className="agent-action-btn"
-                        title="编辑"
-                      >
-                        <Pencil size={11} />
-                      </button>
-                    )}
-                    {msg.role === "assistant" && msg.id !== "welcome" && (
-                      <button
-                        onClick={regenerate}
-                        className="agent-action-btn"
-                        title="重新生成"
-                        disabled={loading}
-                      >
-                        <RefreshCw size={11} />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => deleteMessage(msg.id)}
-                      className="agent-action-btn"
-                      title="删除"
-                    >
-                      <Trash2 size={11} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+            <ChatMessage
+              key={msg.id}
+              msg={msg}
+              editingId={editingId}
+              editText={editText}
+              setEditText={setEditText}
+              onStartEdit={startEdit}
+              onConfirmEdit={confirmEdit}
+              onCancelEdit={() => setEditingId(null)}
+              onRegenerate={regenerate}
+              onDelete={deleteMessage}
+              loading={loading}
+            />
           ))}
 
-          {/* Loading indicator */}
-          {loading && (
-            <div className="agent-msg assistant">
-              <div className="agent-msg-avatar">
-                <Bot size={14} />
-              </div>
-              <div className="agent-msg-body">
-                <div className="agent-thinking">
-                  <Loader size={14} className="agent-spinner" />
-                  <span>思考中...</span>
-                </div>
-              </div>
-            </div>
-          )}
+          {loading && <ChatLoadingIndicator />}
 
           <div ref={messagesEndRef} />
         </div>
 
         {/* Input */}
-        <div className="agent-input-area">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              mode === "ask" ? "问我任何学术问题..." : "输入你的指令..."
-            }
-            rows={1}
-            className="agent-input"
-            disabled={loading}
-          />
-          <button
-            onClick={() => sendMessage(input)}
-            disabled={!input.trim() || loading}
-            className="agent-send-btn"
-          >
-            <Send size={16} />
-          </button>
-        </div>
+        <ChatInput
+          ref={inputRef}
+          input={input}
+          setInput={setInput}
+          loading={loading}
+          mode={mode}
+          onSend={() => sendMessage(input)}
+          onSwitchMode={switchMode}
+          onKeyDown={handleKeyDown}
+        />
       </div>
     </div>
   );
 }
 
-// ── 触发按钮 ────────────────────────────────────────
+// ── Toggle Button ────────────────────────────────────
 
 export function AgentToggleButton({
   isOpen,

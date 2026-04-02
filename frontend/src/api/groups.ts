@@ -1,6 +1,5 @@
-import type { Paper, LiteratureGroup } from '../types';
-
-const API_BASE_URL = 'http://localhost:5444/api';
+import { API_BASE_URL } from "./config";
+import type { Paper, LiteratureGroup } from "../types";
 
 export type PaperGroup = LiteratureGroup;
 
@@ -19,9 +18,11 @@ export interface UpdateGroupRequest {
   description?: string;
 }
 
+const API = `${API_BASE_URL}/api`;
+
 export const groupsApi = {
   async getGroups(skip: number = 0, limit: number = 100): Promise<PaperGroupListResponse> {
-    const response = await fetch(`${API_BASE_URL}/groups/?skip=${skip}&limit=${limit}`);
+    const response = await fetch(`${API}/groups/?skip=${skip}&limit=${limit}`);
     if (!response.ok) {
       throw new Error('Failed to fetch groups');
     }
@@ -29,7 +30,7 @@ export const groupsApi = {
   },
 
   async createGroup(data: CreateGroupRequest): Promise<PaperGroup> {
-    const response = await fetch(`${API_BASE_URL}/groups/`, {
+    const response = await fetch(`${API}/groups/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -43,7 +44,7 @@ export const groupsApi = {
   },
 
   async updateGroup(id: number, data: UpdateGroupRequest): Promise<PaperGroup> {
-    const response = await fetch(`${API_BASE_URL}/groups/${id}`, {
+    const response = await fetch(`${API}/groups/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -57,7 +58,7 @@ export const groupsApi = {
   },
 
   async deleteGroup(id: number): Promise<boolean> {
-    const response = await fetch(`${API_BASE_URL}/groups/${id}`, {
+    const response = await fetch(`${API}/groups/${id}`, {
       method: 'DELETE',
     });
     if (!response.ok) {
@@ -67,7 +68,7 @@ export const groupsApi = {
   },
 
   async addPapersToGroup(groupId: number, paperIds: number[]): Promise<number> {
-    const response = await fetch(`${API_BASE_URL}/groups/${groupId}/papers`, {
+    const response = await fetch(`${API}/groups/${groupId}/papers`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -81,7 +82,7 @@ export const groupsApi = {
   },
 
   async removePapersFromGroup(groupId: number, paperIds: number[]): Promise<number> {
-    const response = await fetch(`${API_BASE_URL}/groups/${groupId}/papers`, {
+    const response = await fetch(`${API}/groups/${groupId}/papers`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
@@ -95,7 +96,7 @@ export const groupsApi = {
   },
 
   async getGroupPapers(groupId: number, skip: number = 0, limit: number = 100): Promise<Paper[]> {
-    const response = await fetch(`${API_BASE_URL}/groups/${groupId}/papers?skip=${skip}&limit=${limit}`);
+    const response = await fetch(`${API}/groups/${groupId}/papers?skip=${skip}&limit=${limit}`);
     if (!response.ok) {
       throw new Error('Failed to fetch group papers');
     }
