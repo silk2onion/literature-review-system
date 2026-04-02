@@ -70,7 +70,7 @@ export default function UsageCleanup({
             style={{ ...filterStyles.input, width: 60, textAlign: "center" }}
           />
           <span
-            style={{ color: "#64748b", fontSize: 12, whiteSpace: "nowrap" }}
+            style={{ color: "#8E8E93", fontSize: 12, whiteSpace: "nowrap" }}
           >
             天前
           </span>
@@ -109,9 +109,9 @@ const filterStyles: Record<string, React.CSSProperties> = {
   select: {
     padding: "7px 12px",
     borderRadius: 8,
-    border: "1px solid rgba(148, 163, 184, 0.2)",
-    backgroundColor: "rgba(30, 41, 59, 0.8)",
-    color: "#cbd5e1",
+    border: "1px solid #D1D1D6",
+    backgroundColor: "#F5F5F7",
+    color: "#1C1C1E",
     fontSize: 13,
     outline: "none",
     cursor: "pointer",
@@ -119,9 +119,9 @@ const filterStyles: Record<string, React.CSSProperties> = {
   input: {
     padding: "7px 12px",
     borderRadius: 8,
-    border: "1px solid rgba(148, 163, 184, 0.2)",
-    backgroundColor: "rgba(30, 41, 59, 0.8)",
-    color: "#cbd5e1",
+    border: "1px solid #D1D1D6",
+    backgroundColor: "#F5F5F7",
+    color: "#1C1C1E",
     fontSize: 13,
     outline: "none",
     width: 180,
@@ -132,9 +132,9 @@ const filterStyles: Record<string, React.CSSProperties> = {
     gap: 4,
     padding: "7px 12px",
     borderRadius: 8,
-    border: "1px solid rgba(244, 63, 94, 0.3)",
-    backgroundColor: "rgba(244, 63, 94, 0.08)",
-    color: "#f43f5e",
+    border: "1px solid rgba(239, 68, 68, 0.2)",
+    backgroundColor: "rgba(239, 68, 68, 0.04)",
+    color: "#dc2626",
     fontSize: 12,
     fontWeight: 600,
     cursor: "pointer",
