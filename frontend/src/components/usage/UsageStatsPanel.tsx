@@ -29,18 +29,18 @@ export const typeColors: Record<
   { bg: string; text: string; icon: React.ReactNode }
 > = {
   llm: {
-    bg: "rgba(168, 85, 247, 0.15)",
-    text: "#c084fc",
+    bg: "rgba(168, 85, 247, 0.08)",
+    text: "#7c3aed",
     icon: <Brain size={12} />,
   },
   embedding: {
-    bg: "rgba(59, 130, 246, 0.15)",
-    text: "#60a5fa",
+    bg: "rgba(59, 130, 246, 0.08)",
+    text: "#2563eb",
     icon: <Database size={12} />,
   },
   crawler: {
-    bg: "rgba(34, 197, 94, 0.15)",
-    text: "#4ade80",
+    bg: "rgba(34, 197, 94, 0.08)",
+    text: "#16a34a",
     icon: <Globe size={12} />,
   },
 };
@@ -70,7 +70,7 @@ export function formatTime(iso: string | null): string {
 }
 
 export function getDurationColor(ms: number | null): string {
-  if (ms == null) return "#64748b";
+  if (ms == null) return "#8E8E93";
   if (ms < 1000) return "#10b981";
   if (ms < 5000) return "#f59e0b";
   return "#f43f5e";
@@ -105,14 +105,14 @@ function StatCard({
           {icon}
         </div>
         <div>
-          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 2 }}>
+          <div style={{ fontSize: 11, color: "#8E8E93", marginBottom: 2 }}>
             {label}
           </div>
           <div
             style={{
               fontSize: 18,
               fontWeight: 700,
-              color: "#e2e8f0",
+              color: "#1C1C1E",
               fontFamily: "monospace",
             }}
           >
@@ -197,9 +197,10 @@ const panelStyles: Record<string, React.CSSProperties> = {
     marginBottom: 20,
   },
   statCard: {
-    backgroundColor: "rgba(30, 41, 59, 0.6)",
+    backgroundColor: "#FFFFFF",
     borderRadius: 10,
     padding: "14px 16px",
-    border: "1px solid rgba(148, 163, 184, 0.08)",
+    border: "1px solid #E5E5EA",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
   },
 };

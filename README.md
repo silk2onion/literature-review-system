@@ -44,7 +44,7 @@ ScholarNative 是一个全栈学术辅助系统，覆盖从文献采集到综述
 
 ### 📚 多源文献采集
 
-- **5 大学术数据源**：Arxiv、Google Scholar (SerpAPI)、Scopus、CrossRef、Semantic Scholar
+- **6 大学术数据源**：Arxiv、Google Scholar (SerpAPI)、Scopus、CrossRef、Semantic Scholar、OpenAlex
 - **两阶段入库**：爬取结果先进暂存库 (StagingPaper)，人工审核后提升至正式库 (Paper)
 - **批量任务管理**：支持分页抓取、暂停/恢复/重试、实时日志
 
@@ -77,23 +77,24 @@ ScholarNative 是一个全栈学术辅助系统，覆盖从文献采集到综述
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Frontend                              │
-│  React 18 + TypeScript + Vite                                │
-│  10 个功能页面 + Agent Chat 侧边栏                            │
+│                     Frontend (React 19)                       │
+│  TypeScript 5.9 + Vite 7 (Rolldown)                          │
+│  12 页面 (src/pages/) + 60+ 子组件 (src/components/)         │
+│  统一 API 层 (src/api/) + 共享 Hooks + 类型系统              │
 │  Port: 5173 (dev) / 80 (nginx)                               │
 ├─────────────────────────────────────────────────────────────┤
-│                        Backend                               │
-│  FastAPI + SQLAlchemy + SQLite                               │
+│                     Backend (FastAPI)                         │
+│  Python 3.11 + SQLAlchemy 2 + Pydantic 2 + Uvicorn          │
 │  Port: 5444                                                  │
 │                                                              │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐           │
-│  │ 12 API   │  │ Services │  │ LLM Integration  │           │
-│  │ Routers  │  │ Layer    │  │ (OpenAI Compat.) │           │
+│  │ 13 API   │  │ Services │  │ LLM Integration  │           │
+│  │ Routers  │  │ (39 files)│  │ (OpenAI Compat.) │           │
 │  └──────────┘  └──────────┘  └──────────────────┘           │
 │                                                              │
 │  ┌──────────────────────────────────────────────┐            │
-│  │ Crawler Layer (5 sources)                     │            │
-│  │ arxiv / scholar_serpapi / scopus /             │            │
+│  │ Crawler Layer (6 sources)                     │            │
+│  │ arxiv / scholar_serpapi / scopus / openalex /  │            │
 │  │ crossref / semantic_scholar                   │            │
 │  └──────────────────────────────────────────────┘            │
 │                                                              │
@@ -102,8 +103,8 @@ ScholarNative 是一个全栈学术辅助系统，覆盖从文献采集到综述
 │  │ citation_anchoring.py + reference_formatter   │            │
 │  └──────────────────────────────────────────────┘            │
 ├─────────────────────────────────────────────────────────────┤
-│  SQLite Database                                             │
-│  15 tables / 11 core models                                  │
+│  SQLite + Alembic Migrations                                 │
+│  18 tables / 12 core models                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -172,13 +173,14 @@ CrawlJob 创建（可选多个数据源并行）
 
 **数据源能力**：
 
-| 数据源                   | 全文元数据 | 摘要 | 引用数 | PDF链接 |
-| ------------------------ | ---------- | ---- | ------ | ------- |
-| Arxiv                    | ✅         | ✅   | ❌     | ✅      |
-| Google Scholar (SerpAPI) | ✅         | ✅   | ✅     | 部分    |
-| Scopus                   | ✅         | ✅   | ✅     | ✅      |
-| CrossRef                 | ✅         | 部分 | ✅     | ❌      |
-| Semantic Scholar         | ✅         | ✅   | ✅     | 部分    |
+| 数据源                   | 全文元数据 | 摘要 | 引用数 | PDF链接 | 认证     |
+| ------------------------ | ---------- | ---- | ------ | ------- | -------- |
+| Arxiv                    | ✅         | ✅   | ❌     | ✅      | 无需     |
+| Google Scholar (SerpAPI) | ✅         | ✅   | ✅     | 部分    | API Key  |
+| Scopus                   | ✅         | ✅   | ✅     | ✅      | API Key  |
+| CrossRef                 | ✅         | 部分 | ✅     | ❌      | 无需     |
+| Semantic Scholar         | ✅         | ✅   | ✅     | 部分    | 无需     |
+| OpenAlex                 | ✅         | ✅   | ✅     | ❌      | 无需     |
 
 ### 2. 一键综述生成 (Orchestrate)
 
@@ -289,23 +291,45 @@ Step 4: 后处理器解析
 
 ---
 
-## 前端页面
+## 前端架构
 
-系统包含 **10 个功能页面** + 1 个侧边栏 Agent Chat：
+### 模块化组件体系
 
-| 页面       | 组件文件                                            | 功能                                            |
-| ---------- | --------------------------------------------------- | ----------------------------------------------- |
-| 文献检索   | `CrawlerSearchPage.tsx`                             | 关键词输入 → 多源爬取 → 任务管理                |
-| 文献库     | `LibraryPage.tsx`                                   | 正式库浏览、筛选、排序、PDF管理、引文分析、分组 |
-| 暂存库     | `StagingPapersPage.tsx`                             | 暂存文献审核：提升/拒绝/删除                    |
-| 综述编排   | `ReviewOrchestratePage.tsx`                         | 一键综述入口（主题→框架→全文）                  |
-| 综述书架   | `ReviewListPage.tsx`                                | 已生成综述列表、导出                            |
-| 从库生成   | `ReviewGenerateFromLibraryPage.tsx`                 | 从已有文献库选文 → 生成综述                     |
-| PhD 管线   | `PhdPipelinePage.tsx`                               | 6步管线交互界面                                 |
-| RAG 调试   | `RagDebugPage.tsx` + `SemanticSearchDebugPanel.tsx` | 语义检索可视化调试                              |
-| 任务监控   | `MonitoringDashboard.tsx`                           | PhD任务 + 爬虫任务实时状态                      |
-| 设置       | `SettingsModal.tsx`                                 | API配置、模型选择、数据源设置                   |
-| Agent Chat | `AgentChatPanel.tsx`                                | 侧边栏 AI 助手对话                              |
+前端采用模块化架构，12 个页面拆分为 60+ 个可复用子组件：
+
+```
+frontend/src/
+├── pages/              # 12 个页面文件
+├── components/         # 8 个组件子目录
+│   ├── settings/       # 9 个设置子组件
+│   ├── library/        # 8 个文献库子组件
+│   ├── review/         # 8 个综述子组件
+│   ├── phd/            # 10 个 PhD 管线子组件
+│   ├── staging/        # 5 个暂存库子组件
+│   ├── crawler/        # 3 个爬虫子组件
+│   ├── usage/          # 3 个监控子组件
+│   └── agent/          # 4 个聊天子组件
+├── api/                # 12 个 API 模块 (统一调用层)
+├── hooks/              # 共享 Hooks (防抖/竞态/分页)
+└── types/              # 6 个领域类型文件
+```
+
+### 页面一览
+
+| 页面       | 路径                                    | 功能                                            |
+| ---------- | --------------------------------------- | ----------------------------------------------- |
+| 文献检索   | `pages/CrawlerSearchPage.tsx`           | 关键词输入 → 多源爬取 → 任务管理                |
+| 文献库     | `pages/LibraryPage.tsx`                 | 正式库浏览、筛选、排序、PDF管理、引文分析、分组 |
+| 暂存库     | `pages/StagingPapersPage.tsx`           | 暂存文献审核：提升/拒绝/删除、PRISMA 筛选      |
+| 综述编排   | `pages/ReviewOrchestratePage.tsx`       | 一键综述入口（主题→框架→全文）                  |
+| 综述书架   | `pages/ReviewListPage.tsx`              | 已生成综述列表、校验、导出                      |
+| 从库生成   | `pages/ReviewGenerateFromLibraryPage.tsx` | 从已有文献库选文 → 生成综述                   |
+| PhD 管线   | `pages/PhdPipelinePage.tsx`             | 6步管线交互界面                                 |
+| PRISMA 筛选| `pages/PrismaFlowPage.tsx`              | PRISMA 流程统计与可视化                         |
+| RAG 调试   | `pages/RagDebugPage.tsx`                | 语义检索可视化调试                              |
+| 任务监控   | `pages/MonitoringDashboard.tsx`         | PhD任务 + 爬虫任务实时状态                      |
+| API 监控   | `pages/ApiUsagePage.tsx`                | LLM/Embedding/爬虫 API 调用日志与统计           |
+| 设置       | `pages/SettingsModal.tsx`               | API配置、模型选择、数据源设置 (9 个子面板)      |
 
 ---
 
@@ -364,7 +388,7 @@ docker-compose -f deployment/docker-compose.yml up -d
 
 ### ✅ 已完成
 
-- [x] 多源爬虫采集（5 个数据源）+ 两阶段入库
+- [x] 多源爬虫采集（6 个数据源 + OpenAlex）+ 两阶段入库
 - [x] 语义检索 RAG（Embedding + 余弦相似度 + 标签增强）
 - [x] 一键综述生成（Orchestrate 管线 + 框架 → 逐章生成）
 - [x] `[[REF_x]]` 确定性引用锚定系统
@@ -372,14 +396,19 @@ docker-compose -f deployment/docker-compose.yml up -d
 - [x] 5 种引用格式（Harvard / APA / IEEE / Chicago / Vancouver）
 - [x] 引文图谱 + 期刊信息增强
 - [x] AI Agent Chat 助手
-- [x] 前端 10 个功能页面
+- [x] 前端模块化重构（12 页面 + 60+ 子组件 + 统一 API 层 + 类型系统）
 - [x] Abstract / Conclusion 自动生成（LLM 驱动，管线集成 + 独立 API）
 - [x] 综述导出为 DOCX 格式（`python-docx` 学术排版：Times New Roman、1.5 倍行距、标题层级）
 - [x] 论点-证据结构化存储（`analysis_json.claims_evidence` 中保存 claim → supporting_papers 映射）
 - [x] 引用校验工具（7 项自动检测：未解析占位符、未引用文献、括号不匹配、孤立映射、重复引用等）
 - [x] 文本片段级 RAG（PDF 分段 Embedding + 带页码引用 `[[REF_x:pN]]`，双层 RAG：chunk-first → paper-fallback）
-- [x] Citation Anchoring 增强（章节级 RAG 独立召回 → LLM 仅在召回范围内写作，`search_chunks_for_section()` + `ChunkSnippet`）
-- [x] 综述导出为 PDF 格式（`xhtml2pdf` 学术排版：A4、Times New Roman、页码、1.6 倍行距、参考文献悬挂缩进）
+- [x] Citation Anchoring 增强（章节级 RAG 独立召回 → LLM 仅在召回范围内写作）
+- [x] 综述导出为 PDF 格式（`xhtml2pdf` 学术排版：A4、页码、1.6 倍行距、参考文献悬挂缩进）
+- [x] Alembic 数据库迁移管理
+- [x] 爬虫完成原因追踪（区分穷尽/达上限/错误零结果）
+- [x] 前端竞态保护（AbortController）+ useEffect 依赖修复
+- [x] 浅色 Mac 风格 UI 统一（全页面主题一致性）
+- [x] 局域网自适应访问（API_BASE_URL 动态适配）
 
 ---
 

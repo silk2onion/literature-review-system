@@ -88,8 +88,8 @@ function StatusBadge({
           borderRadius: 6,
           fontSize: 11,
           fontWeight: 600,
-          backgroundColor: "rgba(16, 185, 129, 0.15)",
-          color: "#10b981",
+          backgroundColor: "rgba(22, 163, 106, 0.08)",
+          color: "#16a34a",
         }}
       >
         <CheckCircle2 size={12} />
@@ -107,8 +107,8 @@ function StatusBadge({
         borderRadius: 6,
         fontSize: 11,
         fontWeight: 600,
-        backgroundColor: "rgba(244, 63, 94, 0.15)",
-        color: "#f43f5e",
+        backgroundColor: "rgba(220, 38, 38, 0.08)",
+        color: "#dc2626",
       }}
     >
       <XCircle size={12} />
@@ -128,10 +128,10 @@ function DetailItem({
 }) {
   return (
     <div style={{ marginBottom: 4 }}>
-      <span style={{ color: "#64748b", fontSize: 11 }}>{label}: </span>
+      <span style={{ color: "#8E8E93", fontSize: 11 }}>{label}: </span>
       <span
         style={{
-          color: "#cbd5e1",
+          color: "#3C3C43",
           fontSize: 12,
           fontFamily: mono ? "monospace" : "inherit",
           wordBreak: "break-all",
@@ -194,7 +194,7 @@ export default function UsageLogTable({
                     ...tableStyles.td,
                     textAlign: "center",
                     padding: 40,
-                    color: "#64748b",
+                    color: "#8E8E93",
                   }}
                 >
                   <Loader2
@@ -213,7 +213,7 @@ export default function UsageLogTable({
                     ...tableStyles.td,
                     textAlign: "center",
                     padding: 40,
-                    color: "#64748b",
+                    color: "#8E8E93",
                   }}
                 >
                   暂无日志记录
@@ -227,7 +227,7 @@ export default function UsageLogTable({
                       ...tableStyles.tr,
                       backgroundColor:
                         expandedId === log.id
-                          ? "rgba(99, 102, 241, 0.06)"
+                          ? "#F5F5F7"
                           : undefined,
                       cursor: "pointer",
                     }}
@@ -237,9 +237,9 @@ export default function UsageLogTable({
                   >
                     <td style={tableStyles.td}>
                       {expandedId === log.id ? (
-                        <ChevronDown size={14} color="#64748b" />
+                        <ChevronDown size={14} color="#8E8E93" />
                       ) : (
-                        <ChevronRight size={14} color="#64748b" />
+                        <ChevronRight size={14} color="#8E8E93" />
                       )}
                     </td>
                     <td
@@ -258,7 +258,7 @@ export default function UsageLogTable({
                     <td
                       style={{
                         ...tableStyles.td,
-                        color: "#cbd5e1",
+                        color: "#1C1C1E",
                         fontWeight: 500,
                       }}
                     >
@@ -267,7 +267,7 @@ export default function UsageLogTable({
                     <td
                       style={{
                         ...tableStyles.td,
-                        color: "#94a3b8",
+                        color: "#8E8E93",
                         fontSize: 12,
                         maxWidth: 180,
                         overflow: "hidden",
@@ -298,7 +298,7 @@ export default function UsageLogTable({
                         ...tableStyles.td,
                         fontFamily: "monospace",
                         fontSize: 12,
-                        color: "#94a3b8",
+                        color: "#8E8E93",
                       }}
                     >
                       {log.tokens_in != null
@@ -310,7 +310,7 @@ export default function UsageLogTable({
                         ...tableStyles.td,
                         fontFamily: "monospace",
                         fontSize: 12,
-                        color: "#94a3b8",
+                        color: "#8E8E93",
                       }}
                     >
                       {log.tokens_out != null
@@ -320,7 +320,7 @@ export default function UsageLogTable({
                     <td
                       style={{
                         ...tableStyles.td,
-                        color: "#64748b",
+                        color: "#8E8E93",
                         fontSize: 11,
                         maxWidth: 200,
                         overflow: "hidden",
@@ -369,7 +369,7 @@ export default function UsageLogTable({
                           />
                           {log.error && (
                             <div style={tableStyles.errorBox}>
-                              <strong style={{ color: "#fca5a5" }}>
+                              <strong style={{ color: "#dc2626" }}>
                                 Error:{" "}
                               </strong>
                               {log.error}
@@ -380,7 +380,7 @@ export default function UsageLogTable({
                               <div style={tableStyles.metadataBox}>
                                 <strong
                                   style={{
-                                    color: "#94a3b8",
+                                    color: "#8E8E93",
                                     marginBottom: 4,
                                     display: "block",
                                   }}
@@ -406,7 +406,7 @@ export default function UsageLogTable({
       {/* Pagination */}
       {totalPages > 1 && (
         <div style={tableStyles.pagination}>
-          <span style={{ color: "#64748b", fontSize: 13 }}>
+          <span style={{ color: "#8E8E93", fontSize: 13 }}>
             共 {total} 条 · 第 {page}/{totalPages} 页
           </span>
           <div style={{ display: "flex", gap: 6 }}>
@@ -436,8 +436,8 @@ const tableStyles: Record<string, React.CSSProperties> = {
     flex: 1,
     overflow: "auto",
     borderRadius: 12,
-    border: "1px solid rgba(148, 163, 184, 0.1)",
-    backgroundColor: "rgba(15, 23, 42, 0.5)",
+    border: "1px solid #E5E5EA",
+    backgroundColor: "#FFFFFF",
   },
   table: {
     width: "100%",
@@ -447,18 +447,18 @@ const tableStyles: Record<string, React.CSSProperties> = {
   th: {
     textAlign: "left" as const,
     padding: "10px 12px",
-    color: "#64748b",
+    color: "#8E8E93",
     fontSize: 11,
     fontWeight: 600,
     textTransform: "uppercase" as const,
-    borderBottom: "1px solid rgba(148, 163, 184, 0.1)",
+    borderBottom: "1px solid #E5E5EA",
     position: "sticky" as const,
     top: 0,
-    backgroundColor: "rgba(15, 23, 42, 0.95)",
+    backgroundColor: "#F5F5F7",
     whiteSpace: "nowrap" as const,
   },
   tr: {
-    borderBottom: "1px solid rgba(148, 163, 184, 0.05)",
+    borderBottom: "1px solid #E5E5EA",
     transition: "background-color 0.15s",
   },
   td: {
@@ -467,35 +467,35 @@ const tableStyles: Record<string, React.CSSProperties> = {
   },
   expandedCell: {
     padding: "0 12px 12px 36px",
-    backgroundColor: "rgba(99, 102, 241, 0.03)",
+    backgroundColor: "#F9FAFB",
   },
   detailGrid: {
     padding: "12px 16px",
-    backgroundColor: "rgba(30, 41, 59, 0.5)",
+    backgroundColor: "#F5F5F7",
     borderRadius: 8,
-    border: "1px solid rgba(148, 163, 184, 0.08)",
+    border: "1px solid #E5E5EA",
   },
   errorBox: {
     marginTop: 8,
     padding: "8px 12px",
-    backgroundColor: "rgba(244, 63, 94, 0.1)",
+    backgroundColor: "#FEF2F2",
     borderRadius: 6,
-    color: "#fca5a5",
+    color: "#dc2626",
     fontSize: 12,
-    border: "1px solid rgba(244, 63, 94, 0.2)",
+    border: "1px solid #FECACA",
     wordBreak: "break-all" as const,
   },
   metadataBox: {
     marginTop: 8,
     padding: "8px 12px",
-    backgroundColor: "rgba(30, 41, 59, 0.8)",
+    backgroundColor: "#F5F5F7",
     borderRadius: 6,
     fontSize: 12,
-    border: "1px solid rgba(148, 163, 184, 0.08)",
+    border: "1px solid #E5E5EA",
   },
   pre: {
     margin: 0,
-    color: "#94a3b8",
+    color: "#3C3C43",
     fontSize: 11,
     fontFamily: "monospace",
     whiteSpace: "pre-wrap" as const,
@@ -510,9 +510,9 @@ const tableStyles: Record<string, React.CSSProperties> = {
   pageBtn: {
     padding: "6px 14px",
     borderRadius: 6,
-    border: "1px solid rgba(148, 163, 184, 0.2)",
-    backgroundColor: "transparent",
-    color: "#94a3b8",
+    border: "1px solid #D1D1D6",
+    backgroundColor: "#FFFFFF",
+    color: "#3C3C43",
     fontSize: 13,
     cursor: "pointer",
   },
