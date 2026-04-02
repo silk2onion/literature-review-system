@@ -65,22 +65,23 @@ export default function ReviewsList({
           <h1
             style={{
               margin: "0 0 8px",
-              color: "#f8fafc",
-              fontSize: 30,
+              color: "#1C1C1E",
+              fontSize: 28,
+              fontWeight: 700,
             }}
           >
             文献综述库
           </h1>
-          <p style={{ margin: 0, color: "#94a3b8" }}>
+          <p style={{ margin: 0, color: "#8E8E93", fontSize: 14 }}>
             查看、导出、校验并管理已生成的综述结果。
           </p>
         </div>
         <div
           style={{
-            padding: "8px 12px",
+            padding: "6px 14px",
             borderRadius: 999,
-            background: "rgba(99,102,241,0.12)",
-            color: "#c4b5fd",
+            background: "rgba(99,102,241,0.08)",
+            color: "#6366f1",
             fontSize: 13,
             fontWeight: 600,
           }}
@@ -93,11 +94,11 @@ export default function ReviewsList({
         <div
           style={{
             padding: 40,
-            borderRadius: 16,
+            borderRadius: 14,
             textAlign: "center",
-            color: "#94a3b8",
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(148,163,184,0.12)",
+            color: "#8E8E93",
+            background: "#FFFFFF",
+            border: "1px solid #E5E5EA",
           }}
         >
           正在加载综述列表…
@@ -106,10 +107,10 @@ export default function ReviewsList({
         <div
           style={{
             padding: 24,
-            borderRadius: 16,
-            color: "#fecaca",
-            background: "rgba(239,68,68,0.08)",
-            border: "1px solid rgba(239,68,68,0.16)",
+            borderRadius: 14,
+            color: "#DC2626",
+            background: "#FEF2F2",
+            border: "1px solid #FECACA",
           }}
         >
           加载失败：{error}
@@ -118,11 +119,11 @@ export default function ReviewsList({
         <div
           style={{
             padding: 40,
-            borderRadius: 16,
+            borderRadius: 14,
             textAlign: "center",
-            color: "#94a3b8",
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(148,163,184,0.12)",
+            color: "#8E8E93",
+            background: "#FFFFFF",
+            border: "1px solid #E5E5EA",
           }}
         >
           <FileText size={28} style={{ marginBottom: 12 }} />
@@ -133,18 +134,27 @@ export default function ReviewsList({
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-            gap: 18,
+            gap: 16,
           }}
         >
           {reviews.map((review) => (
             <div
               key={review.id}
               style={{
-                background: "rgba(15,23,42,0.78)",
-                border: "1px solid rgba(148,163,184,0.14)",
-                borderRadius: 18,
+                background: "#FFFFFF",
+                border: "1px solid #E5E5EA",
+                borderRadius: 16,
                 padding: 20,
-                boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+                transition: "box-shadow 0.2s, transform 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.08)";
+                e.currentTarget.style.transform = "translateY(-1px)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
+                e.currentTarget.style.transform = "translateY(0)";
               }}
             >
               <div
@@ -160,9 +170,10 @@ export default function ReviewsList({
                   <h3
                     style={{
                       margin: "0 0 8px",
-                      color: "#f8fafc",
-                      fontSize: 20,
-                      lineHeight: 1.35,
+                      color: "#1C1C1E",
+                      fontSize: 17,
+                      fontWeight: 600,
+                      lineHeight: 1.4,
                     }}
                   >
                     {review.title}
@@ -172,7 +183,7 @@ export default function ReviewsList({
                       display: "flex",
                       gap: 12,
                       flexWrap: "wrap",
-                      color: "#94a3b8",
+                      color: "#8E8E93",
                       fontSize: 12,
                     }}
                   >
@@ -180,20 +191,20 @@ export default function ReviewsList({
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: 6,
+                        gap: 5,
                       }}
                     >
-                      <Calendar size={13} />
+                      <Calendar size={12} />
                       {new Date(review.created_at).toLocaleDateString()}
                     </span>
                     <span
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: 6,
+                        gap: 5,
                       }}
                     >
-                      <BookOpen size={13} />
+                      <BookOpen size={12} />
                       {review.paper_count} 篇文献
                     </span>
                   </div>
@@ -201,15 +212,30 @@ export default function ReviewsList({
 
                 <span
                   style={{
-                    padding: "4px 10px",
+                    padding: "3px 10px",
                     borderRadius: 999,
-                    background: "rgba(34,197,94,0.12)",
-                    color: "#86efac",
+                    background:
+                      review.status === "completed"
+                        ? "rgba(34,197,94,0.1)"
+                        : review.status === "failed"
+                          ? "rgba(239,68,68,0.1)"
+                          : "rgba(234,179,8,0.1)",
+                    color:
+                      review.status === "completed"
+                        ? "#16a34a"
+                        : review.status === "failed"
+                          ? "#dc2626"
+                          : "#ca8a04",
                     fontSize: 12,
+                    fontWeight: 500,
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {review.status}
+                  {review.status === "completed"
+                    ? "已完成"
+                    : review.status === "failed"
+                      ? "失败"
+                      : review.status}
                 </span>
               </div>
 
@@ -217,8 +243,8 @@ export default function ReviewsList({
                 <p
                   style={{
                     margin: "0 0 16px",
-                    color: "#cbd5e1",
-                    fontSize: 14,
+                    color: "#3C3C43",
+                    fontSize: 13,
                     lineHeight: 1.7,
                   }}
                 >
@@ -240,18 +266,27 @@ export default function ReviewsList({
                   onClick={() => onSelect(review)}
                   title="查看详情"
                   style={{
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(148,163,184,0.15)",
-                    background: "rgba(255,255,255,0.04)",
-                    color: "#e2e8f0",
+                    padding: "7px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #D1D1D6",
+                    background: "#FFFFFF",
+                    color: "#1C1C1E",
                     cursor: "pointer",
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: 8,
+                    gap: 6,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    transition: "background 0.15s",
                   }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.background = "#F5F5F7")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.background = "#FFFFFF")
+                  }
                 >
-                  <ExternalLink size={15} />
+                  <ExternalLink size={14} />
                   详情
                 </button>
 
@@ -276,18 +311,20 @@ export default function ReviewsList({
                   disabled={validating}
                   title="校验引用"
                   style={{
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(34,197,94,0.22)",
-                    background: "rgba(34,197,94,0.12)",
-                    color: "#bbf7d0",
+                    padding: "7px 14px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(34,197,94,0.25)",
+                    background: "rgba(34,197,94,0.06)",
+                    color: "#16a34a",
                     cursor: "pointer",
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: 8,
+                    gap: 6,
+                    fontSize: 13,
+                    fontWeight: 500,
                   }}
                 >
-                  <ShieldCheck size={15} />
+                  <ShieldCheck size={14} />
                   校验
                 </button>
 
@@ -295,18 +332,20 @@ export default function ReviewsList({
                   onClick={() => onDelete(review.id)}
                   title="删除"
                   style={{
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(239,68,68,0.18)",
-                    background: "rgba(239,68,68,0.08)",
-                    color: "#fca5a5",
+                    padding: "7px 14px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(239,68,68,0.2)",
+                    background: "rgba(239,68,68,0.04)",
+                    color: "#dc2626",
                     cursor: "pointer",
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: 8,
+                    gap: 6,
+                    fontSize: 13,
+                    fontWeight: 500,
                   }}
                 >
-                  <Trash2 size={15} />
+                  <Trash2 size={14} />
                   删除
                 </button>
               </div>

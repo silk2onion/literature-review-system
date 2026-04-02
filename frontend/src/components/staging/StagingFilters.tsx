@@ -42,10 +42,9 @@ export default function StagingFilters({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 16,
-        padding: "16px 0",
-        borderBottom: "1px solid #e2e8f0",
-        marginBottom: 16,
+        gap: 10,
+        padding: "10px 20px",
+        borderBottom: "1px solid var(--border-color, #E5E5EA)",
         flexWrap: "wrap",
       }}
     >

@@ -236,3 +236,4 @@ frontend/src/SemanticSearchDebugPanel.tsx
 
 # Nova / misc IDE modes
 .novamodes
+*.bak

@@ -789,10 +789,9 @@ export default function LibraryPage({
         style={{
           display: "flex",
           flexDirection: "column",
-          gap: 16,
-          padding: "16px 0",
-          borderBottom: "1px solid #e2e8f0",
-          marginBottom: 16,
+          gap: 8,
+          padding: "12px 20px",
+          borderBottom: "1px solid var(--border-color)",
         }}
       >
         <SearchFilters
