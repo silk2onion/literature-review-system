@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { API_BASE_URL } from "./api/config";
 import {
   Search,
@@ -68,6 +68,24 @@ function App() {
 
   /** A4: 全局爬取状态 */
   const [crawlStatus, setCrawlStatus] = useState<CrawlStatusInfo | null>(null);
+
+  /** Kaomoji easter egg */
+  const [kaomojiMode, setKaomojiMode] = useState(false);
+  const kaomojiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const KAOMOJI_FACES = [
+    "(╯°□°)╯︵ ┻━┻", "┬─┬ノ( º _ ºノ)", "(ノಠ益ಠ)ノ彡┻━┻",
+    "( ˘▽˘)っ♨", "(っ˘ω˘ς)", "ʕ•ᴥ•ʔ", "(❁´◡`❁)",
+    "( ˶ˆᗜˆ˵ )", "(*≧ω≦)", "(≧▽≦)", "( ˃̣̣̥᷄⌓˂̣̣̥᷅ )",
+    "ᕦ(ò_óˇ)ᕤ", "(ง •_•)ง", "( •̀ ω •́ )✧", "٩(◕‿◕｡)۶",
+    "( ͡° ͜ʖ ͡°)", "¯\\_(ツ)_/¯", "(╥_╥)", "( ˊ̱˂˃ˋ̱ )",
+    "(*ˊᗜˋ*)/ᵗʰᵃᵑᵏˢ", "( ´ ▽ ` )ﾉ", "(๑˃ᴗ˂)ﻭ",
+  ];
+  const triggerKaomoji = () => {
+    if (kaomojiMode) return;
+    setKaomojiMode(true);
+    if (kaomojiTimerRef.current) clearTimeout(kaomojiTimerRef.current);
+    kaomojiTimerRef.current = setTimeout(() => setKaomojiMode(false), 4000);
+  };
 
   // A4: 轮询最新爬取状态
   const fetchCrawlStatus = useCallback(async () => {
@@ -171,7 +189,7 @@ function App() {
           <div className="window-control green"></div>
         </div>
 
-        <div className="sidebar-content">
+        <div className={`sidebar-content ${kaomojiMode ? "kaomoji-party" : ""}`}>
           {/* Group 1: Discover */}
           <div className="sidebar-group">
             <h3 className="sidebar-group-title">Discover</h3>
@@ -225,14 +243,31 @@ function App() {
               暂存库
             </button>
 
-            {/* Recent -> Kaomoji */}
-            <div
+            {/* Kaomoji Easter Egg */}
+            <button
               className="sidebar-item"
-              style={{ cursor: "default", opacity: 0.6 }}
+              onClick={triggerKaomoji}
+              style={{
+                cursor: "pointer",
+                opacity: kaomojiMode ? 1 : 0.6,
+                transition: "all 0.3s",
+                animation: kaomojiMode ? "kaomojiWiggle 0.4s ease infinite" : "none",
+                background: kaomojiMode ? "rgba(99,102,241,0.08)" : "transparent",
+              }}
+              title="?"
             >
-              <Smile size={16} className="sidebar-icon" />
-              (｡•̀ᴗ-)✧
-            </div>
+              <Smile
+                size={16}
+                className="sidebar-icon"
+                style={{
+                  animation: kaomojiMode ? "kaomojiSpin 0.6s ease infinite" : "none",
+                  color: kaomojiMode ? "#6366f1" : undefined,
+                }}
+              />
+              {kaomojiMode
+                ? KAOMOJI_FACES[Math.floor(Math.random() * KAOMOJI_FACES.length)]
+                : "(｡•̀ᴗ-)✧"}
+            </button>
 
             {/* RAG Debug under Recent */}
             <button

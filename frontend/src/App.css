@@ -1,3 +1,38 @@
+/* Kaomoji Easter Egg */
+@keyframes kaomojiWiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-3deg) scale(1.02); }
+  75% { transform: rotate(3deg) scale(1.02); }
+}
+
+@keyframes kaomojiSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.kaomoji-party .sidebar-item {
+  animation: kaomojiWiggle 0.5s ease infinite;
+}
+
+.kaomoji-party .sidebar-item:nth-child(odd) {
+  animation-delay: 0.1s;
+  animation-duration: 0.4s;
+}
+
+.kaomoji-party .sidebar-item:nth-child(even) {
+  animation-delay: 0.05s;
+  animation-duration: 0.6s;
+}
+
+.kaomoji-party .sidebar-icon {
+  animation: kaomojiSpin 0.8s linear infinite !important;
+}
+
+.kaomoji-party .sidebar-group-title {
+  animation: kaomojiWiggle 0.3s ease infinite;
+  color: #6366f1 !important;
+}
+
 /* App Container */
 .app-container {
   display: flex;
