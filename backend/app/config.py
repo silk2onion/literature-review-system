@@ -119,8 +119,12 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:5173",
+        "http://localhost:5174",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://192.168.3.72:5173",
+        "http://192.168.3.72:5174",
     ]
     
     # JWT配置（可选）

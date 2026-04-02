@@ -34,6 +34,7 @@ class CrawlJobResponse(CrawlJobBase):
     fetched_count: int
     failed_count: int
     status: JobStatus
+    completed_reason: Optional[str] = Field(default=None, description="完成原因: exhausted, max_reached, error_zero_results")
     log: Optional[dict] = None
     search_strategy: Optional[Dict[str, Any]] = Field(default=None, description="PRISMA 搜索策略元数据")
     created_at: datetime
