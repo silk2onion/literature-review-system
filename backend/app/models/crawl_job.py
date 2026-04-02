@@ -40,6 +40,9 @@ class CrawlJob(Base):
         default="pending",  # pending / running / completed / failed / paused
     )
 
+    # 完成原因
+    completed_reason = Column(String(50), nullable=True)  # "exhausted", "max_reached", "error_zero_results"
+
     # 日志和元信息
     log = Column(JSON, nullable=True)  # 任意结构的日志列表或汇总信息
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -80,6 +83,7 @@ class CrawlJob(Base):
             "current_page": self.current_page,
             "fetched_count": self.fetched_count,
             "failed_count": self.failed_count,
+            "completed_reason": self.completed_reason,
             "status": self.status,
             "log": self.log,
             "created_at": created_at.isoformat() if created_at else None,

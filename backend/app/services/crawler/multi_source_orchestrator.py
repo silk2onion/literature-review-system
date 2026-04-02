@@ -88,8 +88,13 @@ class MultiSourceOrchestrator:
           "scholar_serpapi": [...],
           "scopus": [...],
         }
+
+        调用后可通过 self.source_errors 查看各数据源的错误信息。
         """
         normalized_sources = [s.strip().lower() for s in sources if s and s.strip()]
+        # 重置每次 search_all 的错误记录
+        self.source_errors: Dict[str, str] = {}
+
         if not normalized_sources:
             logger.warning("[MultiSourceOrchestrator] no sources specified")
             return {}
@@ -98,6 +103,7 @@ class MultiSourceOrchestrator:
         for s in normalized_sources:
             crawler = self._get_crawler(s)
             if not crawler:
+                self.source_errors[s] = "crawler not available or failed to initialize"
                 continue
             try:
                 logger.info(
@@ -122,5 +128,6 @@ class MultiSourceOrchestrator:
                 logger.error(
                     "[MultiSourceOrchestrator] search failed for source=%s: %s", s, e
                 )
+                self.source_errors[s] = str(e)
                 results[s] = []
         return results

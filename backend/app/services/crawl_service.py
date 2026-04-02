@@ -177,6 +177,7 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         remaining = max(max_results - fetched_count, 0)
         if remaining <= 0:
             job.status = "completed"
+            job.completed_reason = "max_reached"
             job.append_log({
                 "ts": datetime.utcnow().isoformat(),
                 "level": "info",
@@ -316,14 +317,34 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
     # 判断是否完成
     if not is_exhaustive and (job.fetched_count or 0) >= (job.max_results or 0):
         job.status = "completed"
+        job.completed_reason = "max_reached"
     elif total_source_count == 0:
-        # API 未返回任何结果，说明已穷尽可用论文
-        job.status = "completed"
-        job.append_log({
-            "ts": datetime.utcnow().isoformat(),
-            "level": "info",
-            "msg": "数据源未返回更多结果，任务自动标记为 completed",
-        })
+        # API 未返回任何结果 — 需要区分"真正穷尽"与"因错误返回 0 结果"
+        source_errors = getattr(orchestrator, "source_errors", {}) or {}
+        if source_errors:
+            # 有数据源报错，0 结果可能不可信
+            job.status = "completed"
+            job.completed_reason = "error_zero_results"
+            error_summary = "; ".join(f"{src}: {err}" for src, err in source_errors.items())
+            logger.warning(
+                "Job %d completed with 0 results but errors occurred: %s",
+                job_id, error_summary,
+            )
+            job.append_log({
+                "ts": datetime.utcnow().isoformat(),
+                "level": "warning",
+                "msg": "数据源未返回结果，但存在错误，0 结果可能不可信",
+                "source_errors": source_errors,
+            })
+        else:
+            # 所有数据源均正常返回 0 结果，真正穷尽
+            job.status = "completed"
+            job.completed_reason = "exhausted"
+            job.append_log({
+                "ts": datetime.utcnow().isoformat(),
+                "level": "info",
+                "msg": "数据源未返回更多结果，任务自动标记为 completed（已穷尽）",
+            })
     else:
         job.status = "pending"
 
@@ -484,6 +505,7 @@ def retry_crawl_job(db: Session, job_id: int) -> CrawlJob:
     job.fetched_count = 0
     job.failed_count = 0
     job.status = "pending"
+    job.completed_reason = None
     job.updated_at = datetime.utcnow()
     job.append_log(
         {
