@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { API_BASE_URL } from "./api/config";
 import {
   Search,
   BookOpen,
@@ -15,19 +16,19 @@ import {
   GitBranch,
   BarChart3,
 } from "lucide-react";
-import LibraryPage from "./LibraryPage";
-import StagingPapersPage from "./StagingPapersPage";
-import ReviewGenerateFromLibraryPage from "./ReviewGenerateFromLibraryPage";
-import RagDebugPage from "./RagDebugPage";
+import LibraryPage from "./pages/LibraryPage";
+import StagingPapersPage from "./pages/StagingPapersPage";
+import ReviewGenerateFromLibraryPage from "./pages/ReviewGenerateFromLibraryPage";
+import RagDebugPage from "./pages/RagDebugPage";
 import AgentChatPanel, { AgentToggleButton } from "./AgentChatPanel";
-import SettingsModal from "./SettingsModal";
+import SettingsModal from "./pages/SettingsModal";
 import "./App.css";
-import CrawlerSearchPage from "./CrawlerSearchPage";
-import ReviewOrchestratePage from "./ReviewOrchestratePage";
-import MonitoringDashboard from "./MonitoringDashboard";
-import ReviewListPage from "./ReviewListPage";
-import PrismaFlowPage from "./PrismaFlowPage";
-import ApiUsagePage from "./ApiUsagePage";
+import CrawlerSearchPage from "./pages/CrawlerSearchPage";
+import ReviewOrchestratePage from "./pages/ReviewOrchestratePage";
+import MonitoringDashboard from "./pages/MonitoringDashboard";
+import ReviewListPage from "./pages/ReviewListPage";
+import PrismaFlowPage from "./pages/PrismaFlowPage";
+import ApiUsagePage from "./pages/ApiUsagePage";
 
 type TabName =
   | "search"
@@ -72,7 +73,7 @@ function App() {
   const fetchCrawlStatus = useCallback(async () => {
     try {
       const res = await fetch(
-        "http://localhost:5444/api/crawl/jobs/latest_status",
+        `${API_BASE_URL}/api/crawl/jobs/latest_status`,
       );
       if (!res.ok) return;
       const data = await res.json();

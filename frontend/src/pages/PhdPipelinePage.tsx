@@ -1,0 +1,484 @@
+import React, { useState } from "react";
+import { API_BASE_URL } from "../api/config";
+import {
+  PipelineHeader,
+  StepConfigForm,
+  FrameworkPreview,
+  SearchResultsPanel,
+  AsyncPipelineStep,
+  ManualSteps,
+  AssembleStep,
+  RagDebugDrawer,
+} from "../components/phd";
+import type {
+  Claim,
+  ClaimWithEvidence,
+  Framework,
+  AutoSearchResult,
+  AssembleStats,
+} from "../components/phd";
+
+export interface PhdPipelinePageProps {
+  initialKeywords?: string[];
+  initialYearFrom?: number;
+  initialYearTo?: number;
+  initialPaperLimit?: number;
+  initialSources?: string[];
+  initialPaperIds?: number[];
+  initialGroupId?: number;
+  onExit?: () => void;
+  embedded?: boolean;
+}
+
+/**
+ * PhD 级多阶段综述管线页面
+ */
+const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
+  initialKeywords = [],
+  initialYearFrom,
+  initialYearTo,
+  initialPaperLimit = 20,
+  initialSources = ["arxiv", "scholar_serpapi", "scopus", "semantic_scholar"],
+  initialPaperIds = [],
+  initialGroupId,
+  onExit,
+  embedded: _embedded = false, // eslint-disable-line @typescript-eslint/no-unused-vars
+}) => {
+  const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Configuration State
+  const [keywords, setKeywords] = useState<string>(initialKeywords.join(", "));
+  const [yearFrom, setYearFrom] = useState<string>(
+    initialYearFrom?.toString() || "",
+  );
+  const [yearTo, setYearTo] = useState<string>(initialYearTo?.toString() || "");
+  const [paperLimit, setPaperLimit] = useState<string>(
+    initialPaperLimit.toString(),
+  );
+  const [sortBy, setSortBy] = useState<string>("year_desc");
+  const [sources, setSources] = useState<string[]>(initialSources);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [paperIds, _setPaperIds] = useState<number[]>(initialPaperIds);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [groupId, _setGroupId] = useState<number | undefined>(initialGroupId);
+
+  // 各阶段的产出
+  const [claims, setClaims] = useState<Claim[]>([]);
+  const [claimsWithEvidence, setClaimsWithEvidence] = useState<
+    ClaimWithEvidence[]
+  >([]);
+  const [finalRender, setFinalRender] = useState<string>("");
+
+  const [reviewId, setReviewId] = useState<number | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [showRagDebug, setShowRagDebug] = useState(false);
+
+  // Step 0: Framework generation
+  const [topic, setTopic] = useState("");
+  const [framework, setFramework] = useState<Framework | null>(null);
+  const [frameworkLoading, setFrameworkLoading] = useState(false);
+  const [frameworkConfirmed, setFrameworkConfirmed] = useState(false);
+
+  // Step 0.5: Auto-search state
+  const [papersPerSection, setPapersPerSection] = useState(20);
+  const [autoSearchLoading, setAutoSearchLoading] = useState(false);
+  const [autoSearchResults, setAutoSearchResults] = useState<AutoSearchResult[]>([]);
+  const [autoSearchDone, setAutoSearchDone] = useState(false);
+
+  // Step 4: Assemble state
+  const [assembleLoading, setAssembleLoading] = useState(false);
+  const [fullReviewMarkdown, setFullReviewMarkdown] = useState("");
+  const [citationStyle, setCitationStyle] = useState("harvard");
+  const [assembleStats, setAssembleStats] = useState<AssembleStats | null>(null);
+
+  const handleStep0_GenerateFramework = async () => {
+    setFrameworkLoading(true);
+    setError(null);
+    setFramework(null);
+    setFrameworkConfirmed(false);
+
+    try {
+      const kws = keywords
+        .split(/[,\uff0c]/)
+        .map((k) => k.trim())
+        .filter((k) => k);
+      const res = await fetch(
+        `${API_BASE_URL}/api/reviews/generate-framework`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic,
+            keywords: kws.length > 0 ? kws : [topic],
+            language: "zh-CN",
+          }),
+        },
+      );
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(
+          errorText || `Framework generation failed: ${res.status}`,
+        );
+      }
+
+      const data = await res.json();
+      setFramework(data.framework);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setFrameworkLoading(false);
+    }
+  };
+
+  const handleStep05_AutoSearch = async () => {
+    if (!framework || !framework.sections) {
+      setError("Please generate and confirm a framework first.");
+      return;
+    }
+    setAutoSearchLoading(true);
+    setError(null);
+    setAutoSearchResults([]);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/reviews/phd/auto-search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sections: framework.sections,
+          papers_per_section: papersPerSection,
+          sources: sources,
+          year_from: yearFrom ? parseInt(yearFrom) : undefined,
+          year_to: yearTo ? parseInt(yearTo) : undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `Auto-search failed: ${res.status}`);
+      }
+
+      const data = await res.json();
+      setAutoSearchResults(data.per_section || []);
+      setAutoSearchDone(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAutoSearchLoading(false);
+    }
+  };
+
+  const handleStep4_Assemble = async () => {
+    if (!finalRender && !reviewId) {
+      setError("Please complete rendering before assembly.");
+      return;
+    }
+    setAssembleLoading(true);
+    setError(null);
+
+    try {
+      const renderedSections = finalRender
+        ? [
+            {
+              section_id: "1",
+              section_title: framework?.title || "Literature Review",
+              text: finalRender,
+              citation_map: {},
+            },
+          ]
+        : [];
+
+      const res = await fetch(`${API_BASE_URL}/api/reviews/phd/assemble`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          review_id: reviewId,
+          title: framework?.title || topic || "Literature Review",
+          rendered_sections: renderedSections,
+          citation_style: citationStyle,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `Assembly failed: ${res.status}`);
+      }
+
+      const data = await res.json();
+      setFullReviewMarkdown(data.full_markdown || "");
+      setAssembleStats({
+        cited: data.total_cited_papers || 0,
+        sections: data.total_sections || 0,
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAssembleLoading(false);
+    }
+  };
+
+  const handleStep1_GenerateClaims = async () => {
+    setLoading(true);
+    setError(null);
+    setStep(1);
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const body: any = {
+        keywords: keywords
+          .split(/[,，]/)
+          .map((k) => k.trim())
+          .filter((k) => k),
+        data_sources: sources,
+        paper_limit: parseInt(paperLimit) || 20,
+        year_start: yearFrom ? parseInt(yearFrom) : undefined,
+        year_end: yearTo ? parseInt(yearTo) : undefined,
+        sort_by: sortBy,
+      };
+
+      if (paperIds.length > 0) {
+        body.paper_ids = paperIds;
+      } else if (groupId) {
+        body.group_id = groupId;
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/reviews/phd/init`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `Step 1 failed with status ${res.status}`);
+      }
+
+      const data = await res.json();
+      setReviewId(data.review_id);
+      setClaims(data.claims);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStep2_AttachEvidence = async () => {
+    if (!reviewId) {
+      setError("Cannot proceed to step 2 without a review ID from step 1.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setStep(2);
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/reviews/phd/attach-evidence`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ review_id: reviewId }),
+        },
+      );
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `Step 2 failed with status ${res.status}`);
+      }
+
+      const data = await res.json();
+      setClaimsWithEvidence(data.claims_with_evidence);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStep3_RenderSection = async () => {
+    if (!reviewId) {
+      setError("Cannot proceed to step 3 without a review ID.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setStep(3);
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/reviews/phd/render-section`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            review_id: reviewId,
+            section_key: "introduction",
+          }),
+        },
+      );
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `Step 3 failed with status ${res.status}`);
+      }
+
+      const data = await res.json();
+      setFinalRender(data.rendered_section.content);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportMarkdown = async () => {
+    if (!reviewId) {
+      setError("当前还没有可导出的综述，请先完成前面的生成步骤。");
+      return;
+    }
+    setExportLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/reviews/${reviewId}/export`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            format: "markdown",
+            include_references: true,
+          }),
+        },
+      );
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || `导出失败，状态码 ${res.status}`);
+      }
+
+      const data = await res.json();
+      const markdown: string = data.markdown;
+      const blob = new Blob([markdown], {
+        type: "text/markdown;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `review-${reviewId}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError((e as Error).message);
+      alert((e as Error).message);
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const parsedKeywords = keywords
+    .split(/[,，]/)
+    .map((k) => k.trim())
+    .filter((k) => k);
+
+  return (
+    <div className="phd-pipeline-page">
+      <PipelineHeader
+        reviewId={reviewId}
+        showRagDebug={showRagDebug}
+        onToggleRagDebug={() => setShowRagDebug(!showRagDebug)}
+        onExit={onExit}
+      />
+
+      {error && (
+        <div className="error-text" style={{ marginBottom: "20px" }}>
+          错误：{error}
+        </div>
+      )}
+
+      <StepConfigForm
+        topic={topic}
+        onTopicChange={setTopic}
+        keywords={keywords}
+        onKeywordsChange={setKeywords}
+        sources={sources}
+        onSourcesChange={setSources}
+        yearFrom={yearFrom}
+        onYearFromChange={setYearFrom}
+        yearTo={yearTo}
+        onYearToChange={setYearTo}
+        paperLimit={paperLimit}
+        onPaperLimitChange={setPaperLimit}
+        sortBy={sortBy}
+        onSortByChange={setSortBy}
+        groupId={groupId}
+      />
+
+      <div className="pipeline-steps-container">
+        <FrameworkPreview
+          framework={framework}
+          frameworkLoading={frameworkLoading}
+          frameworkConfirmed={frameworkConfirmed}
+          topicEmpty={!topic.trim()}
+          onGenerate={handleStep0_GenerateFramework}
+          onConfirm={() => setFrameworkConfirmed(true)}
+        />
+
+        <SearchResultsPanel
+          frameworkConfirmed={frameworkConfirmed}
+          papersPerSection={papersPerSection}
+          onPapersPerSectionChange={setPapersPerSection}
+          autoSearchLoading={autoSearchLoading}
+          autoSearchDone={autoSearchDone}
+          autoSearchResults={autoSearchResults}
+          onAutoSearch={handleStep05_AutoSearch}
+        />
+
+        <AsyncPipelineStep
+          topic={topic}
+          keywords={parsedKeywords}
+          papersPerSection={papersPerSection}
+          sources={sources}
+          citationStyle={citationStyle}
+        />
+
+        <ManualSteps
+          loading={loading}
+          step={step}
+          claims={claims}
+          claimsWithEvidence={claimsWithEvidence}
+          finalRender={finalRender}
+          exportLoading={exportLoading}
+          onGenerateClaims={handleStep1_GenerateClaims}
+          onAttachEvidence={handleStep2_AttachEvidence}
+          onRenderSection={handleStep3_RenderSection}
+          onExportMarkdown={handleExportMarkdown}
+        />
+      </div>
+
+      {/* Step 4: Assemble - outside pipeline-steps-container, same as original */}
+      <AssembleStep
+        citationStyle={citationStyle}
+        onCitationStyleChange={setCitationStyle}
+        assembleLoading={assembleLoading}
+        finalRender={finalRender}
+        reviewId={reviewId}
+        assembleStats={assembleStats}
+        fullReviewMarkdown={fullReviewMarkdown}
+        onAssemble={handleStep4_Assemble}
+      />
+
+      <RagDebugDrawer
+        show={showRagDebug}
+        onClose={() => setShowRagDebug(false)}
+      />
+    </div>
+  );
+};
+
+export default PhdPipelinePage;

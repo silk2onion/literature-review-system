@@ -111,6 +111,9 @@ frontend/node_modules/
 # Development artifacts (not for production/PR)
 # ============================================
 
+# Local debug archives / temporary diagnostics
+_dev_archive/
+
 # Kilocode / IDE-specific project config
 .kilocodemodes
 
@@ -192,3 +195,44 @@ backend/debug_checkpoint.json
 # Server runtime logs
 backend/server5444.*
 backend/app/1
+
+# ============================================
+# Claude analysis & refactor docs (not for PR)
+# ============================================
+_claude_analysis/
+
+# Alembic __pycache__
+backend/alembic/__pycache__/
+backend/alembic/versions/__pycache__/
+
+# Downloaded PDFs and exported files
+data/papers/
+data/exports/
+backend/data/papers/
+backend/data/exports/
+
+# Runtime database files (user data)
+literature.db
+backend/literature.db
+backend/literature_review.db
+
+# Frontend old backup files (pre-refactor originals kept locally)
+frontend/src/LibraryPage.tsx
+frontend/src/ReviewListPage.tsx
+frontend/src/SettingsModal.tsx
+frontend/src/PhdPipelinePage.tsx
+frontend/src/StagingPapersPage.tsx
+frontend/src/CrawlerSearchPage.tsx
+frontend/src/ApiUsagePage.tsx
+frontend/src/AsyncTaskPanel.tsx
+frontend/src/CitationGraphPanel.tsx
+frontend/src/GroupManager.tsx
+frontend/src/MonitoringDashboard.tsx
+frontend/src/PrismaFlowPage.tsx
+frontend/src/RagDebugPage.tsx
+frontend/src/ReviewGenerateFromLibraryPage.tsx
+frontend/src/ReviewOrchestratePage.tsx
+frontend/src/SemanticSearchDebugPanel.tsx
+
+# Nova / misc IDE modes
+.novamodes
