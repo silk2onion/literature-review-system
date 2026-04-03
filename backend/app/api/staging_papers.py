@@ -324,8 +324,9 @@ def get_prisma_stats(
             excluded_count=excluded_map.get(stage_name, 0),
         ))
 
-    # 排除原因分布
-    reason_counts = (
+    # 排除原因分布 — 按 AI 评分分档聚合（如 "AI 评分 0/10" → 合并计数）
+    import re as _re
+    raw_reasons = (
         base_query
         .filter(StagingPaper.exclusion_reason.isnot(None))
         .filter(StagingPaper.exclusion_reason != "")
@@ -336,7 +337,20 @@ def get_prisma_stats(
         .group_by(StagingPaper.exclusion_reason)
         .all()
     )
-    exclusion_reasons: Dict[str, int] = {reason: cnt for reason, cnt in reason_counts}
+    # 如果原因以 "AI 评分 X/10:" 开头，按评分分档聚合
+    score_buckets: Dict[str, int] = {}
+    other_reasons: Dict[str, int] = {}
+    for reason, cnt in raw_reasons:
+        match = _re.match(r"AI\s*评分\s*(\d+)/10", reason)
+        if match:
+            score = int(match.group(1))
+            label = f"AI 评分 {score}/10 — {'完全不相关' if score <= 1 else '相关性极低' if score <= 3 else '相关性较低' if score <= 5 else '部分相关' if score <= 7 else '高度相关'}"
+            score_buckets[label] = score_buckets.get(label, 0) + cnt
+        else:
+            # 非 AI 评分的原因：如果文本过长则截断
+            short = reason[:80] + ("..." if len(reason) > 80 else "")
+            other_reasons[short] = other_reasons.get(short, 0) + cnt
+    exclusion_reasons: Dict[str, int] = {**score_buckets, **other_reasons}
 
     # 获取关联的搜索策略
     search_strategy = None
