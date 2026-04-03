@@ -510,7 +510,7 @@ export default function PrismaFlowPage() {
               <div style={{ padding: "12px 20px", backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: 14, fontWeight: 600, color: "#0f172a" }}>
                 📊 排除原因分布
               </div>
-              <div style={{ padding: "12px 20px" }}>
+              <div style={{ padding: "12px 20px", maxHeight: 320, overflowY: "auto" }}>
                 {Object.entries(stats.exclusion_reasons)
                   .sort(([, a], [, b]) => b - a)
                   .map(([reason, count]) => {
