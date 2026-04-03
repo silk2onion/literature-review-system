@@ -9,12 +9,20 @@ type PrismaStageCount = {
   excluded_count: number;
 };
 
+type ExcludedPaper = {
+  id: number;
+  title: string;
+  score: number | null;
+  reason_short: string;
+};
+
 type PrismaStats = {
   success: boolean;
   crawl_job_id?: number | null;
   total: number;
   stages: PrismaStageCount[];
   exclusion_reasons: Record<string, number>;
+  excluded_papers?: ExcludedPaper[];
   search_strategy?: Record<string, unknown> | null;
 };
 
@@ -521,12 +529,11 @@ export default function PrismaFlowPage() {
                 display: "flex", flexDirection: "column",
                 gap: 20, marginBottom: 24,
               }}>
-                {/* Exclusion Reasons */}
+                {/* Exclusion Reasons — 评分分档汇总 + 论文列表 */}
                 {hasReasons && (
                   <div style={{
                     borderRadius: 12, border: "1px solid #e2e8f0",
                     backgroundColor: "#fff", overflow: "hidden",
-                    display: "flex", flexDirection: "column",
                   }}>
                     <div style={{
                       padding: "14px 20px", backgroundColor: "#fef2f2",
@@ -534,7 +541,7 @@ export default function PrismaFlowPage() {
                       display: "flex", justifyContent: "space-between", alignItems: "center",
                     }}>
                       <span style={{ fontSize: 14, fontWeight: 600, color: "#991b1b" }}>
-                        📊 排除原因分布
+                        📊 排除文献详情
                       </span>
                       <span style={{
                         fontSize: 12, color: "#dc2626", fontWeight: 500,
@@ -543,36 +550,60 @@ export default function PrismaFlowPage() {
                         共 {totalExcluded} 篇排除
                       </span>
                     </div>
-                    <div style={{ padding: "4px 20px 16px" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                        <thead>
-                          <tr style={{ borderBottom: "2px solid #fee2e2" }}>
-                            <th style={{ textAlign: "left", padding: "8px 0", color: "#64748b", fontWeight: 600, fontSize: 12 }}>排除原因</th>
-                            <th style={{ textAlign: "right", padding: "8px 0", color: "#64748b", fontWeight: 600, fontSize: 12, width: 60 }}>数量</th>
-                            <th style={{ textAlign: "right", padding: "8px 0", color: "#64748b", fontWeight: 600, fontSize: 12, width: 60 }}>占比</th>
-                            <th style={{ padding: "8px 0", width: "35%" }} />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sortedReasons.map(([reason, count], i) => {
-                            const pct = totalExcluded > 0 ? ((count / totalExcluded) * 100) : 0;
-                            const barWidth = maxCount > 0 ? ((count / maxCount) * 100) : 0;
-                            return (
-                              <tr key={reason} style={{ borderBottom: i < sortedReasons.length - 1 ? "1px solid #f1f5f9" : "none" }}>
-                                <td style={{ padding: "10px 0", color: "#1e293b", lineHeight: 1.4 }}>{reason}</td>
-                                <td style={{ padding: "10px 0", textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{count}</td>
-                                <td style={{ padding: "10px 0", textAlign: "right", color: "#9ca3af", fontSize: 12 }}>{pct.toFixed(1)}%</td>
-                                <td style={{ padding: "10px 0 10px 16px" }}>
-                                  <div style={{ width: "100%", height: 6, backgroundColor: "#fee2e2", borderRadius: 3, overflow: "hidden" }}>
-                                    <div style={{ width: `${barWidth}%`, height: "100%", backgroundColor: "#ef4444", borderRadius: 3 }} />
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+
+                    {/* 评分分档汇总条 */}
+                    <div style={{ padding: "12px 20px", borderBottom: "1px solid #f1f5f9", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {sortedReasons.map(([label, count]) => {
+                        const pct = totalExcluded > 0 ? ((count / totalExcluded) * 100).toFixed(0) : "0";
+                        return (
+                          <span key={label} style={{
+                            padding: "4px 12px", borderRadius: 16, fontSize: 12, fontWeight: 500,
+                            backgroundColor: "#fee2e2", color: "#991b1b", border: "1px solid #fecaca",
+                          }}>
+                            {label}: {count} 篇 ({pct}%)
+                          </span>
+                        );
+                      })}
                     </div>
+
+                    {/* 被排除论文列表 */}
+                    {stats.excluded_papers && stats.excluded_papers.length > 0 && (
+                      <div style={{ padding: "4px 12px 12px" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ borderBottom: "2px solid #f1f5f9" }}>
+                              <th style={{ textAlign: "left", padding: "8px", color: "#64748b", fontWeight: 600, width: 50 }}>ID</th>
+                              <th style={{ textAlign: "left", padding: "8px", color: "#64748b", fontWeight: 600 }}>论文标题</th>
+                              <th style={{ textAlign: "center", padding: "8px", color: "#64748b", fontWeight: 600, width: 60 }}>评分</th>
+                              <th style={{ textAlign: "left", padding: "8px", color: "#64748b", fontWeight: 600, width: "30%" }}>排除理由</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {stats.excluded_papers.map((p, i) => (
+                              <tr key={p.id} style={{
+                                borderBottom: i < stats.excluded_papers!.length - 1 ? "1px solid #f8fafc" : "none",
+                                backgroundColor: i % 2 === 0 ? "#fff" : "#fafafa",
+                              }}>
+                                <td style={{ padding: "8px", color: "#94a3b8", fontSize: 11 }}>#{p.id}</td>
+                                <td style={{ padding: "8px", color: "#1e293b", lineHeight: 1.4 }}>{p.title}</td>
+                                <td style={{ padding: "8px", textAlign: "center" }}>
+                                  {p.score !== null && (
+                                    <span style={{
+                                      padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 700,
+                                      backgroundColor: p.score <= 1 ? "#fee2e2" : p.score <= 3 ? "#fff7ed" : "#fefce8",
+                                      color: p.score <= 1 ? "#dc2626" : p.score <= 3 ? "#ea580c" : "#ca8a04",
+                                    }}>
+                                      {p.score}/10
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: "8px", color: "#64748b", fontSize: 11, lineHeight: 1.3 }}>{p.reason_short}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
 

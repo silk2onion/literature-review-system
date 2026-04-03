@@ -144,6 +144,14 @@ class PrismaStageCount(BaseModel):
     excluded_count: int = Field(default=0, description="该阶段被排除的文献数")
 
 
+class ExcludedPaperBrief(BaseModel):
+    """被排除论文简要信息"""
+    id: int
+    title: str
+    score: Optional[int] = None
+    reason_short: str = ""
+
+
 class PrismaStatsResponse(BaseModel):
     """PRISMA 流程统计响应"""
     success: bool
@@ -152,7 +160,11 @@ class PrismaStatsResponse(BaseModel):
     stages: List[PrismaStageCount]
     exclusion_reasons: Dict[str, int] = Field(
         default_factory=dict,
-        description="排除原因分类统计 {reason: count}",
+        description="排除原因分档统计 {label: count}",
+    )
+    excluded_papers: List[ExcludedPaperBrief] = Field(
+        default_factory=list,
+        description="被排除的论文列表（含 id、标题、评分）",
     )
     search_strategy: Optional[Dict[str, Any]] = Field(
         default=None,

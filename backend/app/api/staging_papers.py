@@ -352,6 +352,37 @@ def get_prisma_stats(
             other_reasons[short] = other_reasons.get(short, 0) + cnt
     exclusion_reasons: Dict[str, int] = {**score_buckets, **other_reasons}
 
+    # 被排除论文列表（含 id、标题、评分）
+    excluded_rows = (
+        base_query
+        .filter(StagingPaper.exclusion_reason.isnot(None))
+        .filter(StagingPaper.exclusion_reason != "")
+        .with_entities(
+            StagingPaper.id,
+            StagingPaper.title,
+            StagingPaper.exclusion_reason,
+        )
+        .order_by(StagingPaper.id.desc())
+        .all()
+    )
+    from app.schemas.staging_paper import ExcludedPaperBrief
+    excluded_papers = []
+    for eid, etitle, ereason in excluded_rows:
+        score = None
+        reason_short = ereason[:60] if ereason else ""
+        match = _re.match(r"AI\s*评分\s*(\d+)/10", ereason or "")
+        if match:
+            score = int(match.group(1))
+            # 取冒号后面的简短理由
+            colon_pos = ereason.find(":")
+            reason_short = ereason[colon_pos + 1:colon_pos + 61].strip() if colon_pos >= 0 else ereason[:60]
+        excluded_papers.append(ExcludedPaperBrief(
+            id=eid,
+            title=etitle or "(无标题)",
+            score=score,
+            reason_short=reason_short,
+        ))
+
     # 获取关联的搜索策略
     search_strategy = None
     if crawl_job_id is not None:
@@ -365,6 +396,7 @@ def get_prisma_stats(
         total=total,
         stages=stages,
         exclusion_reasons=exclusion_reasons,
+        excluded_papers=excluded_papers,
         search_strategy=search_strategy,
     )
 
