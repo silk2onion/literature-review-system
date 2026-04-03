@@ -288,7 +288,7 @@ async def semantic_search_ws(websocket: WebSocket) -> None:
                 chunk = hits[sent : sent + chunk_size]
                 items = [
                     {
-                        "paper": PaperResponse.model_validate(hit.paper).model_dump(),
+                        "paper": PaperResponse.model_validate(hit.paper).model_dump(mode="json"),
                         "score": hit.score,
                     }
                     for hit in chunk

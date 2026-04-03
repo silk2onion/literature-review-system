@@ -322,7 +322,8 @@ async def promote_staging_papers(
                 getattr(staging, "id", None),
             )
 
-        # 提升成功后，删除暂存记录
+        # 提升成功后，标记最终 PRISMA 阶段并删除暂存记录
+        staging.screening_stage = "included"
         try:
             db.delete(staging)
         except Exception:
