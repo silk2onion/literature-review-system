@@ -1,4 +1,4 @@
-import GroupManager from "../../GroupManager";
+import GroupManager from "../GroupManager";
 import type { LiteratureGroup } from "../../types";
 
 interface AddToGroupModalProps {

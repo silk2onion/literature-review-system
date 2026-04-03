@@ -1,5 +1,5 @@
 import React from "react";
-import SemanticSearchDebugPanel from "../../SemanticSearchDebugPanel";
+import SemanticSearchDebugPanel from "../SemanticSearchDebugPanel";
 
 interface RagDebugDrawerProps {
   show: boolean;
