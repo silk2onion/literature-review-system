@@ -566,42 +566,41 @@ export default function PrismaFlowPage() {
                       })}
                     </div>
 
-                    {/* 被排除论文列表 */}
-                    {stats.excluded_papers && stats.excluded_papers.length > 0 && (
-                      <div style={{ padding: "4px 12px 12px" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                          <thead>
-                            <tr style={{ borderBottom: "2px solid #f1f5f9" }}>
-                              <th style={{ textAlign: "left", padding: "8px", color: "#64748b", fontWeight: 600, width: 50 }}>ID</th>
-                              <th style={{ textAlign: "left", padding: "8px", color: "#64748b", fontWeight: 600 }}>论文标题</th>
-                              <th style={{ textAlign: "center", padding: "8px", color: "#64748b", fontWeight: 600, width: 60 }}>评分</th>
-                              <th style={{ textAlign: "left", padding: "8px", color: "#64748b", fontWeight: 600, width: "30%" }}>排除理由</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {stats.excluded_papers.map((p, i) => (
-                              <tr key={p.id} style={{
-                                borderBottom: i < stats.excluded_papers!.length - 1 ? "1px solid #f8fafc" : "none",
-                                backgroundColor: i % 2 === 0 ? "#fff" : "#fafafa",
-                              }}>
-                                <td style={{ padding: "8px", color: "#94a3b8", fontSize: 11 }}>#{p.id}</td>
-                                <td style={{ padding: "8px", color: "#1e293b", lineHeight: 1.4 }}>{p.title}</td>
-                                <td style={{ padding: "8px", textAlign: "center" }}>
-                                  {p.score !== null && (
-                                    <span style={{
-                                      padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 700,
-                                      backgroundColor: p.score <= 1 ? "#fee2e2" : p.score <= 3 ? "#fff7ed" : "#fefce8",
-                                      color: p.score <= 1 ? "#dc2626" : p.score <= 3 ? "#ea580c" : "#ca8a04",
-                                    }}>
-                                      {p.score}/10
-                                    </span>
-                                  )}
-                                </td>
-                                <td style={{ padding: "8px", color: "#64748b", fontSize: 11, lineHeight: 1.3 }}>{p.reason_short}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                    {/* 被排除论文 — 气泡卡片列表 */}
+                    {(stats.excluded_papers ?? []).length > 0 && (
+                      <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+                        {(stats.excluded_papers ?? []).map((p) => (
+                          <div key={p.id} style={{
+                            display: "flex", alignItems: "flex-start", gap: 10,
+                            padding: "10px 14px", borderRadius: 10,
+                            backgroundColor: "#fefefe", border: "1px solid #f1f5f9",
+                            transition: "background 0.15s",
+                          }}>
+                            {/* 评分徽章 */}
+                            <span style={{
+                              flexShrink: 0, padding: "3px 8px", borderRadius: 8,
+                              fontSize: 11, fontWeight: 700, minWidth: 36, textAlign: "center",
+                              backgroundColor: p.score !== null && p.score <= 1 ? "#fee2e2"
+                                : p.score !== null && p.score <= 3 ? "#fff7ed" : "#fefce8",
+                              color: p.score !== null && p.score <= 1 ? "#dc2626"
+                                : p.score !== null && p.score <= 3 ? "#ea580c" : "#ca8a04",
+                            }}>
+                              {p.score !== null ? `${p.score}/10` : "—"}
+                            </span>
+                            {/* 论文信息 */}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, color: "#1e293b", lineHeight: 1.4, fontWeight: 500 }}>
+                                {p.title}
+                              </div>
+                              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3, lineHeight: 1.3 }}>
+                                <span style={{ color: "#cbd5e1" }}>#{p.id}</span>
+                                {p.reason_short && (
+                                  <> · {p.reason_short}</>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
