@@ -1,23 +1,31 @@
 interface StagingBatchActionsProps {
   selectedCount: number;
   promoting: boolean;
+  aiScreening?: boolean;
+  enriching?: boolean;
   taskStatus: "idle" | "running" | "done" | "error";
   taskMessage: string;
   onRefresh: () => void;
   onDeleteClick: () => void;
   onRejectClick: () => void;
   onPromote: () => void;
+  onAIScreen?: () => void;
+  onEnrich?: () => void;
 }
 
 export default function StagingBatchActions({
   selectedCount,
   promoting,
+  aiScreening,
+  enriching,
   taskStatus,
   taskMessage,
   onRefresh,
   onDeleteClick,
   onRejectClick,
   onPromote,
+  onAIScreen,
+  onEnrich,
 }: StagingBatchActionsProps) {
   const renderTaskBadge = () => {
     if (taskStatus === "idle") return null;
@@ -73,6 +81,48 @@ export default function StagingBatchActions({
       >
         🔄 刷新
       </button>
+      {onAIScreen && (
+        <button
+          type="button"
+          onClick={onAIScreen}
+          disabled={aiScreening}
+          style={{
+            padding: "6px 14px",
+            borderRadius: 6,
+            border: "1px solid #8b5cf6",
+            backgroundColor: "#f5f3ff",
+            color: "#7c3aed",
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: aiScreening ? "default" : "pointer",
+            opacity: aiScreening ? 0.6 : 1,
+          }}
+        >
+          {aiScreening
+            ? "AI 筛选中..."
+            : `🤖 AI 筛选${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
+        </button>
+      )}
+      {onEnrich && (
+        <button
+          type="button"
+          onClick={onEnrich}
+          disabled={enriching}
+          style={{
+            padding: "6px 14px",
+            borderRadius: 6,
+            border: "1px solid #0ea5e9",
+            backgroundColor: "#f0f9ff",
+            color: "#0284c7",
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: enriching ? "default" : "pointer",
+            opacity: enriching ? 0.6 : 1,
+          }}
+        >
+          {enriching ? "补齐中..." : "📥 补齐信息"}
+        </button>
+      )}
       <button
         type="button"
         onClick={onDeleteClick}

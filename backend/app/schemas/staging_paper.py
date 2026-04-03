@@ -32,7 +32,7 @@ class StagingPaperBase(BaseModel):
     keywords: Optional[List[str]] = Field(default=None, description="关键词")
     citations_count: Optional[int] = Field(default=0, description="引用数")
     status: Optional[str] = Field(default=None, description="暂存状态，如 pending/accepted/rejected")
-    llm_tags: Optional[Dict[str, Any]] = Field(default=None, description="LLM 打标信息")
+    llm_tags: Optional[Any] = Field(default=None, description="LLM 打标信息（可能是 list 或 dict）")
     llm_score: Optional[float] = Field(default=None, description="LLM 评估分数")
     screening_stage: Optional[str] = Field(default="identification", description="PRISMA 筛选阶段: identification/screening/eligibility/included")
     exclusion_reason: Optional[str] = Field(default=None, description="PRISMA 排除原因")
@@ -158,3 +158,67 @@ class PrismaStatsResponse(BaseModel):
         default=None,
         description="关联的搜索策略元数据",
     )
+
+
+# ========== AI 筛选 Schemas ==========
+
+class AIScreenRequest(BaseModel):
+    """AI 批量筛选请求"""
+    topic: str = Field(..., description="研究主题，用于评估论文相关度")
+    ids: Optional[List[int]] = Field(default=None, description="指定 StagingPaper ID 列表")
+    crawl_job_ids: Optional[List[int]] = Field(default=None, description="按抓取任务 ID 筛选")
+    q: Optional[str] = Field(default=None, description="关键词过滤（模糊匹配 title/abstract），不传则筛选全部 pending")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "topic": "Transit-Oriented Development and pedestrian safety",
+                "q": "TOD",
+            }
+        }
+
+
+class AIScreenResultItem(BaseModel):
+    """单篇论文的 AI 筛选结果"""
+    staging_paper_id: int
+    score: int
+    reason: str
+    decision: str = Field(description="promote / pending_review / reject / pre_filtered")
+
+
+class AIScreenResponse(BaseModel):
+    """AI 批量筛选响应"""
+    success: bool
+    total: int
+    scored: int
+    promoted: int
+    pending_review: int
+    rejected: int
+    pre_filtered: int = Field(default=0, description="关键词预过滤直接拒绝的数量")
+    failed: int
+    details: List[AIScreenResultItem] = Field(default_factory=list)
+
+
+# ========== 信息补齐 Schemas ==========
+
+class EnrichRequest(BaseModel):
+    """批量信息补齐请求"""
+    ids: Optional[List[int]] = Field(default=None, description="指定要补齐的 StagingPaper ID 列表，不传则补齐所有缺 abstract 的 pending 论文")
+    only_missing_abstract: bool = Field(default=True, description="是否只处理缺 abstract 的论文")
+
+
+class EnrichResultItem(BaseModel):
+    """单篇补齐结果"""
+    paper_id: int
+    enriched_fields: List[str]
+    source: str
+
+
+class EnrichResponse(BaseModel):
+    """批量补齐响应"""
+    success: bool
+    total: int
+    enriched: int
+    skipped_no_doi: int
+    failed: int
+    details: List[EnrichResultItem] = Field(default_factory=list)

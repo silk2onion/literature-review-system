@@ -15,8 +15,10 @@ interface Paper {
 
 interface ActivatedGroup {
   name?: string;
-  keywords?: string[];
-  score?: number;
+  matched_words?: string[];
+  all_words?: string[];
+  strength?: number;
+  weight?: number;
   [key: string]: unknown;
 }
 
@@ -53,6 +55,20 @@ interface SemanticSearchRequestPayload {
 
 type SearchMode = "paper" | "chunk";
 
+function scoreColor(score: number) {
+  if (score >= 0.8) return "#16a34a";
+  if (score >= 0.6) return "#ca8a04";
+  if (score >= 0.4) return "#ea580c";
+  return "#dc2626";
+}
+
+function scoreBg(score: number) {
+  if (score >= 0.8) return "#dcfce7";
+  if (score >= 0.6) return "#fef9c3";
+  if (score >= 0.4) return "#fff7ed";
+  return "#fee2e2";
+}
+
 function SemanticSearchDebugPanel() {
   const [searchMode, setSearchMode] = useState<SearchMode>("paper");
   const [keywordInput, setKeywordInput] = useState("");
@@ -60,18 +76,14 @@ function SemanticSearchDebugPanel() {
   const [yearTo, setYearTo] = useState("");
   const [limit, setLimit] = useState("20");
 
-  // Paper-level state
   const [items, setItems] = useState<SemanticSearchItem[]>([]);
   const [debugInfo, setDebugInfo] = useState<SemanticSearchDebug | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+  const [expandedPaper, setExpandedPaper] = useState<number | null>(null);
 
-  // Chunk-level state
   const [chunkResults, setChunkResults] = useState<ChunkSearchResult[]>([]);
   const [chunkLoading, setChunkLoading] = useState(false);
   const [chunkError, setChunkError] = useState<string | null>(null);
@@ -81,46 +93,26 @@ function SemanticSearchDebugPanel() {
 
   useEffect(() => {
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
+      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
     };
   }, []);
 
   async function handleSearch() {
-    if (searchMode === "paper") {
-      await handlePaperSearch();
-    } else {
-      await handleChunkSearch();
-    }
+    if (searchMode === "paper") await handlePaperSearch();
+    else await handleChunkSearch();
   }
 
   async function handlePaperSearch() {
-    setError(null);
-    setMessage(null);
-    setLoading(true);
-    setItems([]);
-    setDebugInfo(null);
-    setProgress(null);
+    setError(null); setMessage(null); setLoading(true);
+    setItems([]); setDebugInfo(null); setProgress(null); setExpandedPaper(null);
 
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+    if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
 
     try {
-      const keywords = keywordInput
-        .split(",")
-        .map((k) => k.trim())
-        .filter(Boolean);
-
-      if (keywords.length === 0) {
-        throw new Error("请先输入至少一个关键词");
-      }
+      const keywords = keywordInput.split(",").map((k) => k.trim()).filter(Boolean);
+      if (keywords.length === 0) throw new Error("请先输入至少一个关键词");
 
       const body: SemanticSearchRequestPayload = { keywords };
-
       if (yearFrom) body.year_from = Number(yearFrom);
       if (yearTo) body.year_to = Number(yearTo);
       if (limit) body.limit = Number(limit);
@@ -129,524 +121,380 @@ function SemanticSearchDebugPanel() {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ type: "search", payload: body }));
-      };
-
+      ws.onopen = () => { ws.send(JSON.stringify({ type: "search", payload: body })); };
       ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data as string) as {
-            type: string;
-            message?: string;
-            debug?: SemanticSearchDebug;
-            items?: SemanticSearchItem[];
-            progress?: { current: number; total: number };
-          };
-
+          const data = JSON.parse(event.data as string);
           if (data.type === "debug" && data.debug) {
             setDebugInfo(data.debug);
             if (data.message) setMessage(data.message);
           } else if (data.type === "partial_result" && data.items) {
             setItems((prev) => [...prev, ...(data.items ?? [])]);
-            if (data.progress) {
-              setProgress({
-                current: data.progress.current,
-                total: data.progress.total,
-              });
-            }
+            if (data.progress) setProgress(data.progress);
           } else if (data.type === "done") {
             setLoading(false);
           } else if (data.type === "error") {
-            setError(data.message || "语义检索时出现错误");
-            setLoading(false);
+            setError(data.message || "语义检索时出现错误"); setLoading(false);
           }
-        } catch (err) {
-          console.error("解析 WebSocket 消息时出现错误", err);
-          setError("解析 WebSocket 消息时出现错误");
-          setLoading(false);
-        }
+        } catch { setError("解析 WebSocket 消息时出现错误"); setLoading(false); }
       };
-
-      ws.onerror = () => {
-        setError("WebSocket 连接出现错误");
-        setLoading(false);
-      };
-
-      ws.onclose = () => {
-        wsRef.current = null;
-      };
+      ws.onerror = () => { setError("WebSocket 连接出现错误"); setLoading(false); };
+      ws.onclose = () => { wsRef.current = null; };
     } catch (e) {
-      const err = e as Error;
-      setError(err.message || "语义检索时出现错误");
-      setItems([]);
-      setDebugInfo(null);
-      setLoading(false);
+      setError((e as Error).message || "语义检索时出现错误");
+      setItems([]); setDebugInfo(null); setLoading(false);
     }
   }
 
   async function handleChunkSearch() {
-    setChunkError(null);
-    setChunkLoading(true);
-    setChunkResults([]);
-    setExpandedChunks(new Set());
-
+    setChunkError(null); setChunkLoading(true); setChunkResults([]); setExpandedChunks(new Set());
     try {
-      const keywords = keywordInput
-        .split(",")
-        .map((k) => k.trim())
-        .filter(Boolean);
-
-      if (keywords.length === 0) {
-        throw new Error("请先输入至少一个关键词");
-      }
-
-      const body: Record<string, unknown> = {
-        keywords,
-        limit: Number(limit) || 20,
-        score_threshold: 0.25,
-      };
-
+      const keywords = keywordInput.split(",").map((k) => k.trim()).filter(Boolean);
+      if (keywords.length === 0) throw new Error("请先输入至少一个关键词");
       const resp = await fetch(`${API_BASE_URL}/api/semantic-search/chunks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ keywords, limit: Number(limit) || 20, score_threshold: 0.25 }),
       });
-
-      if (!resp.ok) {
-        const errData = await resp.json().catch(() => ({}));
-        throw new Error(errData.detail || `HTTP ${resp.status}`);
-      }
-
+      if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`); }
       const data = await resp.json();
       setChunkResults(data.items || []);
-    } catch (e) {
-      const err = e as Error;
-      setChunkError(err.message || "Chunk 检索失败");
-    } finally {
-      setChunkLoading(false);
-    }
-  }
-
-  function toggleChunkExpand(idx: number) {
-    setExpandedChunks((prev) => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
-      return next;
-    });
+    } catch (e) { setChunkError((e as Error).message || "Chunk 检索失败"); }
+    finally { setChunkLoading(false); }
   }
 
   const isLoading = searchMode === "paper" ? loading : chunkLoading;
   const currentError = searchMode === "paper" ? error : chunkError;
 
   return (
-    <div className="semantic-search-debug-root">
-      <div className="semantic-search-debug-header">
-        <h2>RAG 语义检索可视化调试</h2>
-        <p className="subtitle">
-          输入关键词，查看语义组扩展、相似度排序结果。支持 Paper 级和 Chunk
-          级两种检索模式。
+    <div style={{ padding: "0 4px" }}>
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: "#0f172a", margin: "0 0 6px" }}>
+          RAG 语义检索可视化调试
+        </h2>
+        <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
+          输入关键词，查看语义组扩展、相似度排序结果。支持 Paper 级和 Chunk 级两种检索模式。
         </p>
       </div>
 
-      {/* ── Mode Tabs ── */}
-      <div style={{ display: "flex", gap: 0, marginBottom: 16 }}>
-        <button
-          type="button"
-          onClick={() => setSearchMode("paper")}
-          style={{
-            padding: "8px 20px",
-            border: "1px solid #555",
-            borderRight: "none",
-            borderRadius: "6px 0 0 6px",
-            background: searchMode === "paper" ? "#4a9eff" : "#2a2a2a",
-            color: searchMode === "paper" ? "#fff" : "#aaa",
-            cursor: "pointer",
-            fontWeight: searchMode === "paper" ? 600 : 400,
-            fontSize: "13px",
-          }}
-        >
-          📄 Paper 级检索
-        </button>
-        <button
-          type="button"
-          onClick={() => setSearchMode("chunk")}
-          style={{
-            padding: "8px 20px",
-            border: "1px solid #555",
-            borderRadius: "0 6px 6px 0",
-            background: searchMode === "chunk" ? "#4a9eff" : "#2a2a2a",
-            color: searchMode === "chunk" ? "#fff" : "#aaa",
-            cursor: "pointer",
-            fontWeight: searchMode === "chunk" ? 600 : 400,
-            fontSize: "13px",
-          }}
-        >
-          🔍 Chunk 级检索 (含页码)
-        </button>
+      {/* Mode Tabs */}
+      <div style={{ display: "flex", gap: 0, marginBottom: 20 }}>
+        {(["paper", "chunk"] as const).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => setSearchMode(mode)}
+            style={{
+              padding: "8px 20px",
+              border: "1px solid #cbd5e1",
+              borderRadius: mode === "paper" ? "8px 0 0 8px" : "0 8px 8px 0",
+              borderLeft: mode === "chunk" ? "none" : undefined,
+              background: searchMode === mode
+                ? "linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)"
+                : "#ffffff",
+              color: searchMode === mode ? "#fff" : "#64748b",
+              cursor: "pointer",
+              fontWeight: searchMode === mode ? 600 : 400,
+              fontSize: 13,
+            }}
+          >
+            {mode === "paper" ? "Paper 级检索" : "Chunk 级检索 (含页码)"}
+          </button>
+        ))}
       </div>
 
-      {/* ── Search Form ── */}
-      <div className="semantic-search-debug-form">
-        <div className="form-row">
-          <label className="form-label">关键词（逗号分隔）</label>
+      {/* Search Form */}
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: 12,
+          padding: "16px 20px", borderRadius: 10,
+          backgroundColor: "#f8fafc", border: "1px solid #e2e8f0",
+          marginBottom: 20, flexWrap: "wrap",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <label style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>关键词（逗号分隔）</label>
           <input
-            className="hero-search-input"
             value={keywordInput}
             onChange={(e) => setKeywordInput(e.target.value)}
-            placeholder="例如：urban design, public space, street life"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleSearch();
+            onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
+            placeholder="例如：urban design, public space"
+            style={{
+              width: "100%", marginTop: 4, padding: "8px 12px", borderRadius: 6,
+              border: "1px solid #cbd5e1", fontSize: 13, backgroundColor: "#fff",
             }}
           />
         </div>
-        <div className="form-row">
-          {searchMode === "paper" && (
-            <>
-              <label className="form-label">年份范围</label>
-              <input
-                className="hero-mini-input"
-                value={yearFrom}
-                onChange={(e) => setYearFrom(e.target.value)}
-                placeholder="2015"
-              />
-              <span className="hero-sep">-</span>
-              <input
-                className="hero-mini-input"
-                value={yearTo}
-                onChange={(e) => setYearTo(e.target.value)}
-                placeholder="2025"
-              />
-            </>
-          )}
-          <label className="form-label">Top K</label>
-          <input
-            className="hero-mini-input"
-            value={limit}
-            onChange={(e) => setLimit(e.target.value)}
-            placeholder="20"
-          />
-          <button
-            type="button"
-            className="primary-button hero-search-button"
-            onClick={handleSearch}
-            disabled={isLoading}
-          >
-            {isLoading
-              ? "检索中…"
-              : searchMode === "paper"
-                ? "执行语义检索"
-                : "执行 Chunk 检索"}
-          </button>
+        {searchMode === "paper" && (
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
+            <div>
+              <label style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>年份</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
+                <input value={yearFrom} onChange={(e) => setYearFrom(e.target.value)} placeholder="2015"
+                  style={{ width: 60, padding: "8px 8px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 13 }} />
+                <span style={{ color: "#94a3b8" }}>-</span>
+                <input value={yearTo} onChange={(e) => setYearTo(e.target.value)} placeholder="2025"
+                  style={{ width: 60, padding: "8px 8px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 13 }} />
+              </div>
+            </div>
+          </div>
+        )}
+        <div>
+          <label style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>Top K</label>
+          <input value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="20"
+            style={{ display: "block", width: 50, marginTop: 4, padding: "8px 8px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 13 }} />
         </div>
+        <button
+          onClick={handleSearch}
+          disabled={isLoading}
+          style={{
+            alignSelf: "flex-end", padding: "8px 24px", borderRadius: 8, border: "none",
+            background: isLoading ? "#94a3b8" : "linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)",
+            color: "#fff", fontSize: 13, fontWeight: 600, cursor: isLoading ? "default" : "pointer",
+          }}
+        >
+          {isLoading ? "检索中..." : "执行检索"}
+        </button>
       </div>
 
-      {/* ── Errors & Messages ── */}
+      {/* Status */}
       {currentError && (
-        <div className="error-text" style={{ marginTop: 12 }}>
+        <div style={{ padding: "10px 14px", borderRadius: 8, backgroundColor: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", fontSize: 13, marginBottom: 16 }}>
           {currentError}
         </div>
       )}
       {searchMode === "paper" && message && !error && (
-        <div className="info-text" style={{ marginTop: 12 }}>
+        <div style={{ padding: "10px 14px", borderRadius: 8, backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", color: "#16a34a", fontSize: 13, marginBottom: 16 }}>
           {message}
-        </div>
-      )}
-      {searchMode === "paper" && progress && !error && (
-        <div className="info-text" style={{ marginTop: 8 }}>
-          进度：{progress.current} / {progress.total}
+          {progress && ` (${progress.current}/${progress.total})`}
         </div>
       )}
 
-      {/* ── Paper-level Debug Info ── */}
+      {/* Debug Info */}
       {searchMode === "paper" && debugInfo && (
-        <div className="semantic-search-debug-section">
-          <h3>调试信息</h3>
-          <div className="debug-block">
-            <div className="debug-row">
-              <strong>扩展关键词：</strong>
+        <div style={{ padding: "16px 20px", borderRadius: 10, backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", marginBottom: 20 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", margin: "0 0 12px" }}>调试信息</h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 24, fontSize: 13 }}>
+            <div>
+              <span style={{ color: "#64748b", fontWeight: 500 }}>扩展关键词: </span>
               {debugInfo.expanded_keywords.length > 0 ? (
-                <div className="keyword-chips">
-                  {debugInfo.expanded_keywords.map((k, idx) => (
-                    <span key={idx} className="chip">
-                      {k}
+                <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+                  {debugInfo.expanded_keywords.map((k, i) => (
+                    <span key={i} style={{
+                      padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 500,
+                      backgroundColor: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe",
+                    }}>{k}</span>
+                  ))}
+                </span>
+              ) : <span style={{ color: "#94a3b8" }}>无扩展</span>}
+            </div>
+            <div>
+              <span style={{ color: "#64748b", fontWeight: 500 }}>候选文献: </span>
+              <strong style={{ color: "#0f172a" }}>{debugInfo.total_candidates}</strong> 篇
+            </div>
+            {Object.keys(debugInfo.activated_groups).length > 0 && (
+              <div>
+                <span style={{ color: "#64748b", fontWeight: 500 }}>激活语义组: </span>
+                <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+                  {Object.entries(debugInfo.activated_groups).map(([key, g]) => (
+                    <span key={key} style={{
+                      padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 500,
+                      backgroundColor: "#f5f3ff", color: "#7c3aed", border: "1px solid #ddd6fe",
+                    }} title={`匹配词: ${(g.matched_words || []).join(", ")}`}>
+                      {g.name || key} ({((g.strength ?? 0) * 100).toFixed(0)}%)
                     </span>
                   ))}
-                </div>
-              ) : (
-                <span>无</span>
-              )}
-            </div>
-            <div className="debug-row">
-              <strong>候选文献总数：</strong>
-              <span>{debugInfo.total_candidates}</span>
-            </div>
-            <div className="debug-row">
-              <strong>激活语义组：</strong>
-              {Object.keys(debugInfo.activated_groups).length > 0 ? (
-                <ul className="group-list">
-                  {Object.entries(debugInfo.activated_groups).map(
-                    ([key, group]) => (
-                      <li key={key} className="group-item">
-                        <div className="group-title">
-                          <span className="chip">{key}</span>
-                        </div>
-                        <pre
-                          className="code-block"
-                          style={{ whiteSpace: "pre-wrap" }}
-                        >
-                          {JSON.stringify(group, null, 2)}
-                        </pre>
-                      </li>
-                    ),
-                  )}
-                </ul>
-              ) : (
-                <span>无激活语义组</span>
-              )}
-            </div>
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ── Paper-level Results ── */}
+      {/* Paper Results */}
       {searchMode === "paper" && items.length > 0 && (
-        <div className="semantic-search-debug-section">
-          <h3>检索结果（按相似度排序）</h3>
-          <table className="result-table">
-            <thead>
-              <tr>
-                <th style={{ width: 80 }}>Score</th>
-                <th style={{ width: 80 }}>Year</th>
-                <th>Title</th>
-                <th style={{ width: 220 }}>Authors</th>
-                <th style={{ width: 120 }}>Source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.paper.id}>
-                  <td>{item.score.toFixed(4)}</td>
-                  <td>{item.paper.year ?? "-"}</td>
-                  <td>{item.paper.title}</td>
-                  <td>
-                    {item.paper.authors && item.paper.authors.length > 0
-                      ? item.paper.authors.join(", ")
-                      : "-"}
-                  </td>
-                  <td>
-                    {item.paper.journal ||
-                      item.paper.venue ||
-                      item.paper.source ||
-                      "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* ── Chunk-level Results ── */}
-      {searchMode === "chunk" && chunkResults.length > 0 && (
-        <div className="semantic-search-debug-section">
-          <h3>
-            Chunk 检索结果
-            <span
-              style={{
-                fontSize: "13px",
-                fontWeight: 400,
-                color: "#888",
-                marginLeft: 8,
-              }}
-            >
-              共 {chunkResults.length} 条 · 来自{" "}
-              {new Set(chunkResults.map((c) => c.paper_id)).size} 篇论文
+        <div style={{ borderRadius: 10, border: "1px solid #e2e8f0", backgroundColor: "#fff", overflow: "hidden" }}>
+          <div style={{ padding: "12px 20px", backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 1 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", margin: 0 }}>
+              检索结果
+            </h3>
+            <span style={{ fontSize: 12, color: "#94a3b8" }}>
+              共 {items.length} 篇，按相似度降序
             </span>
-          </h3>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {chunkResults.map((chunk, idx) => {
-              const isExpanded = expandedChunks.has(idx);
-              const scoreColor =
-                chunk.score >= 0.7
-                  ? "#4caf50"
-                  : chunk.score >= 0.5
-                    ? "#ff9800"
-                    : chunk.score >= 0.3
-                      ? "#ff5722"
-                      : "#999";
-
+          </div>
+          <div style={{ maxHeight: "calc(100vh - 380px)", overflowY: "auto" }}>
+            {items.map((item, idx) => {
+              const isExpanded = expandedPaper === item.paper.id;
               return (
                 <div
-                  key={idx}
+                  key={item.paper.id}
+                  onClick={() => setExpandedPaper(isExpanded ? null : item.paper.id)}
                   style={{
-                    background: "#1e1e1e",
-                    border: "1px solid #333",
-                    borderRadius: 8,
-                    padding: "12px 16px",
+                    padding: "14px 20px",
+                    borderBottom: idx < items.length - 1 ? "1px solid #f1f5f9" : "none",
                     cursor: "pointer",
-                    transition: "border-color 0.2s",
+                    backgroundColor: isExpanded ? "#f8fafc" : "transparent",
+                    transition: "background-color 0.15s",
                   }}
-                  onClick={() => toggleChunkExpand(idx)}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.borderColor = "#4a9eff")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.borderColor = "#333")
-                  }
                 >
-                  {/* Header row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    {/* Score badge */}
-                    <span
-                      style={{
-                        background: scoreColor + "22",
-                        color: scoreColor,
-                        border: `1px solid ${scoreColor}44`,
-                        borderRadius: 4,
-                        padding: "2px 8px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        fontFamily: "monospace",
-                        minWidth: 60,
-                        textAlign: "center",
-                      }}
-                    >
-                      {chunk.score.toFixed(4)}
+                  {/* Main row */}
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    {/* Rank */}
+                    <span style={{
+                      width: 28, height: 28, borderRadius: "50%", display: "flex",
+                      alignItems: "center", justifyContent: "center", flexShrink: 0,
+                      fontSize: 12, fontWeight: 700,
+                      backgroundColor: idx < 3 ? "#eff6ff" : "#f8fafc",
+                      color: idx < 3 ? "#2563eb" : "#94a3b8",
+                      border: `1px solid ${idx < 3 ? "#bfdbfe" : "#e2e8f0"}`,
+                    }}>
+                      {idx + 1}
                     </span>
 
-                    {/* Page badge */}
-                    {chunk.page_number != null && (
-                      <span
-                        style={{
-                          background: "#4a9eff22",
-                          color: "#4a9eff",
-                          border: "1px solid #4a9eff44",
-                          borderRadius: 4,
-                          padding: "2px 8px",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                        }}
-                      >
-                        📄 p.{chunk.page_number}
-                      </span>
-                    )}
+                    {/* Score */}
+                    <span style={{
+                      padding: "4px 10px", borderRadius: 6, fontSize: 12, fontWeight: 700,
+                      fontFamily: "monospace", flexShrink: 0,
+                      backgroundColor: scoreBg(item.score), color: scoreColor(item.score),
+                    }}>
+                      {item.score.toFixed(3)}
+                    </span>
 
-                    {/* REF marker */}
-                    {chunk.ref_marker && (
-                      <span
-                        style={{
-                          background: "#9c27b022",
-                          color: "#ce93d8",
-                          border: "1px solid #9c27b044",
-                          borderRadius: 4,
-                          padding: "2px 8px",
-                          fontSize: "11px",
-                          fontFamily: "monospace",
-                        }}
-                      >
-                        {chunk.ref_marker}
-                      </span>
-                    )}
+                    {/* Content */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", lineHeight: 1.4 }}>
+                        {item.paper.title}
+                      </div>
+                      <div style={{ display: "flex", gap: 12, marginTop: 4, flexWrap: "wrap", fontSize: 12, color: "#64748b" }}>
+                        {item.paper.authors && item.paper.authors.length > 0 && (
+                          <span>{item.paper.authors.slice(0, 3).join(", ")}{item.paper.authors.length > 3 ? " et al." : ""}</span>
+                        )}
+                        {item.paper.year && <span style={{ fontWeight: 600 }}>{item.paper.year}</span>}
+                        {(item.paper.journal || item.paper.venue) && (
+                          <span style={{ fontStyle: "italic" }}>{item.paper.journal || item.paper.venue}</span>
+                        )}
+                        {item.paper.doi && (
+                          <a
+                            href={`https://doi.org/${item.paper.doi}`}
+                            target="_blank" rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ color: "#2563eb", textDecoration: "none" }}
+                          >
+                            DOI
+                          </a>
+                        )}
+                      </div>
 
-                    {/* Paper info */}
-                    <span style={{ fontSize: "13px", color: "#ccc", flex: 1 }}>
-                      <strong style={{ color: "#e0e0e0" }}>
-                        {chunk.paper_title}
-                      </strong>
-                      {chunk.paper_year && (
-                        <span style={{ color: "#888", marginLeft: 6 }}>
-                          ({chunk.paper_year})
-                        </span>
+                      {/* Expanded: abstract */}
+                      {isExpanded && item.paper.abstract && (
+                        <div style={{
+                          marginTop: 10, padding: "10px 14px", borderRadius: 8,
+                          backgroundColor: "#f1f5f9", fontSize: 12, color: "#475569",
+                          lineHeight: 1.6, maxHeight: 200, overflowY: "auto",
+                        }}>
+                          {item.paper.abstract}
+                        </div>
                       )}
-                      {chunk.paper_authors && (
-                        <span
-                          style={{
-                            color: "#666",
-                            marginLeft: 8,
-                            fontSize: "12px",
-                          }}
-                        >
-                          — {chunk.paper_authors}
-                        </span>
+                      {isExpanded && !item.paper.abstract && (
+                        <div style={{ marginTop: 10, fontSize: 12, color: "#cbd5e1", fontStyle: "italic" }}>
+                          无摘要
+                        </div>
                       )}
-                    </span>
+                    </div>
 
-                    {/* Chunk index */}
-                    <span style={{ color: "#666", fontSize: "11px" }}>
-                      chunk #{chunk.chunk_index}
-                    </span>
-
-                    {/* Expand indicator */}
-                    <span style={{ color: "#666", fontSize: "12px" }}>
+                    {/* Expand icon */}
+                    <span style={{ color: "#94a3b8", fontSize: 14, flexShrink: 0 }}>
                       {isExpanded ? "▲" : "▼"}
                     </span>
                   </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-                  {/* Preview (always shown) */}
-                  {!isExpanded && (
-                    <div
-                      style={{
-                        marginTop: 8,
-                        fontSize: "12px",
-                        color: "#999",
-                        lineHeight: 1.5,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
+      {/* Chunk Results */}
+      {searchMode === "chunk" && chunkResults.length > 0 && (
+        <div style={{ borderRadius: 10, border: "1px solid #e2e8f0", backgroundColor: "#fff", overflow: "hidden" }}>
+          <div style={{ padding: "12px 20px", backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 1 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", margin: 0 }}>
+              Chunk 检索结果
+            </h3>
+            <span style={{ fontSize: 12, color: "#94a3b8" }}>
+              共 {chunkResults.length} 条，来自 {new Set(chunkResults.map((c) => c.paper_id)).size} 篇论文
+            </span>
+          </div>
+          <div style={{ maxHeight: "calc(100vh - 380px)", overflowY: "auto" }}>
+            {chunkResults.map((chunk, idx) => {
+              const isExp = expandedChunks.has(idx);
+              return (
+                <div
+                  key={idx}
+                  onClick={() => {
+                    setExpandedChunks((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(idx)) next.delete(idx); else next.add(idx);
+                      return next;
+                    });
+                  }}
+                  style={{
+                    padding: "12px 20px",
+                    borderBottom: idx < chunkResults.length - 1 ? "1px solid #f1f5f9" : "none",
+                    cursor: "pointer",
+                    backgroundColor: isExp ? "#f8fafc" : "transparent",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{
+                      padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                      fontFamily: "monospace",
+                      backgroundColor: scoreBg(chunk.score), color: scoreColor(chunk.score),
+                    }}>
+                      {chunk.score.toFixed(3)}
+                    </span>
+                    {chunk.page_number != null && (
+                      <span style={{
+                        padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                        backgroundColor: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe",
+                      }}>
+                        p.{chunk.page_number}
+                      </span>
+                    )}
+                    {chunk.ref_marker && (
+                      <span style={{
+                        padding: "2px 8px", borderRadius: 6, fontSize: 10, fontFamily: "monospace",
+                        backgroundColor: "#f5f3ff", color: "#7c3aed", border: "1px solid #ddd6fe",
+                      }}>
+                        {chunk.ref_marker}
+                      </span>
+                    )}
+                    <span style={{ flex: 1, fontSize: 13, color: "#0f172a", fontWeight: 600 }}>
+                      {chunk.paper_title}
+                      {chunk.paper_year && <span style={{ color: "#94a3b8", fontWeight: 400, marginLeft: 6 }}>({chunk.paper_year})</span>}
+                    </span>
+                    <span style={{ color: "#cbd5e1", fontSize: 11 }}>chunk #{chunk.chunk_index}</span>
+                    <span style={{ color: "#94a3b8", fontSize: 12 }}>{isExp ? "▲" : "▼"}</span>
+                  </div>
+
+                  {!isExp && (
+                    <div style={{ marginTop: 6, fontSize: 12, color: "#94a3b8", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {chunk.chunk_content.slice(0, 150)}...
                     </div>
                   )}
 
-                  {/* Full content (when expanded) */}
-                  {isExpanded && (
-                    <div
-                      style={{
-                        marginTop: 12,
-                        padding: "12px",
-                        background: "#161616",
-                        borderRadius: 6,
-                        border: "1px solid #2a2a2a",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "12px",
-                          color: "#bbb",
-                          lineHeight: 1.7,
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        {chunk.chunk_content}
-                      </div>
-                      <div
-                        style={{
-                          marginTop: 8,
-                          paddingTop: 8,
-                          borderTop: "1px solid #333",
-                          display: "flex",
-                          gap: 16,
-                          fontSize: "11px",
-                          color: "#666",
-                        }}
-                      >
+                  {isExp && (
+                    <div style={{
+                      marginTop: 10, padding: "12px 14px", borderRadius: 8,
+                      backgroundColor: "#f1f5f9", border: "1px solid #e2e8f0",
+                      fontSize: 12, color: "#475569", lineHeight: 1.7,
+                      whiteSpace: "pre-wrap", wordBreak: "break-word",
+                    }}>
+                      {chunk.chunk_content}
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e2e8f0", display: "flex", gap: 16, fontSize: 11, color: "#94a3b8" }}>
                         <span>Paper ID: {chunk.paper_id}</span>
-                        <span>Chunk Index: {chunk.chunk_index}</span>
-                        {chunk.page_number != null && (
-                          <span>Page: {chunk.page_number}</span>
-                        )}
                         <span>Score: {chunk.score.toFixed(6)}</span>
+                        {chunk.paper_authors && <span>Authors: {chunk.paper_authors}</span>}
                       </div>
                     </div>
                   )}
@@ -658,25 +506,18 @@ function SemanticSearchDebugPanel() {
       )}
 
       {/* Empty states */}
-      {searchMode === "chunk" &&
-        !chunkLoading &&
-        chunkResults.length === 0 &&
-        chunkError === null && (
-          <div
-            style={{
-              textAlign: "center",
-              color: "#666",
-              marginTop: 40,
-              fontSize: "14px",
-            }}
-          >
-            输入关键词执行 Chunk 级检索，查看 PDF 文本片段及其页码。
-            <br />
-            <span style={{ fontSize: "12px", color: "#555" }}>
-              提示：需要先在文献管理页面对论文执行 PDF 分段 (Chunking) 操作。
-            </span>
-          </div>
-        )}
+      {searchMode === "paper" && !loading && items.length === 0 && !error && !debugInfo && (
+        <div style={{ textAlign: "center", color: "#94a3b8", marginTop: 48, fontSize: 14 }}>
+          输入关键词执行 Paper 级语义检索
+        </div>
+      )}
+      {searchMode === "chunk" && !chunkLoading && chunkResults.length === 0 && !chunkError && (
+        <div style={{ textAlign: "center", color: "#94a3b8", marginTop: 48, fontSize: 14 }}>
+          输入关键词执行 Chunk 级检索，查看 PDF 文本片段及其页码。
+          <br />
+          <span style={{ fontSize: 12 }}>需要先对论文执行 PDF 分段 (Chunking) 操作。</span>
+        </div>
+      )}
     </div>
   );
 }

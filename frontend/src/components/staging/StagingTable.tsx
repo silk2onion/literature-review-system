@@ -56,6 +56,7 @@ export default function StagingTable({
               <th style={{ width: 120 }}>来源</th>
               <th style={{ width: 80 }}>年份</th>
               <th style={{ width: 100 }}>状态</th>
+              <th style={{ width: 80 }}>AI 评分</th>
               <th style={{ width: 110 }}>筛选阶段</th>
               <th style={{ width: 140 }}>链接</th>
               <th style={{ width: 100 }}>抓取任务</th>
@@ -65,7 +66,7 @@ export default function StagingTable({
             {items.length === 0 && !loading && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   style={{
                     padding: "16px 12px",
                     textAlign: "center",
@@ -171,6 +172,43 @@ export default function StagingTable({
                     }}
                   >
                     {p.status || "-"}
+                  </td>
+                  <td
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: 12,
+                      textAlign: "center",
+                    }}
+                  >
+                    {p.llm_score != null ? (
+                      <span
+                        title={Array.isArray(p.llm_tags) ? p.llm_tags.join(" | ") : ""}
+                        style={{
+                          display: "inline-block",
+                          padding: "2px 8px",
+                          borderRadius: 999,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          backgroundColor:
+                            p.llm_score >= 7
+                              ? "#dcfce7"
+                              : p.llm_score >= 4
+                                ? "#fef9c3"
+                                : "#fee2e2",
+                          color:
+                            p.llm_score >= 7
+                              ? "#16a34a"
+                              : p.llm_score >= 4
+                                ? "#ca8a04"
+                                : "#dc2626",
+                          cursor: "default",
+                        }}
+                      >
+                        {p.llm_score}/10
+                      </span>
+                    ) : (
+                      <span style={{ color: "#d1d5db" }}>-</span>
+                    )}
                   </td>
                   <td
                     style={{
