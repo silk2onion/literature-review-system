@@ -6,6 +6,8 @@ interface ConfirmModalProps {
   setExclusionReasonInput: (v: string) => void;
   onCancel: () => void;
   onConfirm: () => void;
+  /** 可选：预定义排除原因模板列表 */
+  exclusionTemplates?: string[];
 }
 
 export default function ConfirmModal({
@@ -16,6 +18,7 @@ export default function ConfirmModal({
   setExclusionReasonInput,
   onCancel,
   onConfirm,
+  exclusionTemplates,
 }: ConfirmModalProps) {
   if (!show) return null;
 
@@ -67,12 +70,36 @@ export default function ConfirmModal({
             <label
               style={{ fontSize: 13, color: "#374151", fontWeight: 500 }}
             >
-              排除原因 (可选):
+              排除原因:
             </label>
+            {exclusionTemplates && exclusionTemplates.length > 0 && (
+              <select
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) setExclusionReasonInput(e.target.value);
+                }}
+                style={{
+                  width: "100%",
+                  marginTop: 6,
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  fontSize: 13,
+                  backgroundColor: "#ffffff",
+                  color: "#0f172a",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">-- 选择预定义原因 --</option>
+                {exclusionTemplates.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            )}
             <textarea
               value={exclusionReasonInput}
               onChange={(e) => setExclusionReasonInput(e.target.value)}
-              placeholder="例如: 非实证研究 / 研究对象不符 / 重复文献 / 年份超出范围..."
+              placeholder="选择上方模板或自行填写排除原因..."
               style={{
                 width: "100%",
                 marginTop: 6,

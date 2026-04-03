@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../api/config";
+import { PrismaStagePanel, ConfirmModal } from "../components/staging";
+import type { StagingPaper } from "../components/staging";
 
 type PrismaStageCount = {
   stage: string;
@@ -52,6 +54,12 @@ const STAGE_META: Record<
   },
 };
 
+const NEXT_STAGE_LABEL: Record<string, string> = {
+  identification: "📋 筛选",
+  screening: "✅ 资格",
+  eligibility: "📎 纳入",
+};
+
 export default function PrismaFlowPage() {
   const [stats, setStats] = useState<PrismaStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -59,7 +67,29 @@ export default function PrismaFlowPage() {
   const [crawlJobId, setCrawlJobId] = useState<string>("");
   const [crawlJobs, setCrawlJobs] = useState<CrawlJobOption[]>([]);
 
-  // Fetch available crawl jobs for the filter dropdown
+  // 展开的阶段面板
+  const [expandedStage, setExpandedStage] = useState<string | null>(null);
+  const [stagePapers, setStagePapers] = useState<StagingPaper[]>([]);
+  const [stagePapersLoading, setStagePapersLoading] = useState(false);
+  const [stagePapersTotal, setStagePapersTotal] = useState(0);
+  const [stagePage, setStagePage] = useState(1);
+  const stagePageSize = 10;
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+
+  // 排除 modal
+  const [showExcludeModal, setShowExcludeModal] = useState(false);
+  const [exclusionReasonInput, setExclusionReasonInput] = useState("");
+  const [exclusionTemplates, setExclusionTemplates] = useState<string[]>([]);
+
+  // AI 筛选 modal
+  const [showAIScreenModal, setShowAIScreenModal] = useState(false);
+  const [aiScreenTopic, setAiScreenTopic] = useState("");
+  const [aiScreening, setAiScreening] = useState(false);
+
+  // 操作状态提示
+  const [actionMsg, setActionMsg] = useState("");
+
+  // Fetch crawl jobs + exclusion templates on mount
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/crawl/jobs?limit=50`)
       .then((r) => r.json())
@@ -73,7 +103,12 @@ export default function PrismaFlowPage() {
         );
         setCrawlJobs(jobs);
       })
-      .catch((err) => console.error("Failed to load crawl jobs:", err));
+      .catch(() => {});
+
+    fetch(`${API_BASE_URL}/api/staging-papers/exclusion-templates`)
+      .then((r) => r.json())
+      .then((d) => { if (d.templates) setExclusionTemplates(d.templates); })
+      .catch(() => {});
   }, []);
 
   const fetchStats = async () => {
@@ -84,10 +119,7 @@ export default function PrismaFlowPage() {
         ? `${API_BASE_URL}/api/staging-papers/prisma-stats?crawl_job_id=${crawlJobId}`
         : `${API_BASE_URL}/api/staging-papers/prisma-stats`;
       const resp = await fetch(url);
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`请求失败: ${resp.status} - ${text}`);
-      }
+      if (!resp.ok) throw new Error(`请求失败: ${resp.status}`);
       const data: PrismaStats = await resp.json();
       setStats(data);
     } catch (err) {
@@ -102,9 +134,152 @@ export default function PrismaFlowPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleFilter = () => {
-    fetchStats();
+  const fetchStagePapers = async (stage: string, page: number) => {
+    setStagePapersLoading(true);
+    try {
+      const payload: Record<string, unknown> = {
+        screening_stage: stage,
+        status: "pending",
+        page,
+        page_size: stagePageSize,
+      };
+      if (crawlJobId) payload.crawl_job_id = Number(crawlJobId);
+      const resp = await fetch(`${API_BASE_URL}/api/staging-papers/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      setStagePapers(data.items || []);
+      setStagePapersTotal(data.total || 0);
+    } catch {
+      setStagePapers([]);
+      setStagePapersTotal(0);
+    } finally {
+      setStagePapersLoading(false);
+    }
   };
+
+  const handleStageClick = (stage: string) => {
+    if (expandedStage === stage) {
+      setExpandedStage(null);
+      setSelectedIds([]);
+      return;
+    }
+    setExpandedStage(stage);
+    setSelectedIds([]);
+    setStagePage(1);
+    fetchStagePapers(stage, 1);
+  };
+
+  const refreshAll = async () => {
+    await fetchStats();
+    if (expandedStage) await fetchStagePapers(expandedStage, stagePage);
+  };
+
+  // 推进到下一阶段
+  const handleAdvance = async () => {
+    if (selectedIds.length === 0 || !expandedStage) return;
+    const nextStage = ({ identification: "screening", screening: "eligibility", eligibility: "included" } as Record<string, string>)[expandedStage];
+    if (!nextStage) return;
+
+    try {
+      setActionMsg("正在推进...");
+      const resp = await fetch(`${API_BASE_URL}/api/staging-papers/batch-screening`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedIds, screening_stage: nextStage }),
+      });
+      const result = await resp.json();
+      setActionMsg(
+        `已推进 ${result.updated_count} 篇` +
+        (result.skipped_count > 0 ? `，跳过 ${result.skipped_count} 篇（阶段不匹配）` : ""),
+      );
+      setSelectedIds([]);
+      await refreshAll();
+      setTimeout(() => setActionMsg(""), 3000);
+    } catch (err) {
+      setActionMsg(`推进失败: ${(err as { message?: string })?.message || "未知错误"}`);
+    }
+  };
+
+  // 排除（拒绝）
+  const handleExclude = async () => {
+    if (selectedIds.length === 0) return;
+    try {
+      setShowExcludeModal(false);
+      setActionMsg("正在排除...");
+      await fetch(`${API_BASE_URL}/api/staging-papers/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: selectedIds,
+          exclusion_reason: exclusionReasonInput.trim() || undefined,
+        }),
+      });
+      setActionMsg(`已排除 ${selectedIds.length} 篇`);
+      setSelectedIds([]);
+      setExclusionReasonInput("");
+      await refreshAll();
+      setTimeout(() => setActionMsg(""), 3000);
+    } catch (err) {
+      setActionMsg(`排除失败: ${(err as { message?: string })?.message || "未知错误"}`);
+    }
+  };
+
+  // AI 筛选
+  const handleAIScreen = async () => {
+    if (!aiScreenTopic.trim()) return;
+    try {
+      setShowAIScreenModal(false);
+      setAiScreening(true);
+      setActionMsg("AI 正在筛选...");
+      const payload: Record<string, unknown> = { topic: aiScreenTopic.trim() };
+      if (selectedIds.length > 0) {
+        payload.ids = selectedIds;
+      } else if (crawlJobId) {
+        payload.crawl_job_ids = [Number(crawlJobId)];
+      }
+      const resp = await fetch(`${API_BASE_URL}/api/staging-papers/ai-screen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await resp.json();
+      setActionMsg(
+        `AI 筛选完成：推荐 ${result.promoted}，待复核 ${result.pending_review}，拒绝 ${result.rejected}` +
+          (result.pre_filtered ? `，预过滤 ${result.pre_filtered}` : ""),
+      );
+      setSelectedIds([]);
+      await refreshAll();
+      setTimeout(() => setActionMsg(""), 5000);
+    } catch (err) {
+      setActionMsg(`AI 筛选失败: ${(err as { message?: string })?.message || "未知错误"}`);
+    } finally {
+      setAiScreening(false);
+    }
+  };
+
+  const toggleSelectOne = (id: number) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const toggleSelectAll = () => {
+    const pageIds = stagePapers.map((p) => p.id);
+    const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+    } else {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+    }
+  };
+
+  const allCurrentSelected =
+    stagePapers.length > 0 && stagePapers.every((p) => selectedIds.includes(p.id));
+
+  const stageTotalPages = Math.max(1, Math.ceil(stagePapersTotal / stagePageSize));
 
   return (
     <div className="page-container">
@@ -112,8 +287,7 @@ export default function PrismaFlowPage() {
         <div className="page-title">
           <h1>PRISMA-ScR 筛选流程</h1>
           <p>
-            基于 PRISMA-ScR（Scoping Review
-            扩展版）标准的四阶段筛选流程可视化，追踪文献从识别到最终纳入的完整链路
+            点击阶段卡片展开论文列表，可推进阶段、排除文献或触发 AI 筛选
           </p>
         </div>
       </header>
@@ -137,15 +311,9 @@ export default function PrismaFlowPage() {
           value={crawlJobId}
           onChange={(e) => setCrawlJobId(e.target.value)}
           style={{
-            height: 36,
-            padding: "0 8px",
-            borderRadius: 6,
-            border: "1px solid #cbd5e1",
-            backgroundColor: "#ffffff",
-            color: "#0f172a",
-            fontSize: 13,
-            minWidth: 280,
-            cursor: "pointer",
+            height: 36, padding: "0 8px", borderRadius: 6,
+            border: "1px solid #cbd5e1", backgroundColor: "#ffffff",
+            color: "#0f172a", fontSize: 13, minWidth: 280, cursor: "pointer",
           }}
         >
           <option value="">全部任务（汇总）</option>
@@ -156,19 +324,13 @@ export default function PrismaFlowPage() {
           ))}
         </select>
         <button
-          onClick={handleFilter}
+          onClick={() => fetchStats()}
           disabled={loading}
           style={{
-            height: 36,
-            padding: "0 20px",
-            borderRadius: 6,
-            border: "none",
+            height: 36, padding: "0 20px", borderRadius: 6, border: "none",
             background: "linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)",
-            color: "#ffffff",
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: loading ? "default" : "pointer",
-            opacity: loading ? 0.7 : 1,
+            color: "#ffffff", fontSize: 13, fontWeight: 500,
+            cursor: loading ? "default" : "pointer", opacity: loading ? 0.7 : 1,
           }}
         >
           {loading ? "加载中..." : "查询"}
@@ -176,30 +338,26 @@ export default function PrismaFlowPage() {
         <button
           onClick={() => fetchStats()}
           style={{
-            height: 36,
-            padding: "0 14px",
-            borderRadius: 6,
-            border: "1px solid #cbd5e1",
-            backgroundColor: "#ffffff",
-            color: "#374151",
-            fontSize: 13,
-            cursor: "pointer",
+            height: 36, padding: "0 14px", borderRadius: 6,
+            border: "1px solid #cbd5e1", backgroundColor: "#ffffff",
+            color: "#374151", fontSize: 13, cursor: "pointer",
           }}
         >
           🔄 刷新
         </button>
+        {actionMsg && (
+          <span style={{ fontSize: 12, color: "#6366f1", fontWeight: 500 }}>
+            {actionMsg}
+          </span>
+        )}
       </div>
 
       {error && (
         <div
           style={{
-            padding: "10px 14px",
-            borderRadius: 6,
-            backgroundColor: "#fef2f2",
-            border: "1px solid #fecaca",
-            color: "#dc2626",
-            fontSize: 13,
-            marginBottom: 16,
+            padding: "10px 14px", borderRadius: 6,
+            backgroundColor: "#fef2f2", border: "1px solid #fecaca",
+            color: "#dc2626", fontSize: 13, marginBottom: 16,
           }}
         >
           {error}
@@ -211,22 +369,15 @@ export default function PrismaFlowPage() {
           {/* Total Count Banner */}
           <div
             style={{
-              padding: "12px 20px",
-              borderRadius: 8,
-              backgroundColor: "#f8fafc",
-              border: "1px solid #e2e8f0",
-              marginBottom: 24,
-              display: "flex",
-              alignItems: "center",
+              padding: "12px 20px", borderRadius: 8,
+              backgroundColor: "#f8fafc", border: "1px solid #e2e8f0",
+              marginBottom: 24, display: "flex", alignItems: "center",
               justifyContent: "space-between",
             }}
           >
             <span style={{ fontSize: 14, color: "#475569" }}>
               暂存文献总量:{" "}
-              <strong style={{ color: "#0f172a", fontSize: 18 }}>
-                {stats.total}
-              </strong>{" "}
-              篇
+              <strong style={{ color: "#0f172a", fontSize: 18 }}>{stats.total}</strong> 篇
             </span>
             {stats.crawl_job_id && (
               <span style={{ fontSize: 12, color: "#94a3b8" }}>
@@ -238,198 +389,113 @@ export default function PrismaFlowPage() {
           {/* PRISMA Flow Diagram */}
           <div
             style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 0,
-              alignItems: "center",
-              marginBottom: 32,
+              display: "flex", flexDirection: "column", gap: 0,
+              alignItems: "center", marginBottom: 32,
             }}
           >
             {stats.stages.map((stage, idx) => {
               const meta = STAGE_META[stage.stage];
               if (!meta) return null;
+              const isExpanded = expandedStage === stage.stage;
               return (
                 <div
                   key={stage.stage}
                   style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    width: "100%",
+                    display: "flex", flexDirection: "column",
+                    alignItems: "center", width: "100%",
                   }}
                 >
-                  {/* Arrow from previous stage */}
+                  {/* Arrow */}
                   {idx > 0 && (
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        margin: "4px 0",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 2,
-                          height: 20,
-                          backgroundColor: "#cbd5e1",
-                        }}
-                      />
-                      <div
-                        style={{
-                          width: 0,
-                          height: 0,
-                          borderLeft: "6px solid transparent",
-                          borderRight: "6px solid transparent",
-                          borderTop: "8px solid #cbd5e1",
-                        }}
-                      />
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", margin: "4px 0" }}>
+                      <div style={{ width: 2, height: 20, backgroundColor: "#cbd5e1" }} />
+                      <div style={{ width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "8px solid #cbd5e1" }} />
                     </div>
                   )}
 
-                  {/* Stage Box */}
+                  {/* Stage Box - now clickable */}
                   <div
+                    onClick={() => handleStageClick(stage.stage)}
                     style={{
-                      display: "flex",
-                      alignItems: "stretch",
-                      width: "100%",
-                      maxWidth: 700,
-                      borderRadius: 10,
-                      border: `2px solid ${meta.color}40`,
-                      backgroundColor: meta.bgColor,
-                      overflow: "hidden",
+                      display: "flex", alignItems: "stretch", width: "100%",
+                      maxWidth: 700, borderRadius: 10,
+                      border: `2px solid ${isExpanded ? meta.color : meta.color + "40"}`,
+                      backgroundColor: meta.bgColor, overflow: "hidden",
+                      cursor: "pointer", transition: "border-color 0.2s",
                     }}
                   >
-                    {/* Left color bar */}
-                    <div
-                      style={{
-                        width: 6,
-                        backgroundColor: meta.color,
-                        flexShrink: 0,
-                      }}
-                    />
-
-                    {/* Content */}
-                    <div
-                      style={{
-                        flex: 1,
-                        padding: "16px 20px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 12,
-                        }}
-                      >
+                    <div style={{ width: 6, backgroundColor: meta.color, flexShrink: 0 }} />
+                    <div style={{ flex: 1, padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <span style={{ fontSize: 24 }}>{meta.icon}</span>
                         <div>
-                          <div
-                            style={{
-                              fontSize: 15,
-                              fontWeight: 600,
-                              color: "#0f172a",
-                            }}
-                          >
+                          <div style={{ fontSize: 15, fontWeight: 600, color: "#0f172a" }}>
                             {meta.label}
                           </div>
-                          <div
-                            style={{
-                              fontSize: 12,
-                              color: "#64748b",
-                              marginTop: 2,
-                            }}
-                          >
-                            {stage.stage === "identification" &&
-                              "数据库检索返回的全部记录"}
-                            {stage.stage === "screening" &&
-                              "标题/摘要初筛后保留的记录"}
-                            {stage.stage === "eligibility" &&
-                              "全文审查后符合资格的记录"}
-                            {stage.stage === "included" &&
-                              "最终纳入综述分析的记录"}
+                          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                            {stage.stage === "identification" && "数据库检索返回的全部记录"}
+                            {stage.stage === "screening" && "标题/摘要初筛后保留的记录"}
+                            {stage.stage === "eligibility" && "全文审查后符合资格的记录"}
+                            {stage.stage === "included" && "最终纳入综述分析的记录"}
                           </div>
                         </div>
                       </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 16,
-                          textAlign: "center",
-                        }}
-                      >
+                      <div style={{ display: "flex", alignItems: "center", gap: 16, textAlign: "center" }}>
                         <div>
-                          <div
-                            style={{
-                              fontSize: 28,
-                              fontWeight: 700,
-                              color: meta.color,
-                            }}
-                          >
+                          <div style={{ fontSize: 28, fontWeight: 700, color: meta.color }}>
                             {stage.count}
                           </div>
-                          <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                            篇
-                          </div>
+                          <div style={{ fontSize: 11, color: "#94a3b8" }}>篇</div>
                         </div>
                         {stage.excluded_count > 0 && (
-                          <div
-                            style={{
-                              borderLeft: "1px solid #e2e8f0",
-                              paddingLeft: 16,
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: 16,
-                                fontWeight: 600,
-                                color: "#ef4444",
-                              }}
-                            >
+                          <div style={{ borderLeft: "1px solid #e2e8f0", paddingLeft: 16 }}>
+                            <div style={{ fontSize: 16, fontWeight: 600, color: "#ef4444" }}>
                               -{stage.excluded_count}
                             </div>
-                            <div style={{ fontSize: 11, color: "#ef4444" }}>
-                              排除
-                            </div>
+                            <div style={{ fontSize: 11, color: "#ef4444" }}>排除</div>
                           </div>
                         )}
+                        <span style={{ fontSize: 16, color: "#94a3b8", marginLeft: 8 }}>
+                          {isExpanded ? "▲" : "▼"}
+                        </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Exclusion side branch */}
-                  {stage.excluded_count > 0 && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        width: "100%",
-                        maxWidth: 700,
-                        justifyContent: "flex-end",
-                        marginTop: -8,
-                        paddingRight: 20,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "4px 10px",
-                          borderRadius: 6,
-                          backgroundColor: "#fef2f2",
-                          border: "1px solid #fecaca",
-                          fontSize: 11,
-                          color: "#dc2626",
-                        }}
-                      >
-                        ← 排除 {stage.excluded_count} 篇（有记录原因）
+                  {/* Expanded Panel */}
+                  {isExpanded && (
+                    <div style={{ width: "100%", maxWidth: 700 }}>
+                      <PrismaStagePanel
+                        stage={stage.stage}
+                        stageLabel={meta.label}
+                        stageColor={meta.color}
+                        papers={stagePapers}
+                        loading={stagePapersLoading}
+                        total={stagePapersTotal}
+                        page={stagePage}
+                        pageSize={stagePageSize}
+                        totalPages={stageTotalPages}
+                        selectedIds={selectedIds}
+                        onToggleSelect={toggleSelectOne}
+                        onToggleSelectAll={toggleSelectAll}
+                        allSelected={allCurrentSelected}
+                        onAdvance={handleAdvance}
+                        onExclude={() => setShowExcludeModal(true)}
+                        onClose={() => { setExpandedStage(null); setSelectedIds([]); }}
+                        onPageChange={(p) => { setStagePage(p); fetchStagePapers(stage.stage, p); }}
+                        nextStageLabel={NEXT_STAGE_LABEL[stage.stage]}
+                        canAdvance={stage.stage !== "included"}
+                        canRunAI={stage.stage === "identification"}
+                        onRunAI={() => setShowAIScreenModal(true)}
+                      />
+                    </div>
+                  )}
+
+                  {/* Exclusion side note */}
+                  {stage.excluded_count > 0 && !isExpanded && (
+                    <div style={{ display: "flex", width: "100%", maxWidth: 700, justifyContent: "flex-end", marginTop: -8, paddingRight: 20 }}>
+                      <div style={{ padding: "4px 10px", borderRadius: 6, backgroundColor: "#fef2f2", border: "1px solid #fecaca", fontSize: 11, color: "#dc2626" }}>
+                        ← 排除 {stage.excluded_count} 篇
                       </div>
                     </div>
                   )}
@@ -440,94 +506,24 @@ export default function PrismaFlowPage() {
 
           {/* Exclusion Reasons Breakdown */}
           {Object.keys(stats.exclusion_reasons).length > 0 && (
-            <div
-              style={{
-                borderRadius: 10,
-                border: "1px solid #e2e8f0",
-                backgroundColor: "#ffffff",
-                marginBottom: 24,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  padding: "12px 20px",
-                  backgroundColor: "#f8fafc",
-                  borderBottom: "1px solid #e2e8f0",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: "#0f172a",
-                }}
-              >
+            <div style={{ borderRadius: 10, border: "1px solid #e2e8f0", backgroundColor: "#ffffff", marginBottom: 24, overflow: "hidden" }}>
+              <div style={{ padding: "12px 20px", backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: 14, fontWeight: 600, color: "#0f172a" }}>
                 📊 排除原因分布
               </div>
               <div style={{ padding: "12px 20px" }}>
                 {Object.entries(stats.exclusion_reasons)
                   .sort(([, a], [, b]) => b - a)
                   .map(([reason, count]) => {
-                    const totalExcluded = Object.values(
-                      stats.exclusion_reasons,
-                    ).reduce((s, v) => s + v, 0);
-                    const pct =
-                      totalExcluded > 0
-                        ? ((count / totalExcluded) * 100).toFixed(1)
-                        : "0";
+                    const totalExcluded = Object.values(stats.exclusion_reasons).reduce((s, v) => s + v, 0);
+                    const pct = totalExcluded > 0 ? ((count / totalExcluded) * 100).toFixed(1) : "0";
                     return (
-                      <div
-                        key={reason}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 12,
-                          padding: "8px 0",
-                          borderBottom: "1px solid #f1f5f9",
-                        }}
-                      >
-                        <div
-                          style={{ flex: 1, fontSize: 13, color: "#374151" }}
-                        >
-                          {reason}
+                      <div key={reason} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
+                        <div style={{ flex: 1, fontSize: 13, color: "#374151" }}>{reason}</div>
+                        <div style={{ width: 200, height: 8, backgroundColor: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
+                          <div style={{ width: `${pct}%`, height: "100%", backgroundColor: "#ef4444", borderRadius: 4 }} />
                         </div>
-                        <div
-                          style={{
-                            width: 200,
-                            height: 8,
-                            backgroundColor: "#f1f5f9",
-                            borderRadius: 4,
-                            overflow: "hidden",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: `${pct}%`,
-                              height: "100%",
-                              backgroundColor: "#ef4444",
-                              borderRadius: 4,
-                              transition: "width 0.3s ease",
-                            }}
-                          />
-                        </div>
-                        <div
-                          style={{
-                            width: 60,
-                            textAlign: "right",
-                            fontSize: 13,
-                            fontWeight: 600,
-                            color: "#dc2626",
-                          }}
-                        >
-                          {count}
-                        </div>
-                        <div
-                          style={{
-                            width: 50,
-                            textAlign: "right",
-                            fontSize: 11,
-                            color: "#9ca3af",
-                          }}
-                        >
-                          {pct}%
-                        </div>
+                        <div style={{ width: 60, textAlign: "right", fontSize: 13, fontWeight: 600, color: "#dc2626" }}>{count}</div>
+                        <div style={{ width: 50, textAlign: "right", fontSize: 11, color: "#9ca3af" }}>{pct}%</div>
                       </div>
                     );
                   })}
@@ -537,122 +533,30 @@ export default function PrismaFlowPage() {
 
           {/* Search Strategy Card */}
           {stats.search_strategy && (
-            <div
-              style={{
-                borderRadius: 10,
-                border: "1px solid #e2e8f0",
-                backgroundColor: "#ffffff",
-                marginBottom: 24,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  padding: "12px 20px",
-                  backgroundColor: "#f8fafc",
-                  borderBottom: "1px solid #e2e8f0",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: "#0f172a",
-                }}
-              >
+            <div style={{ borderRadius: 10, border: "1px solid #e2e8f0", backgroundColor: "#ffffff", marginBottom: 24, overflow: "hidden" }}>
+              <div style={{ padding: "12px 20px", backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: 14, fontWeight: 600, color: "#0f172a" }}>
                 🔬 搜索策略记录
               </div>
               <div style={{ padding: "16px 20px" }}>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "140px 1fr",
-                    gap: "8px 16px",
-                    fontSize: 13,
-                  }}
-                >
+                <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "8px 16px", fontSize: 13 }}>
                   {!!stats.search_strategy.query_keywords && (
                     <>
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>
-                        检索关键词:
-                      </span>
-                      <span style={{ color: "#0f172a" }}>
-                        {String(stats.search_strategy.query_keywords)}
-                      </span>
+                      <span style={{ color: "#64748b", fontWeight: 500 }}>检索关键词:</span>
+                      <span style={{ color: "#0f172a" }}>{String(stats.search_strategy.query_keywords)}</span>
                     </>
                   )}
                   {!!stats.search_strategy.sources && (
                     <>
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>
-                        数据源:
-                      </span>
+                      <span style={{ color: "#64748b", fontWeight: 500 }}>数据源:</span>
                       <span style={{ color: "#0f172a" }}>
-                        {Array.isArray(stats.search_strategy.sources)
-                          ? (stats.search_strategy.sources as string[]).join(
-                              ", ",
-                            )
-                          : String(stats.search_strategy.sources)}
+                        {Array.isArray(stats.search_strategy.sources) ? (stats.search_strategy.sources as string[]).join(", ") : String(stats.search_strategy.sources)}
                       </span>
                     </>
                   )}
                   {!!stats.search_strategy.year_range && (
                     <>
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>
-                        年份范围:
-                      </span>
-                      <span style={{ color: "#0f172a" }}>
-                        {String(stats.search_strategy.year_range)}
-                      </span>
-                    </>
-                  )}
-                  {stats.search_strategy.max_results !== undefined && (
-                    <>
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>
-                        最大结果数:
-                      </span>
-                      <span style={{ color: "#0f172a" }}>
-                        {String(stats.search_strategy.max_results)}
-                      </span>
-                    </>
-                  )}
-                  {stats.search_strategy.exhaustive !== undefined && (
-                    <>
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>
-                        穷尽检索:
-                      </span>
-                      <span
-                        style={{
-                          color: stats.search_strategy.exhaustive
-                            ? "#22c55e"
-                            : "#94a3b8",
-                        }}
-                      >
-                        {stats.search_strategy.exhaustive ? "✅ 是" : "否"}
-                      </span>
-                    </>
-                  )}
-                  {!!stats.search_strategy.boolean_syntax && (
-                    <>
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>
-                        布尔语法:
-                      </span>
-                      <code
-                        style={{
-                          color: "#0f172a",
-                          backgroundColor: "#f1f5f9",
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          fontSize: 12,
-                        }}
-                      >
-                        {String(stats.search_strategy.boolean_syntax)}
-                      </code>
-                    </>
-                  )}
-                  {!!stats.search_strategy.timestamp && (
-                    <>
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>
-                        执行时间:
-                      </span>
-                      <span style={{ color: "#94a3b8" }}>
-                        {String(stats.search_strategy.timestamp)}
-                      </span>
+                      <span style={{ color: "#64748b", fontWeight: 500 }}>年份范围:</span>
+                      <span style={{ color: "#0f172a" }}>{String(stats.search_strategy.year_range)}</span>
                     </>
                   )}
                 </div>
@@ -660,37 +564,67 @@ export default function PrismaFlowPage() {
             </div>
           )}
 
-          {/* Empty state for no exclusion reasons */}
-          {Object.keys(stats.exclusion_reasons).length === 0 &&
-            stats.total > 0 && (
-              <div
-                style={{
-                  padding: "24px",
-                  textAlign: "center",
-                  color: "#94a3b8",
-                  fontSize: 13,
-                  borderRadius: 10,
-                  border: "1px dashed #e2e8f0",
-                  marginBottom: 24,
-                }}
-              >
-                尚无排除原因记录。在暂存文献库中拒绝文献时可以填写排除原因，或使用批量筛选功能推进
-                PRISMA 阶段。
-              </div>
-            )}
+          {Object.keys(stats.exclusion_reasons).length === 0 && stats.total > 0 && (
+            <div style={{ padding: 24, textAlign: "center", color: "#94a3b8", fontSize: 13, borderRadius: 10, border: "1px dashed #e2e8f0", marginBottom: 24 }}>
+              尚无排除原因记录。点击上方阶段卡片展开论文列表，可排除文献并填写原因。
+            </div>
+          )}
         </>
       )}
 
       {!stats && !loading && !error && (
-        <div
-          style={{
-            padding: "48px 24px",
-            textAlign: "center",
-            color: "#94a3b8",
-            fontSize: 14,
-          }}
-        >
+        <div style={{ padding: "48px 24px", textAlign: "center", color: "#94a3b8", fontSize: 14 }}>
           点击"查询"按钮加载 PRISMA 筛选统计数据
+        </div>
+      )}
+
+      {/* Exclude Modal */}
+      <ConfirmModal
+        show={showExcludeModal}
+        type="reject"
+        count={selectedIds.length}
+        exclusionReasonInput={exclusionReasonInput}
+        setExclusionReasonInput={setExclusionReasonInput}
+        onCancel={() => { setShowExcludeModal(false); setExclusionReasonInput(""); }}
+        onConfirm={handleExclude}
+        exclusionTemplates={exclusionTemplates}
+      />
+
+      {/* AI Screen Modal */}
+      {showAIScreenModal && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+          <div style={{ backgroundColor: "white", padding: 24, borderRadius: 12, maxWidth: 480, width: "90%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+            <h3 style={{ marginTop: 0, color: "#7c3aed" }}>🤖 AI 相关度筛选</h3>
+            <p style={{ color: "#4b5563", fontSize: 14 }}>
+              {selectedIds.length > 0
+                ? `将对选中的 ${selectedIds.length} 篇 identification 阶段文献进行 AI 评分。`
+                : "将对 identification 阶段的所有 pending 文献进行 AI 评分。"}
+            </p>
+            <p style={{ color: "#6b7280", fontSize: 12 }}>
+              7-10 分推荐入库 / 4-6 分待人工复核 / 0-3 分自动拒绝
+            </p>
+            <div style={{ marginTop: 12 }}>
+              <label style={{ fontSize: 13, color: "#374151", fontWeight: 500 }}>研究主题 (必填):</label>
+              <textarea
+                value={aiScreenTopic}
+                onChange={(e) => setAiScreenTopic(e.target.value)}
+                placeholder="例如: Transit-Oriented Development and pedestrian safety"
+                style={{ width: "100%", marginTop: 6, padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13, minHeight: 60, resize: "vertical", fontFamily: "inherit" }}
+              />
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 24 }}>
+              <button onClick={() => setShowAIScreenModal(false)} style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #d1d5db", backgroundColor: "white", cursor: "pointer" }}>
+                取消
+              </button>
+              <button
+                onClick={handleAIScreen}
+                disabled={!aiScreenTopic.trim() || aiScreening}
+                style={{ padding: "8px 16px", borderRadius: 6, border: "none", backgroundColor: aiScreenTopic.trim() && !aiScreening ? "#7c3aed" : "#d1d5db", color: "white", fontWeight: 500, cursor: aiScreenTopic.trim() && !aiScreening ? "pointer" : "default" }}
+              >
+                {aiScreening ? "筛选中..." : "开始筛选"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

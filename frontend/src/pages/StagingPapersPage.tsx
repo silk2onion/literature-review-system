@@ -43,6 +43,17 @@ export default function StagingPapersPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [promoting, setPromoting] = useState<boolean>(false);
 
+  // AI 筛选状态
+  const [showAIScreenModal, setShowAIScreenModal] = useState(false);
+  const [aiScreenTopic, setAiScreenTopic] = useState("");
+  const [aiScreening, setAiScreening] = useState(false);
+
+  // 排除原因模板
+  const [exclusionTemplates, setExclusionTemplates] = useState<string[]>([]);
+
+  // 信息补齐
+  const [enriching, setEnriching] = useState(false);
+
   const { getSignal } = useAbortableFetch();
 
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 1;
@@ -162,6 +173,11 @@ export default function StagingPapersPage() {
     fetchDataRef.current({ resetPage: true }).catch((e) =>
       console.error("initial staging load error", e),
     );
+    // 加载排除原因模板
+    fetch(`${API_BASE_URL}/api/staging-papers/exclusion-templates`)
+      .then((r) => r.json())
+      .then((d) => { if (d.templates) setExclusionTemplates(d.templates); })
+      .catch(() => {});
   }, []);
 
   // Easter egg state
@@ -211,6 +227,98 @@ export default function StagingPapersPage() {
   const dismissEasterEgg = () => {
     setEasterEgg("exiting");
     setTimeout(() => setEasterEgg("off"), 1200);
+  };
+
+  const aiScreenTargetLabel = selectedIds.length > 0
+    ? `选中的 ${selectedIds.length} 篇文献`
+    : crawlJobId
+      ? `Job #${crawlJobId} 的 pending 文献`
+      : q.trim()
+        ? `关键词「${q.trim()}」匹配的 pending 文献`
+        : "全部 pending 文献";
+
+  const handleAIScreen = async () => {
+    if (!aiScreenTopic.trim()) return;
+
+    const payload: Record<string, unknown> = { topic: aiScreenTopic.trim() };
+    if (selectedIds.length > 0) {
+      payload.ids = selectedIds;
+    } else if (crawlJobId) {
+      payload.crawl_job_ids = [Number(crawlJobId)];
+    } else if (q.trim()) {
+      payload.q = q.trim();
+    }
+
+    try {
+      setAiScreening(true);
+      setShowAIScreenModal(false);
+      setTaskStatus("running");
+      setTaskMessage(`AI 正在筛选 ${aiScreenTargetLabel}...`);
+
+      const resp = await fetch(`${API_BASE_URL}/api/staging-papers/ai-screen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`AI 筛选失败: ${resp.status} - ${text}`);
+      }
+
+      const result = await resp.json();
+      setTaskStatus("done");
+      setTaskMessage(
+        `AI 筛选完成：共 ${result.total} 篇，推荐 ${result.promoted} 篇，待复核 ${result.pending_review} 篇，拒绝 ${result.rejected} 篇` +
+          (result.pre_filtered > 0 ? `，预过滤 ${result.pre_filtered} 篇` : "") +
+          (result.failed > 0 ? `，失败 ${result.failed} 篇` : ""),
+      );
+      setSelectedIds([]);
+      await fetchData({ page });
+    } catch (err) {
+      console.error("AI screen error", err);
+      setTaskStatus("error");
+      setTaskMessage(
+        `AI 筛选失败：${(err as { message?: string })?.message || "未知错误"}`,
+      );
+    } finally {
+      setAiScreening(false);
+    }
+  };
+
+  const handleEnrich = async () => {
+    try {
+      setEnriching(true);
+      setTaskStatus("running");
+      setTaskMessage("正在从 CrossRef / Semantic Scholar 补齐缺失的摘要和元数据...");
+
+      const payload: Record<string, unknown> = { only_missing_abstract: true };
+      if (selectedIds.length > 0) payload.ids = selectedIds;
+
+      const resp = await fetch(`${API_BASE_URL}/api/staging-papers/enrich`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`补齐失败: ${resp.status} - ${text}`);
+      }
+      const result = await resp.json();
+      setTaskStatus("done");
+      setTaskMessage(
+        `补齐完成：共 ${result.total} 篇，成功补齐 ${result.enriched} 篇` +
+        (result.skipped_no_doi > 0 ? `，${result.skipped_no_doi} 篇无 DOI 跳过` : "") +
+        (result.failed > 0 ? `，${result.failed} 篇失败` : ""),
+      );
+      setSelectedIds([]);
+      await fetchData({ page });
+    } catch (err) {
+      setTaskStatus("error");
+      setTaskMessage(`补齐失败：${(err as { message?: string })?.message || "未知错误"}`);
+    } finally {
+      setEnriching(false);
+    }
   };
 
   const handleSearchClick = () => {
@@ -400,9 +508,13 @@ export default function StagingPapersPage() {
         <StagingBatchActions
           selectedCount={selectedIds.length}
           promoting={promoting}
+          aiScreening={aiScreening}
+          enriching={enriching}
           taskStatus={taskStatus}
           taskMessage={taskMessage}
           onRefresh={() => fetchData({ page })}
+          onAIScreen={() => setShowAIScreenModal(true)}
+          onEnrich={handleEnrich}
           onDeleteClick={() =>
             setShowConfirmModal({
               show: true,
@@ -482,7 +594,99 @@ export default function StagingPapersPage() {
           setExclusionReasonInput("");
         }}
         onConfirm={handleConfirmAction}
+        exclusionTemplates={exclusionTemplates}
       />
+
+      {/* AI Screening Modal */}
+      {showAIScreenModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              padding: "24px",
+              borderRadius: "12px",
+              maxWidth: "480px",
+              width: "90%",
+              boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
+            }}
+          >
+            <h3 style={{ marginTop: 0, color: "#7c3aed" }}>
+              🤖 AI 相关度筛选
+            </h3>
+            <p style={{ color: "#4b5563", fontSize: 14, lineHeight: 1.5 }}>
+              将对 <strong>{aiScreenTargetLabel}</strong> 进行 AI 相关度评分。
+            </p>
+            <p style={{ color: "#6b7280", fontSize: 12, lineHeight: 1.5 }}>
+              评分标准：7-10 分推荐入库 / 4-6 分待人工复核 / 0-3 分自动拒绝
+            </p>
+            <div style={{ marginTop: 12 }}>
+              <label style={{ fontSize: 13, color: "#374151", fontWeight: 500 }}>
+                研究主题 (必填):
+              </label>
+              <textarea
+                value={aiScreenTopic}
+                onChange={(e) => setAiScreenTopic(e.target.value)}
+                placeholder="例如: Transit-Oriented Development and pedestrian safety in urban areas"
+                style={{
+                  width: "100%",
+                  marginTop: 6,
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  fontSize: 13,
+                  minHeight: 60,
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                }}
+              />
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 12,
+                marginTop: 24,
+              }}
+            >
+              <button
+                onClick={() => setShowAIScreenModal(false)}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  backgroundColor: "white",
+                  cursor: "pointer",
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleAIScreen}
+                disabled={!aiScreenTopic.trim()}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: 6,
+                  border: "none",
+                  backgroundColor: aiScreenTopic.trim() ? "#7c3aed" : "#d1d5db",
+                  color: "white",
+                  fontWeight: 500,
+                  cursor: aiScreenTopic.trim() ? "pointer" : "default",
+                }}
+              >
+                开始筛选
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Easter Egg: PhD PTSD Universe */}
       {easterEgg !== "off" && (

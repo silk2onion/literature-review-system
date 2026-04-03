@@ -19,10 +19,18 @@ from app.schemas.staging_paper import (
     BatchScreeningRequest,
     PrismaStageCount,
     PrismaStatsResponse,
+    AIScreenRequest,
+    AIScreenResultItem,
+    AIScreenResponse,
 )
 from pydantic import BaseModel
 from app.schemas.paper import PaperResponse
 from app.services.paper_service import promote_staging_papers as promote_staging_papers_service
+from app.services.prisma_state_machine import (
+    PRISMA_STAGES,
+    EXCLUSION_REASON_TEMPLATES,
+    validate_transition,
+)
 
 router = APIRouter(prefix="/api/staging-papers", tags=["staging_papers"])
 
@@ -174,7 +182,13 @@ def delete_staging_papers(
 
 # ========== PRISMA 筛选附属功能端点 ==========
 
-VALID_SCREENING_STAGES = {"identification", "screening", "eligibility", "included"}
+VALID_SCREENING_STAGES = set(PRISMA_STAGES)
+
+
+@router.get("/exclusion-templates")
+def get_exclusion_templates():
+    """返回预定义的 PRISMA 排除原因模板列表。"""
+    return {"success": True, "templates": EXCLUSION_REASON_TEMPLATES}
 
 
 @router.patch("/{staging_paper_id}/screening")
@@ -186,6 +200,7 @@ def update_screening_stage(
     """
     更新单条暂存文献的 PRISMA 筛选阶段。
     与 status（pending/accepted/rejected）完全独立，互不影响。
+    包含状态机校验：只允许相邻阶段间转换。
     """
     if payload.screening_stage not in VALID_SCREENING_STAGES:
         raise HTTPException(
@@ -197,6 +212,11 @@ def update_screening_stage(
     paper = db.query(StagingPaper).filter(StagingPaper.id == staging_paper_id).first()
     if not paper:
         raise HTTPException(status_code=404, detail="暂存文献不存在")
+
+    # 状态机校验
+    valid, err = validate_transition(paper.screening_stage or "identification", payload.screening_stage)
+    if not valid:
+        raise HTTPException(status_code=400, detail=err)
 
     paper.screening_stage = payload.screening_stage
     paper.exclusion_reason = payload.exclusion_reason
@@ -218,7 +238,7 @@ def batch_update_screening(
 ):
     """
     批量更新 PRISMA 筛选阶段。
-    将指定 ID 列表的文献统一推进到目标阶段，可选填排除原因。
+    包含状态机校验：合法的更新，非法的跳过并汇报。
     """
     if payload.screening_stage not in VALID_SCREENING_STAGES:
         raise HTTPException(
@@ -227,22 +247,29 @@ def batch_update_screening(
                    f"允许值: {', '.join(sorted(VALID_SCREENING_STAGES))}",
         )
 
-    update_values: Dict[str, Optional[str]] = {
-        "screening_stage": payload.screening_stage,
-    }
-    if payload.exclusion_reason is not None:
-        update_values["exclusion_reason"] = payload.exclusion_reason
+    papers = db.query(StagingPaper).filter(StagingPaper.id.in_(payload.ids)).all()
 
-    count = (
-        db.query(StagingPaper)
-        .filter(StagingPaper.id.in_(payload.ids))
-        .update(update_values, synchronize_session="fetch")
-    )
+    updated_count = 0
+    skipped_ids = []
+
+    for paper in papers:
+        current = paper.screening_stage or "identification"
+        valid, _ = validate_transition(current, payload.screening_stage)
+        if not valid:
+            skipped_ids.append(paper.id)
+            continue
+        paper.screening_stage = payload.screening_stage
+        if payload.exclusion_reason is not None:
+            paper.exclusion_reason = payload.exclusion_reason
+        updated_count += 1
+
     db.commit()
 
     return {
         "success": True,
-        "updated_count": count,
+        "updated_count": updated_count,
+        "skipped_count": len(skipped_ids),
+        "skipped_ids": skipped_ids,
         "screening_stage": payload.screening_stage,
     }
 
@@ -325,6 +352,95 @@ def get_prisma_stats(
         stages=stages,
         exclusion_reasons=exclusion_reasons,
         search_strategy=search_strategy,
+    )
+
+
+# ========== AI 筛选端点 ==========
+
+@router.post("/ai-screen", response_model=AIScreenResponse)
+async def ai_screen_staging_papers(
+    payload: AIScreenRequest,
+    db: Session = Depends(get_db),
+) -> AIScreenResponse:
+    """
+    AI 批量筛选暂存文献。
+
+    对 pending 状态的暂存文献调用 LLM 进行相关度打分（0-10），
+    根据分数自动分为三档：
+    - >= 7: promote（推荐入库，screening_stage → screening）
+    - 4-6:  pending_review（待人工复核，screening_stage → screening）
+    - < 4:  reject（自动拒绝，附带 AI 排除原因）
+    """
+    from app.services.screening_service import screen_staging_papers
+
+    result = await screen_staging_papers(
+        db=db,
+        topic=payload.topic,
+        paper_ids=payload.ids,
+        crawl_job_ids=payload.crawl_job_ids,
+        keyword_filter=payload.q,
+        auto_apply=True,
+    )
+
+    return AIScreenResponse(
+        success=True,
+        total=result.total,
+        scored=result.scored,
+        promoted=result.promoted,
+        pending_review=result.pending_review,
+        rejected=result.rejected,
+        pre_filtered=result.pre_filtered,
+        failed=result.failed,
+        details=[
+            AIScreenResultItem(
+                staging_paper_id=d.staging_paper_id,
+                score=d.score,
+                reason=d.reason,
+                decision=d.decision,
+            )
+            for d in result.details
+        ],
+    )
+
+
+# ========== 信息补齐端点 ==========
+
+from app.schemas.staging_paper import EnrichRequest, EnrichResultItem, EnrichResponse
+
+
+@router.post("/enrich", response_model=EnrichResponse)
+async def enrich_staging_papers_endpoint(
+    payload: EnrichRequest,
+    db: Session = Depends(get_db),
+) -> EnrichResponse:
+    """
+    批量补齐暂存文献的 abstract 和其他元数据。
+
+    通过 DOI 从 CrossRef / Semantic Scholar 拉取缺失的 abstract、authors、
+    year、journal、pdf_url 等信息。只补齐缺失字段，不覆盖已有值。
+    """
+    from app.services.enrichment_service import enrich_staging_papers
+
+    result = await enrich_staging_papers(
+        db=db,
+        paper_ids=payload.ids,
+        only_missing_abstract=payload.only_missing_abstract,
+    )
+
+    return EnrichResponse(
+        success=True,
+        total=result.total,
+        enriched=result.enriched,
+        skipped_no_doi=result.skipped_no_doi,
+        failed=result.failed,
+        details=[
+            EnrichResultItem(
+                paper_id=d.paper_id,
+                enriched_fields=d.enriched_fields,
+                source=d.source,
+            )
+            for d in result.details
+        ],
     )
 
 

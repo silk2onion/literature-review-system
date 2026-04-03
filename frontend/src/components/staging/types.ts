@@ -13,6 +13,8 @@ export type StagingPaper = {
   arxiv_id?: string | null;
   url?: string | null;
   pdf_url?: string | null;
+  llm_score?: number | null;
+  llm_tags?: string[] | null;
   created_at: string;
 };
 

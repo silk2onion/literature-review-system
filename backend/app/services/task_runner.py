@@ -23,7 +23,7 @@ from app.models.paper import Paper as PaperModel
 from app.models.pipeline_task import PipelineTask
 from app.database import SessionLocal
 from app.services.paper_ingest import paper_to_source_paper, insert_or_update_papers_from_sources
-from app.services.llm.prompts import RELEVANCE_SCORING_PROMPT
+from app.services.llm.prompts import SEARCH_QUERY_EXPANSION_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -789,61 +789,43 @@ class PipelineTaskRunner:
         self._step_done(step_key, f"检索完成：共获取约 {total_new} 篇新文献")
 
         # --- AI Relevance Filtering & Auto-Promotion ---
-        if total_new > 0 or True: # Always check if papers were found
+        if total_new > 0 or True:  # Always check if papers were found
             self._step_start(step_key, "AI 正在对获取的文献进行学科相关度审查 (AI Relevance Filter)...")
-            
-            from app.services.llm.openai_service import OpenAIService
-            from app.config import settings
-            llm = OpenAIService(settings=settings)
-            
+
             if not job_ids:
                 self._step_done(step_key, "检索完成：未产生爬虫任务")
                 return
 
-            staging_papers = self.db.query(StagingPaper).filter(
-                StagingPaper.status == "pending",
-                StagingPaper.crawl_job_id.in_(job_ids)
-            ).order_by(StagingPaper.created_at.desc()).all()
-            
+            from app.services.screening_service import screen_staging_papers
+
+            async def _on_progress(scored: int, total_count: int, promoted: int):
+                if scored % 5 == 0:
+                    self._step_start(step_key, f"已审查 {scored}/{total_count} 篇文献，采纳 {promoted} 篇...")
+
+            screening_result = await screen_staging_papers(
+                db=self.db,
+                topic=self.task.topic,
+                crawl_job_ids=job_ids,
+                auto_apply=True,
+                on_progress=_on_progress,
+            )
+
+            # 将 promote 的论文提升到正式库
             accepted_papers = []
-            reviewed_count = 0
-            
-            for sp in staging_papers:
-                reviewed_count += 1
-                prompt = RELEVANCE_SCORING_PROMPT.format(
-                    topic=self.task.topic,
-                    title=sp.title,
-                    abstract=sp.abstract or "No abstract available."
-                )
-                try:
-                    result = await llm.complete_json(prompt=prompt, system_prompt="You are a professional academic reviewer.", temperature=0.1)
-                    score = result.get("score", 0)
-                    reason = result.get("reason", "")
-                    
-                    if score >= 7:
-                        # Promote to official Paper table
-                        source_paper = paper_to_source_paper(sp) # Use the utility from paper_ingest
+            for detail in screening_result.details:
+                if detail.decision == "promote":
+                    sp = self.db.query(StagingPaper).get(detail.staging_paper_id)
+                    if sp:
+                        source_paper = paper_to_source_paper(sp)
                         official_papers, _ = insert_or_update_papers_from_sources(self.db, [source_paper])
                         if official_papers:
                             self.task.paper_ids.append(official_papers[0].id)
                             accepted_papers.append(official_papers[0])
                         sp.status = "promoted"
-                        sp.llm_score = score
-                        sp.llm_tags = [f"relevance:{score}", reason[:50]]
-                    else:
-                        sp.status = "rejected"
-                        sp.llm_score = score
-                        sp.llm_tags = [f"irrelevant:{score}", reason[:50]]
-                    
-                    self.db.commit()
-                except Exception as e:
-                    logger.warning(f"Relevance scoring failed for paper {sp.id}: {e}")
-                
-                if reviewed_count % 5 == 0:
-                    self._step_start(step_key, f"已审查 {reviewed_count} 篇文献，采纳 {len(accepted_papers)} 篇...")
+                        self.db.commit()
 
-            self._log(f"AI Review finished: Reviewed {reviewed_count} papers, accepted {len(accepted_papers)} into library.")
-            self._step_done(step_key, f"审查完成：总共发现 {reviewed_count} 篇文献，AI 采纳了 {len(accepted_papers)} 篇符合课题方向的文献。")
+            self._log(f"AI Review finished: Reviewed {screening_result.scored} papers, accepted {len(accepted_papers)} into library.")
+            self._step_done(step_key, f"审查完成：总共发现 {screening_result.scored} 篇文献，AI 采纳了 {len(accepted_papers)} 篇符合课题方向的文献。")
             self._save_checkpoint("auto_search", {"paper_ids": self.task.paper_ids})
 
     # ── Step 3: Generate Claims ──────────────────────────────

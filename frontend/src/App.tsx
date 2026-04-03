@@ -151,7 +151,7 @@ function App() {
     }
   };
 
-  const getPageTitle = () => {
+  const _getPageTitle = () => {
     switch (activeTab) {
       case "search":
         return "文献检索";
