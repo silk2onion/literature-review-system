@@ -156,13 +156,13 @@ function App() {
       case "search":
         return "文献检索";
       case "library":
-        return "All References";
+        return "全部文献";
       case "staging":
-        return "Staging Library";
+        return "暂存库";
       case "rag":
-        return "RAG Debug";
+        return "语义检索调试";
       case "draft":
-        return "Agent Survey Draft";
+        return "PhD 深度管线";
       case "orchestrate":
         return "一键综述生成";
       case "screening":
@@ -190,9 +190,9 @@ function App() {
         </div>
 
         <div className={`sidebar-content ${kaomojiMode ? "kaomoji-party" : ""}`}>
-          {/* Group 1: Discover */}
+          {/* Group 1: 发现 */}
           <div className="sidebar-group">
-            <h3 className="sidebar-group-title">Discover</h3>
+            <h3 className="sidebar-group-title">发现</h3>
             <button
               onClick={() => setActiveTab("search")}
               className={`sidebar-item ${activeTab === "search" ? "active" : ""}`}
@@ -223,15 +223,15 @@ function App() {
             </button>
           </div>
 
-          {/* Group 2: Library */}
+          {/* Group 2: 文献库 */}
           <div className="sidebar-group">
-            <h3 className="sidebar-group-title">Library</h3>
+            <h3 className="sidebar-group-title">文献库</h3>
             <button
               onClick={() => setActiveTab("library")}
               className={`sidebar-item ${activeTab === "library" ? "active" : ""}`}
             >
               <BookOpen size={16} className="sidebar-icon orange" />
-              All References
+              全部文献
             </button>
 
             {/* Favorites -> Staging (暂存库) */}
@@ -275,19 +275,19 @@ function App() {
               className={`sidebar-item ${activeTab === "rag" ? "active" : ""}`}
             >
               <Database size={16} className="sidebar-icon purple" />
-              RAG Debug
+              语义检索调试
             </button>
           </div>
 
-          {/* Group 3: Projects */}
+          {/* Group 3: 项目 */}
           <div className="sidebar-group">
-            <h3 className="sidebar-group-title">Projects</h3>
+            <h3 className="sidebar-group-title">项目</h3>
             <button
               onClick={() => setActiveTab("draft")}
               className={`sidebar-item ${activeTab === "draft" ? "active" : ""}`}
             >
               <PenTool size={16} className="sidebar-icon purple" />
-              Agent Survey Draft
+              PhD 深度管线
             </button>
             <button
               onClick={() => setActiveTab("orchestrate")}
@@ -313,7 +313,7 @@ function App() {
             onClick={() => setShowSettings(true)}
           >
             <Settings size={16} className="sidebar-icon" />
-            Settings
+            设置
           </button>
         </div>
       </div>
