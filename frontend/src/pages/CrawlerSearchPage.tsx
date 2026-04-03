@@ -228,6 +228,7 @@ export default function CrawlerSearchPage() {
     backgroundColor: "#f3f4f6",
     borderRadius: "8px",
     width: "fit-content",
+    flexShrink: 0,
   };
 
   const getTabStyle = (isActive: boolean): React.CSSProperties => ({
@@ -271,6 +272,8 @@ export default function CrawlerSearchPage() {
           style={{
             display: "flex",
             justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: "16px",
             marginBottom: "24px",
           }}
         >
