@@ -518,8 +518,7 @@ export default function PrismaFlowPage() {
 
             return (
               <div style={{
-                display: "grid",
-                gridTemplateColumns: hasReasons && hasStrategy ? "1fr 1fr" : "1fr",
+                display: "flex", flexDirection: "column",
                 gap: 20, marginBottom: 24,
               }}>
                 {/* Exclusion Reasons */}
@@ -544,34 +543,41 @@ export default function PrismaFlowPage() {
                         共 {totalExcluded} 篇排除
                       </span>
                     </div>
-                    <div style={{ padding: "8px 20px 16px", overflowY: "auto", maxHeight: 480, flex: 1 }}>
-                      {sortedReasons.map(([reason, count], i) => {
+                    <div style={{
+                      padding: "12px 20px 16px",
+                      display: "grid",
+                      gridTemplateColumns: sortedReasons.length > 4 ? "1fr 1fr" : "1fr",
+                      gap: "4px 24px",
+                    }}>
+                      {sortedReasons.map(([reason, count]) => {
                         const pct = totalExcluded > 0 ? ((count / totalExcluded) * 100) : 0;
                         const barWidth = maxCount > 0 ? ((count / maxCount) * 100) : 0;
                         return (
                           <div key={reason} style={{
-                            padding: "10px 0",
-                            borderBottom: i < sortedReasons.length - 1 ? "1px solid #f8fafc" : "none",
+                            padding: "8px 12px",
+                            borderRadius: 8,
+                            backgroundColor: "#fefefe",
+                            border: "1px solid #f1f5f9",
                           }}>
                             <div style={{
                               display: "flex", justifyContent: "space-between",
-                              alignItems: "baseline", marginBottom: 6,
+                              alignItems: "baseline", marginBottom: 5,
                             }}>
-                              <span style={{ fontSize: 13, color: "#1e293b", flex: 1, lineHeight: 1.4 }}>
+                              <span style={{ fontSize: 13, color: "#1e293b", flex: 1, lineHeight: 1.3 }}>
                                 {reason}
                               </span>
                               <span style={{
                                 fontSize: 13, fontWeight: 700, color: "#dc2626",
-                                marginLeft: 12, whiteSpace: "nowrap",
+                                marginLeft: 8, whiteSpace: "nowrap",
                               }}>
-                                {count} 篇
-                                <span style={{ fontWeight: 400, color: "#9ca3af", fontSize: 11, marginLeft: 4 }}>
-                                  ({pct.toFixed(1)}%)
+                                {count}
+                                <span style={{ fontWeight: 400, color: "#9ca3af", fontSize: 11, marginLeft: 3 }}>
+                                  ({pct.toFixed(0)}%)
                                 </span>
                               </span>
                             </div>
                             <div style={{
-                              width: "100%", height: 6,
+                              width: "100%", height: 5,
                               backgroundColor: "#fee2e2", borderRadius: 3,
                               overflow: "hidden",
                             }}>
