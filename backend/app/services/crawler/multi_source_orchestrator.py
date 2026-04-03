@@ -8,6 +8,7 @@ from app.services.crawler.scopus_crawler import ScopusCrawler
 from app.services.crawler.semantic_scholar_crawler import SemanticScholarCrawler
 from app.services.crawler.openalex_crawler import OpenAlexCrawler
 from app.services.crawler.crossref_crawler import CrossRefCrawler
+from app.services.crawler.wos_crawler import WebOfScienceCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class MultiSourceOrchestrator:
             "semantic_scholar": SemanticScholarCrawler,
             "openalex": OpenAlexCrawler,
             "crossref": CrossRefCrawler,
+            "wos": WebOfScienceCrawler,
         }
         # 缓存已创建的 crawler 实例，避免重复创建 httpx.Client
         self._crawler_cache: Dict[str, BaseCrawler] = {}

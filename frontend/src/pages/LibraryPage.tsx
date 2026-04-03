@@ -80,6 +80,7 @@ export default function LibraryPage({
   const [selectedPaperId, setSelectedPaperId] = useState<number | null>(null);
   const [selectedPaperTitle, setSelectedPaperTitle] = useState<string>("");
   const [downloadingIds, setDownloadingIds] = useState<Set<number>>(new Set());
+  const [ezproxyPrefix, setEzproxyPrefix] = useState<string>("");
   const [enrichingIds, setEnrichingIds] = useState<Set<number>>(new Set());
 
   /* ── Batch action state ── */
@@ -90,6 +91,7 @@ export default function LibraryPage({
   const [syncing, setSyncing] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const [removingFromGroup, setRemovingFromGroup] = useState<boolean>(false);
+  const [batchDownloading, setBatchDownloading] = useState<boolean>(false);
 
   /* ── UI toggle state ── */
   const [showRagDebug, setShowRagDebug] = useState(false);
@@ -458,6 +460,26 @@ export default function LibraryPage({
     }
   };
 
+  const handleBatchDownloadPdf = async () => {
+    if (selectedIds.size === 0) return;
+    setBatchDownloading(true);
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/papers/batch-download-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paper_ids: Array.from(selectedIds) }),
+      });
+      if (!resp.ok) throw new Error("批量下载请求失败");
+      const data = await resp.json();
+      alert(data.message || "批量下载任务已启动");
+    } catch (err) {
+      console.error(err);
+      alert("批量下载 PDF 出错");
+    } finally {
+      setBatchDownloading(false);
+    }
+  };
+
   const handleSyncCitationsSelected = async () => {
     if (selectedIds.size === 0) return;
     setSyncing(true);
@@ -621,6 +643,13 @@ export default function LibraryPage({
     fetchDataRef.current({ resetPage: true }).catch((e) =>
       console.error("initial load error", e),
     );
+    // 加载 EZProxy 前缀
+    fetch(`${API_BASE_URL}/api/settings/institutional-access`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.enabled && d.ezproxy_prefix) setEzproxyPrefix(d.ezproxy_prefix);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -734,6 +763,7 @@ export default function LibraryPage({
             archiving={archiving}
             restoring={restoring}
             syncing={syncing}
+            batchDownloading={batchDownloading}
             removingFromGroup={removingFromGroup}
             selectedGroupId={selectedGroupId}
             showArchived={showArchived}
@@ -743,6 +773,7 @@ export default function LibraryPage({
             onAddToGroup={() => setShowAddToGroupModal(true)}
             onRemoveFromGroup={handleRemoveFromGroup}
             onSyncCitations={handleSyncCitationsSelected}
+            onBatchDownloadPdf={handleBatchDownloadPdf}
             onGenerateReview={
               selectedGroupId && onGenerateReview
                 ? () => onGenerateReview(selectedGroupId)
@@ -858,6 +889,7 @@ export default function LibraryPage({
           onJournalMouseLeave={handleJournalMouseLeave}
           onLogInteraction={logInteraction}
           loading={loading}
+          ezproxyPrefix={ezproxyPrefix}
         />
 
         {/* Pagination footer */}

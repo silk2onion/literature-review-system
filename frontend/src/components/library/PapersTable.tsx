@@ -46,6 +46,7 @@ interface PapersTableProps {
   onJournalMouseLeave: () => void;
   onLogInteraction: (paperId: number, action: string) => void;
   loading: boolean;
+  ezproxyPrefix?: string;
 }
 
 export default function PapersTable({
@@ -65,6 +66,7 @@ export default function PapersTable({
   onJournalMouseLeave,
   onLogInteraction,
   loading,
+  ezproxyPrefix,
 }: PapersTableProps) {
   const canEnrichJournalInfo = (paper: PaperResponse) =>
     Boolean(paper.journal || paper.journal_issn);
@@ -373,6 +375,37 @@ export default function PapersTable({
                       {downloadingIds.has(p.id)
                         ? "下载中..."
                         : "⬇️ 下载 PDF"}
+                    </button>
+                  ) : p.doi && ezproxyPrefix ? (
+                    <button
+                      onClick={async () => {
+                        onLogInteraction(p.id, "institutional_pdf");
+                        try {
+                          const r = await fetch(
+                            `${API_BASE_URL}/api/papers/institutional-url?doi=${encodeURIComponent(p.doi!)}`,
+                          );
+                          if (r.ok) {
+                            const d = await r.json();
+                            window.open(d.proxied_url, "_blank");
+                          } else {
+                            // fallback: 直接用 EZProxy + doi.org
+                            window.open(`${ezproxyPrefix}https://doi.org/${p.doi}`, "_blank");
+                          }
+                        } catch {
+                          window.open(`${ezproxyPrefix}https://doi.org/${p.doi}`, "_blank");
+                        }
+                      }}
+                      style={{
+                        background: "transparent",
+                        fontSize: 10,
+                        color: "#8b5cf6",
+                        border: "1px solid #8b5cf680",
+                        borderRadius: 4,
+                        padding: "2px 6px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      🏛️ 机构下载
                     </button>
                   ) : null}
                 </div>

@@ -223,7 +223,7 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
             multi_sources: List[str] = ["semantic_scholar", "crossref"]
         else:
             legacy_supported = {"arxiv"}
-            multi_supported = {"scholar_serpapi", "scopus", "openalex", "crossref", "semantic_scholar"}
+            multi_supported = {"scholar_serpapi", "scopus", "openalex", "crossref", "semantic_scholar", "wos"}
             legacy_sources = [s for s in normalized_sources if s in legacy_supported]
             multi_sources = [s for s in normalized_sources if s in multi_supported]
 

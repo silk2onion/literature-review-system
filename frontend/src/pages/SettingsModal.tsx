@@ -8,6 +8,7 @@ import ReviewDefaultsSettings from "../components/settings/ReviewDefaultsSetting
 import CrawlerSettings from "../components/settings/CrawlerSettings";
 import SearchSettings from "../components/settings/SearchSettings";
 import DisciplineProfileSettings from "../components/settings/DisciplineProfileSettings";
+import InstitutionalAccessSettings from "../components/settings/InstitutionalAccessSettings";
 
 type SettingsModalProps = {
   open: boolean;
@@ -22,6 +23,7 @@ const tabs = [
   { key: "agent", label: "Agent 心跳", icon: "💗" },
   { key: "review-defaults", label: "综述默认值", icon: "📝" },
   { key: "crawler", label: "爬虫配置", icon: "🕷️" },
+  { key: "institutional", label: "机构访问", icon: "🏛️" },
   { key: "search", label: "语义检索", icon: "🔍" },
   { key: "discipline", label: "学科配置", icon: "🎓" },
 ] as const;
@@ -49,6 +51,8 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
         return <ReviewDefaultsSettings open={open} />;
       case "crawler":
         return <CrawlerSettings open={open} />;
+      case "institutional":
+        return <InstitutionalAccessSettings open={open} />;
       case "search":
         return <SearchSettings open={open} />;
       case "discipline":
