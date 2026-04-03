@@ -200,6 +200,12 @@
   gap: 12px;
 }
 
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .toolbar-title {
   font-size: 13px;
   font-weight: 600;
