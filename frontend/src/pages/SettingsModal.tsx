@@ -9,6 +9,8 @@ import CrawlerSettings from "../components/settings/CrawlerSettings";
 import SearchSettings from "../components/settings/SearchSettings";
 import DisciplineProfileSettings from "../components/settings/DisciplineProfileSettings";
 import InstitutionalAccessSettings from "../components/settings/InstitutionalAccessSettings";
+import { useLocale } from "../hooks/useLocale";
+import type { TranslationKey } from "../locales";
 
 type SettingsModalProps = {
   open: boolean;
@@ -16,22 +18,23 @@ type SettingsModalProps = {
 };
 
 const tabs = [
-  { key: "data-sources", label: "数据源", icon: "🔌" },
-  { key: "models", label: "模型选择", icon: "🤖" },
-  { key: "llm-connection", label: "LLM 连接", icon: "🔗" },
-  { key: "system-prompt", label: "系统提示词", icon: "💬" },
-  { key: "agent", label: "Agent 心跳", icon: "💗" },
-  { key: "review-defaults", label: "综述默认值", icon: "📝" },
-  { key: "crawler", label: "爬虫配置", icon: "🕷️" },
-  { key: "institutional", label: "机构访问", icon: "🏛️" },
-  { key: "search", label: "语义检索", icon: "🔍" },
-  { key: "discipline", label: "学科配置", icon: "🎓" },
+  { key: "data-sources", labelKey: "settings.tab.dataSources", icon: "🔌" },
+  { key: "models", labelKey: "settings.tab.modelSelection", icon: "🤖" },
+  { key: "llm-connection", labelKey: "settings.tab.llmConnection", icon: "🔗" },
+  { key: "system-prompt", labelKey: "settings.tab.systemPrompt", icon: "💬" },
+  { key: "agent", labelKey: "settings.tab.agentHeartbeat", icon: "💗" },
+  { key: "review-defaults", labelKey: "settings.tab.reviewDefaults", icon: "📝" },
+  { key: "crawler", labelKey: "settings.tab.crawler", icon: "🕷️" },
+  { key: "institutional", labelKey: "settings.tab.institutional", icon: "🏛️" },
+  { key: "search", labelKey: "settings.tab.search", icon: "🔍" },
+  { key: "discipline", labelKey: "settings.tab.discipline", icon: "🎓" },
 ] as const;
 
 type TabKey = (typeof tabs)[number]["key"];
 
 function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("data-sources");
+  const { t, locale, setLocale } = useLocale();
 
   if (!open) return null;
 
@@ -102,7 +105,7 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
               }}
             >
               <span>{tab.icon}</span>
-              <span>{tab.label}</span>
+              <span>{t(tab.labelKey as TranslationKey)}</span>
             </button>
           ))}
         </nav>
@@ -110,10 +113,52 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
         {/* Main content area */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div className="settings-header">
-            <h2>系统设置</h2>
-            <button className="settings-close" onClick={onClose}>
-              ×
-            </button>
+            <h2>{t("settings.title")}</h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              {/* Language toggle */}
+              <div
+                style={{
+                  display: "flex",
+                  borderRadius: 6,
+                  overflow: "hidden",
+                  border: "1px solid #475569",
+                  fontSize: 12,
+                }}
+              >
+                <button
+                  onClick={() => setLocale("zh-CN")}
+                  style={{
+                    padding: "3px 10px",
+                    border: "none",
+                    cursor: "pointer",
+                    backgroundColor: locale === "zh-CN" ? "#3b82f6" : "transparent",
+                    color: locale === "zh-CN" ? "#fff" : "#94a3b8",
+                    fontWeight: locale === "zh-CN" ? 600 : 400,
+                    transition: "all 0.15s",
+                  }}
+                >
+                  中文
+                </button>
+                <button
+                  onClick={() => setLocale("en")}
+                  style={{
+                    padding: "3px 10px",
+                    border: "none",
+                    borderLeft: "1px solid #475569",
+                    cursor: "pointer",
+                    backgroundColor: locale === "en" ? "#3b82f6" : "transparent",
+                    color: locale === "en" ? "#fff" : "#94a3b8",
+                    fontWeight: locale === "en" ? 600 : 400,
+                    transition: "all 0.15s",
+                  }}
+                >
+                  EN
+                </button>
+              </div>
+              <button className="settings-close" onClick={onClose}>
+                ×
+              </button>
+            </div>
           </div>
 
           <div className="settings-body" style={{ flex: 1, overflowY: "auto" }}>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { API_BASE_URL } from "./api/config";
+import { useLocale } from "./hooks/useLocale";
 import {
   Search,
   BookOpen,
@@ -56,6 +57,7 @@ interface CrawlStatusInfo {
 }
 
 function App() {
+  const { t } = useLocale();
   // State
   const [activeTab, setActiveTab] = useState<TabName>("search");
   /** A3: 跨页面参数 —— 切换到 library 时预设 groupId */
@@ -154,25 +156,25 @@ function App() {
   const _getPageTitle = () => {
     switch (activeTab) {
       case "search":
-        return "文献检索";
+        return t("page.search");
       case "library":
-        return "全部文献";
+        return t("page.library");
       case "staging":
-        return "暂存库";
+        return t("page.staging");
       case "rag":
-        return "语义检索调试";
+        return t("page.ragDebug");
       case "draft":
-        return "PhD 深度管线";
+        return t("page.phdPipeline");
       case "orchestrate":
-        return "一键综述生成";
+        return t("page.oneClickReview");
       case "screening":
-        return "PRISMA 筛选流程";
+        return t("page.prismaFlow");
       case "apiUsage":
-        return "API 使用监控";
+        return t("page.apiUsage");
       case "monitoring":
-        return "任务进度监控";
+        return t("page.taskMonitoring");
       case "reviews":
-        return "文献综述书架";
+        return t("page.reviewShelf");
       default:
         return "ScholarNative";
     }
@@ -192,46 +194,46 @@ function App() {
         <div className={`sidebar-content ${kaomojiMode ? "kaomoji-party" : ""}`}>
           {/* Group 1: 发现 */}
           <div className="sidebar-group">
-            <h3 className="sidebar-group-title">发现</h3>
+            <h3 className="sidebar-group-title">{t("sidebar.discover")}</h3>
             <button
               onClick={() => setActiveTab("search")}
               className={`sidebar-item ${activeTab === "search" ? "active" : ""}`}
             >
               <Search size={16} className="sidebar-icon blue" />
-              文献检索
+              {t("sidebar.search")}
             </button>
             <button
               onClick={() => setActiveTab("monitoring")}
               className={`sidebar-item ${activeTab === "monitoring" ? "active" : ""}`}
             >
               <Activity size={16} className="sidebar-icon green" />
-              任务监控
+              {t("sidebar.monitoring")}
             </button>
             <button
               onClick={() => setActiveTab("apiUsage")}
               className={`sidebar-item ${activeTab === "apiUsage" ? "active" : ""}`}
             >
               <BarChart3 size={16} className="sidebar-icon orange" />
-              API 监控
+              {t("sidebar.apiMonitoring")}
             </button>
             <button
               onClick={() => setActiveTab("screening")}
               className={`sidebar-item ${activeTab === "screening" ? "active" : ""}`}
             >
               <GitBranch size={16} className="sidebar-icon blue" />
-              PRISMA 筛选
+              {t("sidebar.prismaScreening")}
             </button>
           </div>
 
           {/* Group 2: 文献库 */}
           <div className="sidebar-group">
-            <h3 className="sidebar-group-title">文献库</h3>
+            <h3 className="sidebar-group-title">{t("sidebar.library")}</h3>
             <button
               onClick={() => setActiveTab("library")}
               className={`sidebar-item ${activeTab === "library" ? "active" : ""}`}
             >
               <BookOpen size={16} className="sidebar-icon orange" />
-              全部文献
+              {t("sidebar.allPapers")}
             </button>
 
             {/* Favorites -> Staging (暂存库) */}
@@ -240,7 +242,7 @@ function App() {
               className={`sidebar-item ${activeTab === "staging" ? "active" : ""}`}
             >
               <Archive size={16} className="sidebar-icon" />
-              暂存库
+              {t("sidebar.staging")}
             </button>
 
             {/* Kaomoji Easter Egg */}
@@ -275,33 +277,33 @@ function App() {
               className={`sidebar-item ${activeTab === "rag" ? "active" : ""}`}
             >
               <Database size={16} className="sidebar-icon purple" />
-              语义检索调试
+              {t("sidebar.semanticDebug")}
             </button>
           </div>
 
           {/* Group 3: 项目 */}
           <div className="sidebar-group">
-            <h3 className="sidebar-group-title">项目</h3>
+            <h3 className="sidebar-group-title">{t("sidebar.projects")}</h3>
             <button
               onClick={() => setActiveTab("draft")}
               className={`sidebar-item ${activeTab === "draft" ? "active" : ""}`}
             >
               <PenTool size={16} className="sidebar-icon purple" />
-              PhD 深度管线
+              {t("sidebar.phdPipeline")}
             </button>
             <button
               onClick={() => setActiveTab("orchestrate")}
               className={`sidebar-item ${activeTab === "orchestrate" ? "active" : ""}`}
             >
               <FileEdit size={16} className="sidebar-icon green" />
-              一键综述生成
+              {t("sidebar.oneClickReview")}
             </button>
             <button
               onClick={() => setActiveTab("reviews")}
               className={`sidebar-item ${activeTab === "reviews" ? "active" : ""}`}
             >
               <FileText size={16} className="sidebar-icon purple" />
-              文献综述
+              {t("sidebar.reviews")}
             </button>
           </div>
         </div>
@@ -313,7 +315,7 @@ function App() {
             onClick={() => setShowSettings(true)}
           >
             <Settings size={16} className="sidebar-icon" />
-            设置
+            {t("sidebar.settings")}
           </button>
         </div>
       </div>
@@ -366,7 +368,7 @@ function App() {
                     }}
                   />
                   <span>
-                    {crawlStatus.status === "running" ? "爬取中" : "等待中"}{" "}
+                    {crawlStatus.status === "running" ? t("crawlStatus.crawling") : t("crawlStatus.waiting")}{" "}
                     {crawlStatus.fetched_count}/{crawlStatus.max_results}
                   </span>
                   <span style={{ color: "#94a3b8" }}>
