@@ -504,71 +504,201 @@ export default function PrismaFlowPage() {
             })}
           </div>
 
-          {/* Exclusion Reasons Breakdown */}
-          {Object.keys(stats.exclusion_reasons).length > 0 && (
-            <div style={{ borderRadius: 10, border: "1px solid #e2e8f0", backgroundColor: "#ffffff", marginBottom: 24, overflow: "hidden" }}>
-              <div style={{ padding: "12px 20px", backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: 14, fontWeight: 600, color: "#0f172a" }}>
-                📊 排除原因分布
-              </div>
-              <div style={{ padding: "12px 20px", maxHeight: 320, overflowY: "auto" }}>
-                {Object.entries(stats.exclusion_reasons)
-                  .sort(([, a], [, b]) => b - a)
-                  .map(([reason, count]) => {
-                    const totalExcluded = Object.values(stats.exclusion_reasons).reduce((s, v) => s + v, 0);
-                    const pct = totalExcluded > 0 ? ((count / totalExcluded) * 100).toFixed(1) : "0";
-                    return (
-                      <div key={reason} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
-                        <div style={{ flex: 1, fontSize: 13, color: "#374151" }}>{reason}</div>
-                        <div style={{ width: 200, height: 8, backgroundColor: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
-                          <div style={{ width: `${pct}%`, height: "100%", backgroundColor: "#ef4444", borderRadius: 4 }} />
-                        </div>
-                        <div style={{ width: 60, textAlign: "right", fontSize: 13, fontWeight: 600, color: "#dc2626" }}>{count}</div>
-                        <div style={{ width: 50, textAlign: "right", fontSize: 11, color: "#9ca3af" }}>{pct}%</div>
-                      </div>
-                    );
-                  })}
-              </div>
-            </div>
-          )}
+          {/* Bottom info panels — side by side */}
+          {(() => {
+            const hasReasons = Object.keys(stats.exclusion_reasons).length > 0;
+            const hasStrategy = !!stats.search_strategy;
+            const totalExcluded = hasReasons
+              ? Object.values(stats.exclusion_reasons).reduce((s, v) => s + v, 0)
+              : 0;
+            const sortedReasons = hasReasons
+              ? Object.entries(stats.exclusion_reasons).sort(([, a], [, b]) => b - a)
+              : [];
+            const maxCount = sortedReasons.length > 0 ? sortedReasons[0][1] : 1;
 
-          {/* Search Strategy Card */}
-          {stats.search_strategy && (
-            <div style={{ borderRadius: 10, border: "1px solid #e2e8f0", backgroundColor: "#ffffff", marginBottom: 24, overflow: "hidden" }}>
-              <div style={{ padding: "12px 20px", backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: 14, fontWeight: 600, color: "#0f172a" }}>
-                🔬 搜索策略记录
-              </div>
-              <div style={{ padding: "16px 20px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "8px 16px", fontSize: 13 }}>
-                  {!!stats.search_strategy.query_keywords && (
-                    <>
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>检索关键词:</span>
-                      <span style={{ color: "#0f172a" }}>{String(stats.search_strategy.query_keywords)}</span>
-                    </>
-                  )}
-                  {!!stats.search_strategy.sources && (
-                    <>
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>数据源:</span>
-                      <span style={{ color: "#0f172a" }}>
-                        {Array.isArray(stats.search_strategy.sources) ? (stats.search_strategy.sources as string[]).join(", ") : String(stats.search_strategy.sources)}
+            return (
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: hasReasons && hasStrategy ? "1fr 1fr" : "1fr",
+                gap: 20, marginBottom: 24,
+              }}>
+                {/* Exclusion Reasons */}
+                {hasReasons && (
+                  <div style={{
+                    borderRadius: 12, border: "1px solid #e2e8f0",
+                    backgroundColor: "#fff", overflow: "hidden",
+                    display: "flex", flexDirection: "column",
+                  }}>
+                    <div style={{
+                      padding: "14px 20px", backgroundColor: "#fef2f2",
+                      borderBottom: "1px solid #fecaca",
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                    }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: "#991b1b" }}>
+                        📊 排除原因分布
                       </span>
-                    </>
-                  )}
-                  {!!stats.search_strategy.year_range && (
-                    <>
-                      <span style={{ color: "#64748b", fontWeight: 500 }}>年份范围:</span>
-                      <span style={{ color: "#0f172a" }}>{String(stats.search_strategy.year_range)}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+                      <span style={{
+                        fontSize: 12, color: "#dc2626", fontWeight: 500,
+                        padding: "2px 10px", backgroundColor: "#fee2e2", borderRadius: 10,
+                      }}>
+                        共 {totalExcluded} 篇排除
+                      </span>
+                    </div>
+                    <div style={{ padding: "8px 20px 16px", overflowY: "auto", maxHeight: 480, flex: 1 }}>
+                      {sortedReasons.map(([reason, count], i) => {
+                        const pct = totalExcluded > 0 ? ((count / totalExcluded) * 100) : 0;
+                        const barWidth = maxCount > 0 ? ((count / maxCount) * 100) : 0;
+                        return (
+                          <div key={reason} style={{
+                            padding: "10px 0",
+                            borderBottom: i < sortedReasons.length - 1 ? "1px solid #f8fafc" : "none",
+                          }}>
+                            <div style={{
+                              display: "flex", justifyContent: "space-between",
+                              alignItems: "baseline", marginBottom: 6,
+                            }}>
+                              <span style={{ fontSize: 13, color: "#1e293b", flex: 1, lineHeight: 1.4 }}>
+                                {reason}
+                              </span>
+                              <span style={{
+                                fontSize: 13, fontWeight: 700, color: "#dc2626",
+                                marginLeft: 12, whiteSpace: "nowrap",
+                              }}>
+                                {count} 篇
+                                <span style={{ fontWeight: 400, color: "#9ca3af", fontSize: 11, marginLeft: 4 }}>
+                                  ({pct.toFixed(1)}%)
+                                </span>
+                              </span>
+                            </div>
+                            <div style={{
+                              width: "100%", height: 6,
+                              backgroundColor: "#fee2e2", borderRadius: 3,
+                              overflow: "hidden",
+                            }}>
+                              <div style={{
+                                width: `${barWidth}%`, height: "100%",
+                                backgroundColor: "#ef4444", borderRadius: 3,
+                                transition: "width 0.3s ease",
+                              }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
-          {Object.keys(stats.exclusion_reasons).length === 0 && stats.total > 0 && (
-            <div style={{ padding: 24, textAlign: "center", color: "#94a3b8", fontSize: 13, borderRadius: 10, border: "1px dashed #e2e8f0", marginBottom: 24 }}>
-              尚无排除原因记录。点击上方阶段卡片展开论文列表，可排除文献并填写原因。
-            </div>
-          )}
+                {/* Search Strategy + Summary */}
+                {hasStrategy && (
+                  <div style={{
+                    borderRadius: 12, border: "1px solid #e2e8f0",
+                    backgroundColor: "#fff", overflow: "hidden",
+                    display: "flex", flexDirection: "column",
+                  }}>
+                    <div style={{
+                      padding: "14px 20px", backgroundColor: "#f0f9ff",
+                      borderBottom: "1px solid #bae6fd",
+                      fontSize: 14, fontWeight: 600, color: "#0c4a6e",
+                    }}>
+                      🔬 搜索策略与筛选摘要
+                    </div>
+                    <div style={{ padding: "16px 20px", flex: 1 }}>
+                      {/* Strategy details */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
+                        {!!stats.search_strategy!.query_keywords && (
+                          <div>
+                            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
+                              检索关键词
+                            </div>
+                            <div style={{ fontSize: 13, color: "#0f172a", lineHeight: 1.5 }}>
+                              {String(stats.search_strategy!.query_keywords)}
+                            </div>
+                          </div>
+                        )}
+                        {!!stats.search_strategy!.sources && (
+                          <div>
+                            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
+                              数据源
+                            </div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              {(Array.isArray(stats.search_strategy!.sources)
+                                ? (stats.search_strategy!.sources as string[])
+                                : [String(stats.search_strategy!.sources)]
+                              ).map((s) => (
+                                <span key={s} style={{
+                                  padding: "2px 10px", borderRadius: 10, fontSize: 12,
+                                  backgroundColor: "#f0f9ff", color: "#0369a1",
+                                  border: "1px solid #bae6fd",
+                                }}>
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {!!stats.search_strategy!.year_range && (
+                          <div>
+                            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
+                              年份范围
+                            </div>
+                            <div style={{ fontSize: 13, color: "#0f172a" }}>
+                              {String(stats.search_strategy!.year_range)}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Funnel summary */}
+                      <div style={{
+                        padding: "14px 16px", backgroundColor: "#f8fafc",
+                        borderRadius: 8, border: "1px solid #e2e8f0",
+                      }}>
+                        <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>
+                          筛选漏斗
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          {stats.stages.map((stage, idx) => {
+                            const meta = STAGE_META[stage.stage];
+                            if (!meta) return null;
+                            return (
+                              <span key={stage.stage} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                {idx > 0 && <span style={{ color: "#cbd5e1", fontSize: 14 }}>→</span>}
+                                <span style={{
+                                  padding: "3px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600,
+                                  backgroundColor: meta.bgColor, color: meta.color,
+                                  border: `1px solid ${meta.color}30`,
+                                }}>
+                                  {meta.icon} {stage.count}
+                                </span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                        {totalExcluded > 0 && (
+                          <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
+                            通过率:{" "}
+                            <strong style={{ color: "#22c55e" }}>
+                              {stats.stages.length > 0 && stats.stages[0].count > 0
+                                ? ((stats.stages[stats.stages.length - 1].count / stats.stages[0].count) * 100).toFixed(1)
+                                : "0"}%
+                            </strong>
+                            {" "}({stats.stages[stats.stages.length - 1]?.count || 0} / {stats.stages[0]?.count || 0})
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* No reasons yet */}
+                {!hasReasons && !hasStrategy && stats.total > 0 && (
+                  <div style={{ padding: 24, textAlign: "center", color: "#94a3b8", fontSize: 13, borderRadius: 10, border: "1px dashed #e2e8f0" }}>
+                    尚无排除原因记录。点击上方阶段卡片展开论文列表，可排除文献并填写原因。
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </>
       )}
 
