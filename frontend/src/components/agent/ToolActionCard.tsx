@@ -25,6 +25,14 @@ const TOOL_LABELS: Record<
   export_review: { label: "导出综述", emoji: "📥", color: "#22c55e" },
   semantic_search: { label: "语义搜索", emoji: "🧠", color: "#a855f7" },
   manage_groups: { label: "管理分组", emoji: "📁", color: "#64748b" },
+  check_task_progress: { label: "查看进度", emoji: "📊", color: "#f59e0b" },
+  modify_task_requirements: { label: "修改需求", emoji: "✏️", color: "#f97316" },
+  configure_discipline: { label: "学科配置", emoji: "🎓", color: "#8b5cf6" },
+  download_pdf: { label: "下载 PDF", emoji: "📥", color: "#10b981" },
+  screen_papers: { label: "AI 筛选", emoji: "🔬", color: "#ec4899" },
+  enrich_papers: { label: "元数据补全", emoji: "✨", color: "#f59e0b" },
+  prisma_stage: { label: "PRISMA 筛选", emoji: "📋", color: "#06b6d4" },
+  institutional_login: { label: "机构登录", emoji: "🏛️", color: "#8b5cf6" },
 };
 
 const cardStyles = {

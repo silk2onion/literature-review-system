@@ -171,6 +171,45 @@ TOOLS_SCHEMA = [
             "preset_name": "可选：同时保存为命名预设",
         },
     },
+    {
+        "name": "download_pdf",
+        "description": "下载指定文献的 PDF 全文。支持直接下载（OA/arXiv）、Unpaywall 开放获取、机构认证下载三种策略。也可以批量下载多篇文献。",
+        "parameters": {
+            "paper_ids": "文献 ID 列表（必填，可以是单个 ID 或多个）",
+        },
+    },
+    {
+        "name": "screen_papers",
+        "description": "对暂存库中的文献进行 AI 自动筛选评分。LLM 根据研究主题评估每篇文献的相关性（0-10 分），高分自动纳入、低分自动排除。支持 PRISMA 四阶段筛选流程。",
+        "parameters": {
+            "topic": "研究主题/课题（必填，用于评估相关性）",
+            "crawl_job_id": "可选：只筛选特定爬取任务的文献",
+            "keywords": "可选：额外的关键词过滤",
+        },
+    },
+    {
+        "name": "enrich_papers",
+        "description": "为文献库中的论文补全缺失的元数据（摘要、期刊信息、影响因子、JCR 分区、收录平台等）。从 CrossRef 和 Semantic Scholar 获取。",
+        "parameters": {
+            "paper_ids": "文献 ID 列表，留空则自动选择缺失信息的文献",
+            "limit": "最多处理数量（默认 20）",
+        },
+    },
+    {
+        "name": "prisma_stage",
+        "description": "管理 PRISMA 筛选阶段。将暂存文献在四个阶段间推进：identification → screening → eligibility → included。可以查看各阶段统计或批量推进。",
+        "parameters": {
+            "action": "操作: stats（查看统计）/ advance（推进阶段）/ set（设置阶段）",
+            "staging_paper_ids": "文献 ID 列表（advance/set 时必填）",
+            "target_stage": "目标阶段: screening/eligibility/included（advance/set 时必填）",
+            "exclusion_reason": "可选：排除原因（设为非 included 阶段时）",
+        },
+    },
+    {
+        "name": "institutional_login",
+        "description": "登录大学机构访问（EZProxy / Shibboleth），获取认证 session 用于下载付费期刊 PDF 或访问 Web of Science。",
+        "parameters": {},
+    },
 ]
 
 TOOLS_DESCRIPTION = "\n".join(
@@ -453,6 +492,11 @@ class AgentService:
             "check_task_progress": self._tool_check_task_progress,
             "modify_task_requirements": self._tool_modify_task_requirements,
             "configure_discipline": self._tool_configure_discipline,
+            "download_pdf": self._tool_download_pdf,
+            "screen_papers": self._tool_screen_papers,
+            "enrich_papers": self._tool_enrich_papers,
+            "prisma_stage": self._tool_prisma_stage,
+            "institutional_login": self._tool_institutional_login,
         }
 
         handler = handlers.get(tool)
@@ -1141,6 +1185,202 @@ Requirements:
             return {"removed": removed, "group_id": int(group_id)}
 
         return {"error": f"Unknown action: {action}. Use list/create/add_papers/remove_papers"}
+
+    # ── 新功能工具 ──────────────────────────────────────────
+
+    async def _tool_download_pdf(self, params: Dict, db: Session) -> Dict:
+        """下载文献 PDF（支持批量）"""
+        from app.services.pdf_service import PDFDownloadService
+
+        paper_ids = params.get("paper_ids", [])
+        if isinstance(paper_ids, (int, str)):
+            paper_ids = [int(paper_ids)]
+        elif isinstance(paper_ids, list):
+            paper_ids = [int(x) for x in paper_ids]
+
+        if not paper_ids:
+            return {"error": "请提供文献 ID（paper_ids）"}
+
+        service = PDFDownloadService(db)
+
+        if len(paper_ids) == 1:
+            result = await service.download_paper_pdf(paper_ids[0])
+            return {
+                "paper_id": paper_ids[0],
+                "success": result is not None,
+                "pdf_path": result,
+                "message": f"PDF 下载{'成功' if result else '失败'}",
+            }
+        else:
+            results = await service.batch_download(paper_ids)
+            return {
+                "total": len(paper_ids),
+                "success_count": len(results["success"]),
+                "failed_count": len(results["failed"]),
+                "skipped_count": len(results["skipped"]),
+                "success_ids": results["success"],
+                "failed_ids": results["failed"],
+            }
+
+    async def _tool_screen_papers(self, params: Dict, db: Session) -> Dict:
+        """AI 自动筛选暂存库文献"""
+        from app.services.screening_service import ScreeningService
+
+        topic = params.get("topic", "")
+        if not topic:
+            return {"error": "请提供研究主题（topic），用于评估文献相关性"}
+
+        crawl_job_id = params.get("crawl_job_id")
+        keywords = params.get("keywords", "")
+
+        try:
+            service = ScreeningService(db)
+            result = await service.ai_screen(
+                topic=topic,
+                crawl_job_ids=[int(crawl_job_id)] if crawl_job_id else None,
+                keyword_filter=keywords if keywords else None,
+            )
+            return {
+                "topic": topic,
+                "screened_count": result.get("total", 0),
+                "promoted": result.get("promoted", 0),
+                "rejected": result.get("rejected", 0),
+                "pending_review": result.get("pending_review", 0),
+                "message": f"AI 筛选完成: {result.get('promoted', 0)} 篇纳入, {result.get('rejected', 0)} 篇排除, {result.get('pending_review', 0)} 篇待审",
+            }
+        except Exception as e:
+            logger.error("AI screening failed: %s", e, exc_info=True)
+            return {"error": f"AI 筛选失败: {e}"}
+
+    async def _tool_enrich_papers(self, params: Dict, db: Session) -> Dict:
+        """补全文献元数据"""
+        from app.services.enrichment_service import EnrichmentService
+
+        paper_ids = params.get("paper_ids", [])
+        if isinstance(paper_ids, (int, str)):
+            paper_ids = [int(paper_ids)]
+        elif isinstance(paper_ids, list) and paper_ids:
+            paper_ids = [int(x) for x in paper_ids]
+
+        limit = int(params.get("limit", 20))
+
+        try:
+            service = EnrichmentService(db)
+
+            if paper_ids:
+                result = await service.enrich_papers(paper_ids)
+            else:
+                # 自动选择缺失信息的文献
+                result = await service.enrich_incomplete(limit=limit)
+
+            return {
+                "enriched_count": result.get("enriched", 0),
+                "failed_count": result.get("failed", 0),
+                "skipped_count": result.get("skipped", 0),
+                "details": result.get("details", [])[:5],
+                "message": f"元数据补全完成: {result.get('enriched', 0)} 篇更新",
+            }
+        except Exception as e:
+            logger.error("Enrichment failed: %s", e, exc_info=True)
+            return {"error": f"元数据补全失败: {e}"}
+
+    async def _tool_prisma_stage(self, params: Dict, db: Session) -> Dict:
+        """PRISMA 筛选阶段管理"""
+        from app.services.prisma_state_machine import (
+            PRISMA_STAGES,
+            validate_transition,
+        )
+
+        action = params.get("action", "stats")
+
+        if action == "stats":
+            # 统计各阶段数量
+            counts = {}
+            for stage in PRISMA_STAGES:
+                count = (
+                    db.query(StagingPaper)
+                    .filter(StagingPaper.screening_stage == stage)
+                    .count()
+                )
+                counts[stage] = count
+            total = db.query(StagingPaper).count()
+            return {"total": total, "stages": counts}
+
+        staging_ids = params.get("staging_paper_ids", [])
+        if isinstance(staging_ids, (int, str)):
+            staging_ids = [int(staging_ids)]
+        elif isinstance(staging_ids, list):
+            staging_ids = [int(x) for x in staging_ids]
+
+        target_stage = params.get("target_stage", "")
+        exclusion_reason = params.get("exclusion_reason")
+
+        if not staging_ids or not target_stage:
+            return {"error": "请提供 staging_paper_ids 和 target_stage"}
+
+        if target_stage not in PRISMA_STAGES:
+            return {"error": f"无效阶段: {target_stage}，可选: {PRISMA_STAGES}"}
+
+        success = 0
+        errors = []
+        for sid in staging_ids:
+            paper = db.query(StagingPaper).filter(StagingPaper.id == sid).first()
+            if not paper:
+                errors.append(f"ID {sid} 不存在")
+                continue
+            current = paper.screening_stage or "identification"
+            valid, err = validate_transition(current, target_stage)
+            if not valid:
+                errors.append(f"ID {sid}: {err}")
+                continue
+            paper.screening_stage = target_stage
+            if exclusion_reason:
+                paper.exclusion_reason = exclusion_reason
+            success += 1
+
+        db.commit()
+        return {
+            "action": action,
+            "target_stage": target_stage,
+            "success": success,
+            "errors": errors[:5] if errors else [],
+            "message": f"{success} 篇文献已推进到 {target_stage}" + (f"，{len(errors)} 篇失败" if errors else ""),
+        }
+
+    async def _tool_institutional_login(self, params: Dict, db: Session) -> Dict:
+        """登录机构访问"""
+        from app.services.institutional_auth import get_institutional_auth_service
+
+        auth = get_institutional_auth_service()
+
+        if auth.is_authenticated:
+            return {
+                "success": True,
+                "message": "机构访问已认证，无需重新登录",
+                "status": auth.get_status(),
+            }
+
+        login_url = getattr(settings, "INSTITUTIONAL_LOGIN_URL", "")
+        username = getattr(settings, "INSTITUTIONAL_USERNAME", "")
+        password = getattr(settings, "INSTITUTIONAL_PASSWORD", "")
+        auth_type = getattr(settings, "INSTITUTIONAL_AUTH_TYPE", "ezproxy")
+
+        if not login_url or not username:
+            return {"error": "未配置机构访问信息，请在设置页面配置"}
+
+        success = auth.login(
+            login_url=login_url,
+            username=username,
+            password=password,
+            auth_type=auth_type,
+            headless=getattr(settings, "SELENIUM_HEADLESS", True),
+        )
+
+        return {
+            "success": success,
+            "message": f"机构{'登录成功' if success else '登录失败'}",
+            "status": auth.get_status(),
+        }
 
     # ── Result summary ──────────────────────────────────────
 
