@@ -543,53 +543,35 @@ export default function PrismaFlowPage() {
                         共 {totalExcluded} 篇排除
                       </span>
                     </div>
-                    <div style={{
-                      padding: "12px 20px 16px",
-                      display: "grid",
-                      gridTemplateColumns: sortedReasons.length > 4 ? "1fr 1fr" : "1fr",
-                      gap: "4px 24px",
-                    }}>
-                      {sortedReasons.map(([reason, count]) => {
-                        const pct = totalExcluded > 0 ? ((count / totalExcluded) * 100) : 0;
-                        const barWidth = maxCount > 0 ? ((count / maxCount) * 100) : 0;
-                        return (
-                          <div key={reason} style={{
-                            padding: "8px 12px",
-                            borderRadius: 8,
-                            backgroundColor: "#fefefe",
-                            border: "1px solid #f1f5f9",
-                          }}>
-                            <div style={{
-                              display: "flex", justifyContent: "space-between",
-                              alignItems: "baseline", marginBottom: 5,
-                            }}>
-                              <span style={{ fontSize: 13, color: "#1e293b", flex: 1, lineHeight: 1.3 }}>
-                                {reason}
-                              </span>
-                              <span style={{
-                                fontSize: 13, fontWeight: 700, color: "#dc2626",
-                                marginLeft: 8, whiteSpace: "nowrap",
-                              }}>
-                                {count}
-                                <span style={{ fontWeight: 400, color: "#9ca3af", fontSize: 11, marginLeft: 3 }}>
-                                  ({pct.toFixed(0)}%)
-                                </span>
-                              </span>
-                            </div>
-                            <div style={{
-                              width: "100%", height: 5,
-                              backgroundColor: "#fee2e2", borderRadius: 3,
-                              overflow: "hidden",
-                            }}>
-                              <div style={{
-                                width: `${barWidth}%`, height: "100%",
-                                backgroundColor: "#ef4444", borderRadius: 3,
-                                transition: "width 0.3s ease",
-                              }} />
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div style={{ padding: "4px 20px 16px" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ borderBottom: "2px solid #fee2e2" }}>
+                            <th style={{ textAlign: "left", padding: "8px 0", color: "#64748b", fontWeight: 600, fontSize: 12 }}>排除原因</th>
+                            <th style={{ textAlign: "right", padding: "8px 0", color: "#64748b", fontWeight: 600, fontSize: 12, width: 60 }}>数量</th>
+                            <th style={{ textAlign: "right", padding: "8px 0", color: "#64748b", fontWeight: 600, fontSize: 12, width: 60 }}>占比</th>
+                            <th style={{ padding: "8px 0", width: "35%" }} />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedReasons.map(([reason, count], i) => {
+                            const pct = totalExcluded > 0 ? ((count / totalExcluded) * 100) : 0;
+                            const barWidth = maxCount > 0 ? ((count / maxCount) * 100) : 0;
+                            return (
+                              <tr key={reason} style={{ borderBottom: i < sortedReasons.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                                <td style={{ padding: "10px 0", color: "#1e293b", lineHeight: 1.4 }}>{reason}</td>
+                                <td style={{ padding: "10px 0", textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{count}</td>
+                                <td style={{ padding: "10px 0", textAlign: "right", color: "#9ca3af", fontSize: 12 }}>{pct.toFixed(1)}%</td>
+                                <td style={{ padding: "10px 0 10px 16px" }}>
+                                  <div style={{ width: "100%", height: 6, backgroundColor: "#fee2e2", borderRadius: 3, overflow: "hidden" }}>
+                                    <div style={{ width: `${barWidth}%`, height: "100%", backgroundColor: "#ef4444", borderRadius: 3 }} />
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
