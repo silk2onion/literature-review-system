@@ -217,6 +217,7 @@ backend/literature.db
 backend/literature_review.db
 
 # Frontend old backup files (pre-refactor originals kept locally)
+# 注意: AgentChatPanel.tsx 和 AsyncTaskPanel.tsx 仍在使用，不能忽略
 frontend/src/LibraryPage.tsx
 frontend/src/ReviewListPage.tsx
 frontend/src/SettingsModal.tsx
@@ -224,7 +225,6 @@ frontend/src/PhdPipelinePage.tsx
 frontend/src/StagingPapersPage.tsx
 frontend/src/CrawlerSearchPage.tsx
 frontend/src/ApiUsagePage.tsx
-frontend/src/AsyncTaskPanel.tsx
 frontend/src/CitationGraphPanel.tsx
 frontend/src/GroupManager.tsx
 frontend/src/MonitoringDashboard.tsx
