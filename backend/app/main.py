@@ -53,8 +53,17 @@ async def lifespan(app: FastAPI):
     print("✅ 系统启动成功！")
     
     yield
-    
+
     # 关闭时执行
+    # 清理机构认证 WebDriver
+    try:
+        from app.services.institutional_auth import get_institutional_auth_service
+        auth_service = get_institutional_auth_service()
+        auth_service.close()
+        print("✓ 机构认证服务已关闭")
+    except Exception:
+        pass
+
     print("👋 系统关闭")
 
 
@@ -77,7 +86,7 @@ logger.info(f"配置 CORS，允许来源: {settings.CORS_ORIGINS}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

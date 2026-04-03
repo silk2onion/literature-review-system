@@ -4,6 +4,7 @@ interface BatchActionBarProps {
   archiving: boolean;
   restoring: boolean;
   syncing: boolean;
+  batchDownloading?: boolean;
   removingFromGroup: boolean;
   selectedGroupId: number | null;
   showArchived: boolean;
@@ -13,6 +14,7 @@ interface BatchActionBarProps {
   onAddToGroup: () => void;
   onRemoveFromGroup: () => void;
   onSyncCitations: () => void;
+  onBatchDownloadPdf?: () => void;
   onGenerateReview?: () => void;
 }
 
@@ -22,6 +24,7 @@ export default function BatchActionBar({
   archiving,
   restoring,
   syncing,
+  batchDownloading,
   removingFromGroup,
   selectedGroupId,
   showArchived,
@@ -31,6 +34,7 @@ export default function BatchActionBar({
   onAddToGroup,
   onRemoveFromGroup,
   onSyncCitations,
+  onBatchDownloadPdf,
   onGenerateReview,
 }: BatchActionBarProps) {
   if (selectedCount === 0) return null;
@@ -43,6 +47,22 @@ export default function BatchActionBar({
       >
         加入分组
       </button>
+      {onBatchDownloadPdf && (
+        <button
+          onClick={onBatchDownloadPdf}
+          disabled={batchDownloading}
+          className="action-button"
+          style={{
+            borderColor: "#8b5cf6",
+            backgroundColor: "rgba(139, 92, 246, 0.1)",
+            color: "#8b5cf6",
+          }}
+        >
+          {batchDownloading
+            ? "下载中..."
+            : `批量下载 PDF (${selectedCount})`}
+        </button>
+      )}
       {selectedGroupId && (
         <button
           onClick={onRemoveFromGroup}

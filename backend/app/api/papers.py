@@ -385,6 +385,10 @@ async def restore_papers_endpoint(
     return {"message": f"已恢复 {count} 篇文献", "count": count}
 
 
+class BatchDownloadRequest(BaseModel):
+    paper_ids: List[int]
+
+
 @router.post("/{paper_id}/download-pdf")
 async def download_paper_pdf(
     paper_id: int,
@@ -392,37 +396,146 @@ async def download_paper_pdf(
     db: Session = Depends(get_db),
 ):
     """
-    下载文献PDF (异步后台任务)
+    下载文献 PDF（异步后台任务）
+
+    支持三种下载策略：
+    1. 直接下载（OA / arXiv 等有 pdf_url 的）
+    2. 机构认证下载（通过 EZProxy + 出版商 handler）
+    3. 仅需有 DOI 或 URL 即可尝试
     """
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
     if not paper:
         raise HTTPException(status_code=404, detail="文献不存在")
 
-    # Check if PDF URL exists
-    pdf_url = getattr(paper, "pdf_url", None)
-    if not pdf_url:
-        raise HTTPException(status_code=400, detail="该文献没有PDF链接")
+    # 至少需要 pdf_url / doi / url 之一
+    if not paper.pdf_url and not paper.doi and not paper.url:
+        raise HTTPException(
+            status_code=400,
+            detail="该文献没有 PDF 链接、DOI 或 URL，无法下载",
+        )
 
-    # Define background task
     async def download_task():
         try:
-            # Re-create session for background task if needed,
-            # but here we use the service which uses the passed db session.
-            # Note: In FastAPI background tasks, it's safer to create a new session
-            # or ensure the session isn't closed before the task runs.
-            # For simplicity here, we'll assume the service handles it or we catch errors.
-            # BETTER APPROACH: Create a new session scope inside the task.
             from app.database import SessionLocal
             with SessionLocal() as session:
                 service = PDFDownloadService(session)
-                await service.download_paper_pdf(paper_id)
-                logger.info(f"PDF downloaded successfully for paper {paper_id}")
+                result = await service.download_paper_pdf(paper_id)
+                if result:
+                    logger.info("PDF downloaded successfully for paper %d: %s", paper_id, result)
+                else:
+                    logger.warning("PDF download failed for paper %d", paper_id)
         except Exception as e:
-            logger.error(f"Failed to download PDF for paper {paper_id}: {e}")
+            logger.error("Failed to download PDF for paper %d: %s", paper_id, e)
 
     background_tasks.add_task(download_task)
 
     return {"message": "PDF下载任务已启动", "paper_id": paper_id}
+
+
+@router.post("/batch-download-pdf")
+async def batch_download_pdfs(
+    payload: BatchDownloadRequest,
+    background_tasks: BackgroundTasks,
+):
+    """
+    批量下载 PDF（异步后台任务）
+
+    使用机构认证 session 一次登录，批量下载多篇论文。
+    通过 GET /api/papers/download-progress 查询进度。
+    """
+    from app.services.pdf_service import (
+        clear_batch_download_progress,
+        update_batch_download_progress,
+    )
+
+    if not payload.paper_ids:
+        raise HTTPException(status_code=400, detail="paper_ids 不能为空")
+
+    clear_batch_download_progress()
+
+    async def batch_task():
+        try:
+            from app.database import SessionLocal
+            with SessionLocal() as session:
+                service = PDFDownloadService(session)
+                await service.batch_download(
+                    payload.paper_ids,
+                    progress_callback=update_batch_download_progress,
+                )
+        except Exception as e:
+            logger.error("Batch PDF download failed: %s", e)
+
+    background_tasks.add_task(batch_task)
+
+    return {
+        "message": f"批量下载任务已启动 ({len(payload.paper_ids)} 篇)",
+        "paper_ids": payload.paper_ids,
+    }
+
+
+@router.get("/download-progress")
+async def get_download_progress():
+    """获取批量下载进度"""
+    from app.services.pdf_service import get_batch_download_progress
+
+    return get_batch_download_progress()
+
+
+@router.get("/institutional-url")
+async def get_institutional_url(doi: str, db: Session = Depends(get_db)):
+    """
+    将 DOI 转为 EZProxy 代理后的出版商 URL
+
+    根据 DOI 前缀直接构造出版商 URL（不依赖 doi.org 解析），
+    前端直接用返回的 URL 在用户浏览器中打开，零反爬。
+    """
+    from app.models.system_setting import SystemSetting
+    import json as _json
+
+    # 读取 EZProxy 前缀
+    setting = db.query(SystemSetting).filter(
+        SystemSetting.key == "institutional_access_config"
+    ).first()
+    ezproxy_prefix = ""
+    if setting and setting.value:
+        try:
+            config = _json.loads(setting.value)
+            if config.get("enabled"):
+                ezproxy_prefix = config.get("ezproxy_prefix", "")
+        except Exception:
+            pass
+    if not ezproxy_prefix:
+        ezproxy_prefix = getattr(settings, "INSTITUTIONAL_EZPROXY_PREFIX", "")
+    if not ezproxy_prefix:
+        raise HTTPException(status_code=400, detail="未配置 EZProxy 前缀")
+
+    publisher_url = _doi_to_publisher_url(doi.strip())
+    proxied_url = f"{ezproxy_prefix}{publisher_url}"
+    return {"doi": doi, "publisher_url": publisher_url, "proxied_url": proxied_url}
+
+
+def _doi_to_publisher_url(doi: str) -> str:
+    """根据 DOI 前缀直接构造出版商 URL（不依赖 doi.org）"""
+    if doi.startswith("10.1016/"):
+        return f"https://linkinghub.elsevier.com/retrieve/doi/{doi}"
+    if doi.startswith("10.1007/"):
+        return f"https://link.springer.com/article/{doi}"
+    if doi.startswith("10.1038/"):
+        return f"https://www.nature.com/articles/{doi.split('/')[-1]}"
+    if doi.startswith("10.1002/") or doi.startswith("10.1111/"):
+        return f"https://onlinelibrary.wiley.com/doi/{doi}"
+    if doi.startswith("10.1080/"):
+        return f"https://www.tandfonline.com/doi/full/{doi}"
+    if doi.startswith("10.1177/"):
+        return f"https://journals.sagepub.com/doi/{doi}"
+    if doi.startswith("10.1109/"):
+        return f"https://ieeexplore.ieee.org/document/{doi}"
+    if doi.startswith("10.3390/"):
+        return f"https://www.mdpi.com/{doi.split('/')[-1]}"
+    if doi.startswith("10.3389/"):
+        return f"https://www.frontiersin.org/articles/{doi}/full"
+    # fallback
+    return f"https://doi.org/{doi}"
 
 
 @router.post("/upload", response_model=PaperResponse)

@@ -13,6 +13,7 @@ const SOURCE_OPTIONS = [
   { value: "scopus", label: "Scopus" },
   { value: "semantic_scholar", label: "Semantic Scholar" },
   { value: "openalex", label: "OpenAlex" },
+  { value: "wos", label: "Web of Science" },
 ];
 
 interface CrawlJobFormProps {

@@ -40,6 +40,8 @@ class DataSourcesConfig(BaseModel):
 class ModelSelectionConfig(BaseModel):
     llm_model: str
     embedding_model: str
+    embedding_dimensions: int = Field(default=0, description="Embedding 维度（0=使用模型默认）")
+    screening_model: str = Field(default="", description="AI 筛选专用模型（为空则使用主 LLM 模型）")
 
 
 class AgentConfig(BaseModel):
@@ -52,6 +54,8 @@ class ModelOptionsResponse(BaseModel):
     embedding_models: List[str]
     current_llm_model: str
     current_embedding_model: str
+    current_embedding_dimensions: int = 0
+    current_screening_model: str = ""
 
 
 # ---- LLM 连接配置 ----
@@ -286,11 +290,16 @@ def get_model_options(db: Session = Depends(get_db)) -> ModelOptionsResponse:
     if current_emb and current_emb not in embedding_models:
         embedding_models = embedding_models + [current_emb]
 
+    current_emb_dim = saved_selection.get("embedding_dimensions", getattr(settings, "EMBEDDING_DIMENSIONS", 0))
+    current_screening = saved_selection.get("screening_model", getattr(settings, "SCREENING_MODEL", ""))
+
     return ModelOptionsResponse(
         llm_models=llm_models,
         embedding_models=embedding_models,
         current_llm_model=current_llm,
         current_embedding_model=current_emb,
+        current_embedding_dimensions=current_emb_dim,
+        current_screening_model=current_screening,
     )
 
 
@@ -308,6 +317,8 @@ def update_model_options(
     # 2. 同步更新全局 settings (运行时生效)
     setattr(settings, "OPENAI_MODEL", payload.llm_model)
     setattr(settings, "EMBEDDING_MODEL", payload.embedding_model)
+    setattr(settings, "EMBEDDING_DIMENSIONS", payload.embedding_dimensions)
+    setattr(settings, "SCREENING_MODEL", payload.screening_model)
 
     # 3. 重新构建返回 (复用 get 逻辑的简化版)
     api_key = getattr(settings, "OPENAI_API_KEY", "")
@@ -331,6 +342,8 @@ def update_model_options(
         embedding_models=embedding_models,
         current_llm_model=payload.llm_model,
         current_embedding_model=payload.embedding_model,
+        current_embedding_dimensions=payload.embedding_dimensions,
+        current_screening_model=payload.screening_model,
     )
 
 
@@ -533,6 +546,114 @@ def get_search_config(db: Session = Depends(get_db)):
 def save_search_config(payload: SearchConfig, db: Session = Depends(get_db)):
     """保存语义检索配置"""
     _set_setting(db, "search_config", payload.model_dump())
+
+
+# ---- 机构访问配置 ----
+
+
+class InstitutionalAccessConfig(BaseModel):
+    enabled: bool = False
+    institution_name: str = ""
+    auth_type: str = Field(default="ezproxy", description="ezproxy | shibboleth")
+    login_url: str = ""
+    ezproxy_prefix: str = ""
+    username: str = ""
+    password: str = ""
+    headless: bool = True
+
+
+@router.get("/settings/institutional-access", response_model=InstitutionalAccessConfig)
+def get_institutional_access_config(db: Session = Depends(get_db)):
+    """获取机构访问配置"""
+    saved = _get_setting(db, "institutional_access_config", {})
+    default = InstitutionalAccessConfig(
+        enabled=getattr(settings, "INSTITUTIONAL_ENABLED", False),
+        institution_name=getattr(settings, "INSTITUTIONAL_NAME", ""),
+        auth_type=getattr(settings, "INSTITUTIONAL_AUTH_TYPE", "ezproxy"),
+        login_url=getattr(settings, "INSTITUTIONAL_LOGIN_URL", ""),
+        ezproxy_prefix=getattr(settings, "INSTITUTIONAL_EZPROXY_PREFIX", ""),
+        username=getattr(settings, "INSTITUTIONAL_USERNAME", ""),
+        password=getattr(settings, "INSTITUTIONAL_PASSWORD", ""),
+        headless=getattr(settings, "SELENIUM_HEADLESS", True),
+    )
+    if saved and isinstance(saved, dict):
+        return InstitutionalAccessConfig(
+            enabled=saved.get("enabled", default.enabled),
+            institution_name=saved.get("institution_name", default.institution_name),
+            auth_type=saved.get("auth_type", default.auth_type),
+            login_url=saved.get("login_url", default.login_url),
+            ezproxy_prefix=saved.get("ezproxy_prefix", default.ezproxy_prefix),
+            username=saved.get("username", default.username),
+            password=saved.get("password", default.password),
+            headless=saved.get("headless", default.headless),
+        )
+    return default
+
+
+@router.put("/settings/institutional-access", response_model=InstitutionalAccessConfig)
+def save_institutional_access_config(
+    payload: InstitutionalAccessConfig,
+    db: Session = Depends(get_db),
+):
+    """保存机构访问配置，运行时立即生效"""
+    _set_setting(db, "institutional_access_config", payload.model_dump())
+    # 运行时热更新
+    setattr(settings, "INSTITUTIONAL_ENABLED", payload.enabled)
+    setattr(settings, "INSTITUTIONAL_NAME", payload.institution_name)
+    setattr(settings, "INSTITUTIONAL_AUTH_TYPE", payload.auth_type)
+    setattr(settings, "INSTITUTIONAL_LOGIN_URL", payload.login_url)
+    setattr(settings, "INSTITUTIONAL_EZPROXY_PREFIX", payload.ezproxy_prefix)
+    setattr(settings, "INSTITUTIONAL_USERNAME", payload.username)
+    setattr(settings, "INSTITUTIONAL_PASSWORD", payload.password)
+    setattr(settings, "SELENIUM_HEADLESS", payload.headless)
+    return payload
+
+
+@router.post("/settings/institutional-access/test")
+def test_institutional_login(db: Session = Depends(get_db)):
+    """测试机构登录"""
+    from app.services.institutional_auth import get_institutional_auth_service
+
+    saved = _get_setting(db, "institutional_access_config", {})
+    if not saved:
+        raise HTTPException(status_code=400, detail="未配置机构访问信息")
+
+    config = InstitutionalAccessConfig(**saved)
+    if not config.login_url or not config.username or not config.password:
+        raise HTTPException(status_code=400, detail="登录 URL、用户名、密码不能为空")
+
+    auth_service = get_institutional_auth_service()
+    success = auth_service.login(
+        login_url=config.login_url,
+        username=config.username,
+        password=config.password,
+        auth_type=config.auth_type,
+        headless=config.headless,
+    )
+
+    if success:
+        return {
+            "success": True,
+            "message": "机构登录成功",
+            "status": auth_service.get_status(),
+        }
+    else:
+        return {
+            "success": False,
+            "message": "机构登录失败，请检查凭据或尝试关闭 headless 模式",
+            "status": auth_service.get_status(),
+        }
+
+
+@router.get("/settings/institutional-access/status")
+def get_institutional_session_status():
+    """查询机构认证 session 状态"""
+    from app.services.institutional_auth import get_institutional_auth_service
+
+    auth_service = get_institutional_auth_service()
+    status = auth_service.get_status()
+    status["session_healthy"] = auth_service.check_session_health() if status["authenticated"] else False
+    return status
 
 
 # ---- 学科配置 (Discipline Profile) ----
