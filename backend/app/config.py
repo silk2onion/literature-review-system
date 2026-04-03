@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
     HOST: str = "0.0.0.0"
-    PORT: int = 5444
+    PORT: int = 5455
     
     # 数据库配置
     # 使用项目根目录下的绝对路径，避免因启动工作目录不同而生成多份 SQLite
@@ -46,8 +46,9 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "「team」gpt-5.4"
 
-    # Embedding 模型配置（默认使用 OpenAI 兼容的 embedding 模型）
+    # Embedding 模型配置
     EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_DIMENSIONS: int = 0  # 0 = 使用模型默认维度，>0 则强制截断/指定
 
     # 可选：预设多个模型名称，方便在代码中做校验或切换
     SUPPORTED_LLM_MODELS: List[str] = [
@@ -91,11 +92,25 @@ class Settings(BaseSettings):
     # Semantic Scholar API（免费，无需 API Key；有 Key 可提速至 10 req/sec）
     SEMANTIC_SCHOLAR_ENABLED: bool = True
     SEMANTIC_SCHOLAR_API_KEY: str = ""
+
+    # 机构访问配置（EZProxy / Shibboleth 认证 + PDF 下载）
+    INSTITUTIONAL_ENABLED: bool = False
+    INSTITUTIONAL_NAME: str = ""
+    INSTITUTIONAL_AUTH_TYPE: str = "ezproxy"  # ezproxy | shibboleth
+    INSTITUTIONAL_LOGIN_URL: str = ""
+    INSTITUTIONAL_EZPROXY_PREFIX: str = ""
+    INSTITUTIONAL_USERNAME: str = ""
+    INSTITUTIONAL_PASSWORD: str = ""
+    SELENIUM_HEADLESS: bool = True
+
+    # Web of Science 爬虫（需要机构访问）
+    WOS_ENABLED: bool = False
     
     # AI 助手主动模式配置
     AGENT_PROACTIVE_ENABLED: bool = True
     AGENT_HEARTBEAT_INTERVAL: int = 60  # 秒
     HEARTBEAT_MODEL: str = ""  # 心跳专用模型，为空则使用 OPENAI_MODEL
+    SCREENING_MODEL: str = ""  # AI 筛选专用模型（轻量即可），为空则使用 OPENAI_MODEL
 
     
     # 文件存储路径
@@ -114,18 +129,8 @@ class Settings(BaseSettings):
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         return os.path.join(base_dir, self.EXPORTS_DIR)
     
-    # CORS配置
-    CORS_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-        "http://192.168.3.72:5173",
-        "http://192.168.3.72:5174",
-    ]
+    # CORS配置（使用通配符允许任意来源，方便公网/局域网访问）
+    CORS_ORIGINS: List[str] = ["*"]
     
     # JWT配置（可选）
     SECRET_KEY: str = "your-secret-key-change-in-production"
