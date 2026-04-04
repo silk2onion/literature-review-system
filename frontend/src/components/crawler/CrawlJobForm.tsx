@@ -5,6 +5,7 @@ import {
   Loader,
   ScanSearch,
 } from "lucide-react";
+import { useLocale } from "../../hooks/useLocale";
 
 const SOURCE_OPTIONS = [
   { value: "arxiv", label: "arXiv" },
@@ -51,6 +52,7 @@ export default function CrawlJobForm({
   submitMessage,
   onSubmit,
 }: CrawlJobFormProps) {
+  const { t } = useLocale();
   const labelStyle: React.CSSProperties = {
     display: "block",
     fontSize: "14px",
@@ -92,17 +94,15 @@ export default function CrawlJobForm({
       {/* Keywords */}
       <div>
         <label style={labelStyle}>
-          关键词{" "}
+          {t("crawl.keywords")}{" "}
           <span style={{ fontWeight: 400, color: "#9ca3af" }}>
-            (支持 OR / AND 布尔语法，逗号分隔多组)
+            {t("crawl.keywordsHelp")}
           </span>
         </label>
         <textarea
           value={keywords}
           onChange={(e) => setKeywords(e.target.value)}
-          placeholder={
-            '例如: TOD OR "transit oriented development" AND qingdao'
-          }
+          placeholder={t("crawl.keywordsPlaceholder")}
           style={{
             ...inputStyle,
             minHeight: "100px",
@@ -121,7 +121,7 @@ export default function CrawlJobForm({
             lineHeight: "1.6",
           }}
         >
-          <strong>💡 布尔语法：</strong>
+          <strong>💡 {t("crawl.booleanSyntaxTitle")}</strong>
           <code
             style={{
               backgroundColor: "#e0f2fe",
@@ -131,7 +131,7 @@ export default function CrawlJobForm({
           >
             OR
           </code>{" "}
-          表示"或"（拆分为多次搜索合并），
+          {t("crawl.booleanOr")}
           <code
             style={{
               backgroundColor: "#e0f2fe",
@@ -141,7 +141,7 @@ export default function CrawlJobForm({
           >
             AND
           </code>{" "}
-          表示"且"，
+          {t("crawl.booleanAnd")}
           <code
             style={{
               backgroundColor: "#e0f2fe",
@@ -149,11 +149,11 @@ export default function CrawlJobForm({
               borderRadius: "3px",
             }}
           >
-            "引号"
+            {t("crawl.booleanQuote")}
           </code>{" "}
-          保持短语完整。
+          {t("crawl.booleanPhrase")}
           <br />
-          示例：
+          {t("crawl.booleanExample")}
           <code
             style={{
               backgroundColor: "#e0f2fe",
@@ -168,7 +168,7 @@ export default function CrawlJobForm({
 
       {/* Sources */}
       <div>
-        <label style={labelStyle}>数据源</label>
+        <label style={labelStyle}>{t("crawl.dataSources")}</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
           {SOURCE_OPTIONS.map((opt) => (
             <label
@@ -259,7 +259,7 @@ export default function CrawlJobForm({
               }}
             >
               <ScanSearch size={16} />
-              穷尽检索模式 (Scoping Review)
+              {t("crawl.exhaustiveMode")}
             </div>
             <div
               style={{
@@ -268,8 +268,7 @@ export default function CrawlJobForm({
                 marginTop: "2px",
               }}
             >
-              忽略数量上限，检索数据源中所有匹配结果，适用于系统性文献综述
-              (PRISMA)
+              {t("crawl.exhaustiveDescription")}
             </div>
           </div>
         </label>
@@ -284,7 +283,7 @@ export default function CrawlJobForm({
         }}
       >
         <div>
-          <label style={labelStyle}>年份范围</label>
+          <label style={labelStyle}>{t("crawl.yearRange")}</label>
           <div
             style={{
               display: "flex",
@@ -317,7 +316,7 @@ export default function CrawlJobForm({
           }}
         >
           <label style={labelStyle}>
-            最大抓取数量
+            {t("crawl.maxResults")}
             {exhaustive && (
               <span
                 style={{
@@ -326,7 +325,7 @@ export default function CrawlJobForm({
                   marginLeft: "8px",
                 }}
               >
-                （穷尽模式已启用）
+                {t("crawl.exhaustiveEnabled")}
               </span>
             )}
           </label>
@@ -381,12 +380,12 @@ export default function CrawlJobForm({
             <>
               <Loader size={16} className="animate-spin" />{" "}
               {/* Note: animate-spin won't work without CSS, but icon will show */}
-              创建中...
+              {t("crawl.creating")}
             </>
           ) : (
             <>
               <Search size={16} />
-              开始检索
+              {t("crawl.startSearch")}
             </>
           )}
         </button>

@@ -1,4 +1,5 @@
 import { Zap, ExternalLink } from "lucide-react";
+import { useLocale } from "../../hooks/useLocale";
 
 export type ActionResult = {
   tool: string;
@@ -8,31 +9,31 @@ export type ActionResult = {
 
 const TOOL_LABELS: Record<
   string,
-  { label: string; emoji: string; color: string }
+  { labelKey: string; emoji: string; color: string }
 > = {
-  search_papers: { label: "搜索文献", emoji: "🔍", color: "#3b82f6" },
-  list_staging: { label: "查看暂存库", emoji: "📋", color: "#8b5cf6" },
-  promote_papers: { label: "提升文献", emoji: "⬆️", color: "#22c55e" },
-  delete_staging: { label: "删除暂存", emoji: "🗑️", color: "#ef4444" },
-  search_library: { label: "搜索正式库", emoji: "📚", color: "#f59e0b" },
-  sync_citations: { label: "同步引用", emoji: "🔗", color: "#06b6d4" },
-  system_status: { label: "系统状态", emoji: "⚙️", color: "#64748b" },
-  general_chat: { label: "对话", emoji: "💬", color: "#6366f1" },
-  generate_framework: { label: "生成框架", emoji: "📝", color: "#8b5cf6" },
-  start_review_task: { label: "异步生成综述", emoji: "🚀", color: "#ec4899" },
-  run_phd_pipeline: { label: "运行管线", emoji: "🔬", color: "#14b8a6" },
-  list_reviews: { label: "查看综述", emoji: "📄", color: "#f59e0b" },
-  export_review: { label: "导出综述", emoji: "📥", color: "#22c55e" },
-  semantic_search: { label: "语义搜索", emoji: "🧠", color: "#a855f7" },
-  manage_groups: { label: "管理分组", emoji: "📁", color: "#64748b" },
-  check_task_progress: { label: "查看进度", emoji: "📊", color: "#f59e0b" },
-  modify_task_requirements: { label: "修改需求", emoji: "✏️", color: "#f97316" },
-  configure_discipline: { label: "学科配置", emoji: "🎓", color: "#8b5cf6" },
-  download_pdf: { label: "下载 PDF", emoji: "📥", color: "#10b981" },
-  screen_papers: { label: "AI 筛选", emoji: "🔬", color: "#ec4899" },
-  enrich_papers: { label: "元数据补全", emoji: "✨", color: "#f59e0b" },
-  prisma_stage: { label: "PRISMA 筛选", emoji: "📋", color: "#06b6d4" },
-  institutional_login: { label: "机构登录", emoji: "🏛️", color: "#8b5cf6" },
+  search_papers: { labelKey: "agent.tool.searchPapers", emoji: "🔍", color: "#3b82f6" },
+  list_staging: { labelKey: "agent.tool.listStaging", emoji: "📋", color: "#8b5cf6" },
+  promote_papers: { labelKey: "agent.tool.promotePapers", emoji: "⬆️", color: "#22c55e" },
+  delete_staging: { labelKey: "agent.tool.deleteStaging", emoji: "🗑️", color: "#ef4444" },
+  search_library: { labelKey: "agent.tool.searchLibrary", emoji: "📚", color: "#f59e0b" },
+  sync_citations: { labelKey: "agent.tool.syncCitations", emoji: "🔗", color: "#06b6d4" },
+  system_status: { labelKey: "agent.tool.systemStatus", emoji: "⚙️", color: "#64748b" },
+  general_chat: { labelKey: "agent.tool.chat", emoji: "💬", color: "#6366f1" },
+  generate_framework: { labelKey: "agent.tool.generateFramework", emoji: "📝", color: "#8b5cf6" },
+  start_review_task: { labelKey: "agent.tool.startReviewTask", emoji: "🚀", color: "#ec4899" },
+  run_phd_pipeline: { labelKey: "agent.tool.runPhdPipeline", emoji: "🔬", color: "#14b8a6" },
+  list_reviews: { labelKey: "agent.tool.listReviews", emoji: "📄", color: "#f59e0b" },
+  export_review: { labelKey: "agent.tool.exportReview", emoji: "📥", color: "#22c55e" },
+  semantic_search: { labelKey: "agent.tool.semanticSearch", emoji: "🧠", color: "#a855f7" },
+  manage_groups: { labelKey: "agent.tool.manageGroups", emoji: "📁", color: "#64748b" },
+  check_task_progress: { labelKey: "agent.tool.checkProgress", emoji: "📊", color: "#f59e0b" },
+  modify_task_requirements: { labelKey: "agent.tool.modifyRequirements", emoji: "✏️", color: "#f97316" },
+  configure_discipline: { labelKey: "agent.tool.configureDiscipline", emoji: "🎓", color: "#8b5cf6" },
+  download_pdf: { labelKey: "agent.tool.downloadPdf", emoji: "📥", color: "#10b981" },
+  screen_papers: { labelKey: "agent.tool.screenPapers", emoji: "🔬", color: "#ec4899" },
+  enrich_papers: { labelKey: "agent.tool.enrichPapers", emoji: "✨", color: "#f59e0b" },
+  prisma_stage: { labelKey: "agent.tool.prismaStage", emoji: "📋", color: "#06b6d4" },
+  institutional_login: { labelKey: "agent.tool.institutionalLogin", emoji: "🏛️", color: "#8b5cf6" },
 };
 
 const cardStyles = {
@@ -60,11 +61,15 @@ const cardStyles = {
 };
 
 export default function ToolActionCard({ action }: { action: ActionResult }) {
+  const { t } = useLocale();
+
   const toolInfo = TOOL_LABELS[action.tool] || {
-    label: action.tool,
+    labelKey: "",
     emoji: "⚡",
     color: "#64748b",
   };
+
+  const label = toolInfo.labelKey ? t(toolInfo.labelKey) : action.tool;
 
   return (
     <div
@@ -87,7 +92,7 @@ export default function ToolActionCard({ action }: { action: ActionResult }) {
       >
         <Zap size={14} style={{ color: toolInfo.color }} />
         <span style={{ fontWeight: 600, color: toolInfo.color, fontSize: 12 }}>
-          {toolInfo.emoji} {toolInfo.label}
+          {toolInfo.emoji} {label}
         </span>
       </div>
       <div
@@ -105,7 +110,7 @@ export default function ToolActionCard({ action }: { action: ActionResult }) {
         ) : (
           <>
             {typeof action.result.total === "number" && (
-              <span style={cardStyles.badge}>{action.result.total} 条</span>
+              <span style={cardStyles.badge}>{t("agent.resultCount", { count: action.result.total })}</span>
             )}
             {(action.result.task_id ||
               action.result.id ||
@@ -126,13 +131,13 @@ export default function ToolActionCard({ action }: { action: ActionResult }) {
                   }}
                   style={cardStyles.actionBtn}
                 >
-                  前往监控面板 <ExternalLink size={10} />
+                  {t("agent.goToMonitoring")} <ExternalLink size={10} />
                 </button>
               </>
             )}
             {/* Fallback for other results */}
             {!action.result.task_id && !action.result.error && (
-              <span style={{ color: toolInfo.color }}>操作成功</span>
+              <span style={{ color: toolInfo.color }}>{t("agent.operationSuccess")}</span>
             )}
           </>
         )}

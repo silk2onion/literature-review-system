@@ -1,5 +1,6 @@
 import { Play, Pause, RotateCcw, ScanSearch } from "lucide-react";
 import type { CrawlJob } from "../../types";
+import { useLocale } from "../../hooks/useLocale";
 
 interface CrawlJobRowProps {
   job: CrawlJob;
@@ -19,6 +20,7 @@ export default function CrawlJobRow({
   statusLabel,
   statusStyle,
 }: CrawlJobRowProps) {
+  const { t } = useLocale();
   return (
     <tr style={{ borderTop: "1px solid #f3f4f6" }}>
       <td style={{ padding: "16px 24px", color: "#6b7280" }}>
@@ -110,7 +112,7 @@ export default function CrawlJobRow({
                   border: "none",
                   cursor: "pointer",
                 }}
-                title="执行一步"
+                title={t("crawl.history.runOnce")}
               >
                 <Play size={16} />
               </button>
@@ -126,7 +128,7 @@ export default function CrawlJobRow({
                   border: "none",
                   cursor: "pointer",
                 }}
-                title="暂停"
+                title={t("crawl.history.pause")}
               >
                 <Pause size={16} />
               </button>
@@ -145,7 +147,7 @@ export default function CrawlJobRow({
                 border: "none",
                 cursor: "pointer",
               }}
-              title="恢复"
+              title={t("crawl.history.resume")}
             >
               <Play size={16} />
             </button>
@@ -162,7 +164,7 @@ export default function CrawlJobRow({
                 border: "none",
                 cursor: "pointer",
               }}
-              title="重试"
+              title={t("crawl.history.retry")}
             >
               <RotateCcw size={16} />
             </button>

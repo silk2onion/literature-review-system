@@ -1,4 +1,5 @@
 import type { StagingPaper } from "./types";
+import { useLocale } from "../../hooks/useLocale";
 
 interface PrismaStagePanelProps {
   stage: string;
@@ -47,6 +48,7 @@ export default function PrismaStagePanel({
   canRunAI,
   onRunAI,
 }: PrismaStagePanelProps) {
+  const { t } = useLocale();
   void _stage; // used by parent for key identification
   return (
     <div
@@ -73,7 +75,7 @@ export default function PrismaStagePanel({
         }}
       >
         <span style={{ fontSize: 13, fontWeight: 600, color: stageColor }}>
-          {stageLabel} — {total} 篇文献
+          {stageLabel} — {t("prisma.panel.paperCount", { total })}
         </span>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {canRunAI && onRunAI && (
@@ -90,7 +92,7 @@ export default function PrismaStagePanel({
                 cursor: "pointer",
               }}
             >
-              🤖 AI 筛选
+              🤖 {t("prisma.panel.aiScreen")}
             </button>
           )}
           {canAdvance && (
@@ -109,7 +111,7 @@ export default function PrismaStagePanel({
                 cursor: selectedIds.length > 0 ? "pointer" : "default",
               }}
             >
-              推进到 {nextStageLabel || "下一阶段"}
+              {t("prisma.panel.advanceTo")} {nextStageLabel || t("prisma.panel.nextStage")}
               {selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}
             </button>
           )}
@@ -131,7 +133,7 @@ export default function PrismaStagePanel({
               cursor: selectedIds.length > 0 ? "pointer" : "default",
             }}
           >
-            排除 {selectedIds.length > 0 ? `(${selectedIds.length})` : ""}
+            {t("prisma.panel.exclude")} {selectedIds.length > 0 ? `(${selectedIds.length})` : ""}
           </button>
           <button
             onClick={onClose}
@@ -145,7 +147,7 @@ export default function PrismaStagePanel({
               cursor: "pointer",
             }}
           >
-            收起
+            {t("prisma.panel.collapse")}
           </button>
         </div>
       </div>
@@ -162,25 +164,25 @@ export default function PrismaStagePanel({
                   onChange={onToggleSelectAll}
                 />
               </th>
-              <th style={{ padding: "6px 8px", textAlign: "left" }}>标题</th>
-              <th style={{ width: 60, padding: "6px 8px" }}>年份</th>
-              <th style={{ width: 100, padding: "6px 8px" }}>来源</th>
-              <th style={{ width: 70, padding: "6px 8px" }}>AI 评分</th>
-              <th style={{ width: 80, padding: "6px 8px" }}>状态</th>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>{t("prisma.panel.tableTitle")}</th>
+              <th style={{ width: 60, padding: "6px 8px" }}>{t("prisma.panel.tableYear")}</th>
+              <th style={{ width: 100, padding: "6px 8px" }}>{t("prisma.panel.tableSource")}</th>
+              <th style={{ width: 70, padding: "6px 8px" }}>{t("prisma.panel.tableAiScore")}</th>
+              <th style={{ width: 80, padding: "6px 8px" }}>{t("prisma.panel.tableStatus")}</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
                 <td colSpan={6} style={{ padding: 16, textAlign: "center", color: "#9ca3af" }}>
-                  加载中...
+                  {t("common.loading")}
                 </td>
               </tr>
             )}
             {!loading && papers.length === 0 && (
               <tr>
                 <td colSpan={6} style={{ padding: 16, textAlign: "center", color: "#9ca3af" }}>
-                  该阶段暂无文献
+                  {t("prisma.panel.noData")}
                 </td>
               </tr>
             )}
@@ -263,7 +265,7 @@ export default function PrismaStagePanel({
           }}
         >
           <span>
-            第 {page}/{totalPages} 页，共 {total} 条
+            {t("prisma.panel.pageInfo", { page, totalPages, total })}
           </span>
           <div style={{ display: "flex", gap: 4 }}>
             <button
@@ -279,7 +281,7 @@ export default function PrismaStagePanel({
                 opacity: page <= 1 ? 0.4 : 1,
               }}
             >
-              上一页
+              {t("common.previousPage")}
             </button>
             <button
               onClick={() => onPageChange(page + 1)}
@@ -294,7 +296,7 @@ export default function PrismaStagePanel({
                 opacity: page >= totalPages ? 0.4 : 1,
               }}
             >
-              下一页
+              {t("common.nextPage")}
             </button>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../api/config";
 import { PrismaStagePanel, ConfirmModal } from "../components/staging";
 import type { StagingPaper } from "../components/staging";
+import { useLocale } from "../hooks/useLocale";
 
 type PrismaStageCount = {
   stage: string;
@@ -32,43 +33,44 @@ type CrawlJobOption = {
   created_at: string;
 };
 
-const STAGE_META: Record<
+const STAGE_STYLE: Record<
   string,
-  { label: string; icon: string; color: string; bgColor: string }
+  { labelKey: string; icon: string; color: string; bgColor: string }
 > = {
   identification: {
-    label: "识别 Identification",
+    labelKey: "prisma.stage.identification",
     icon: "🔍",
     color: "#6366f1",
     bgColor: "#eef2ff",
   },
   screening: {
-    label: "筛选 Screening",
+    labelKey: "prisma.stage.screening",
     icon: "📋",
     color: "#0ea5e9",
     bgColor: "#f0f9ff",
   },
   eligibility: {
-    label: "资格 Eligibility",
+    labelKey: "prisma.stage.eligibility",
     icon: "✅",
     color: "#f59e0b",
     bgColor: "#fffbeb",
   },
   included: {
-    label: "纳入 Included",
+    labelKey: "prisma.stage.included",
     icon: "📎",
     color: "#22c55e",
     bgColor: "#f0fdf4",
   },
 };
 
-const NEXT_STAGE_LABEL: Record<string, string> = {
-  identification: "📋 筛选",
-  screening: "✅ 资格",
-  eligibility: "📎 纳入",
+const NEXT_STAGE_LABEL_KEY: Record<string, string> = {
+  identification: "prisma.nextStage.screening",
+  screening: "prisma.nextStage.eligibility",
+  eligibility: "prisma.nextStage.included",
 };
 
 export default function PrismaFlowPage() {
+  const { t } = useLocale();
   const [stats, setStats] = useState<PrismaStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +107,7 @@ export default function PrismaFlowPage() {
         const jobs = (data.jobs || data || []).map(
           (j: Record<string, unknown>) => ({
             id: j.id as number,
-            query: (j.query as string) || "未知查询",
+            query: (j.query as string) || t("prisma.unknownQuery"),
             created_at: (j.created_at as string) || "",
           }),
         );
@@ -127,11 +129,11 @@ export default function PrismaFlowPage() {
         ? `${API_BASE_URL}/api/staging-papers/prisma-stats?crawl_job_id=${crawlJobId}`
         : `${API_BASE_URL}/api/staging-papers/prisma-stats`;
       const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`请求失败: ${resp.status}`);
+      if (!resp.ok) throw new Error(t("prisma.requestFailed", { status: String(resp.status) }));
       const data: PrismaStats = await resp.json();
       setStats(data);
     } catch (err) {
-      setError((err as { message?: string })?.message || "加载失败");
+      setError((err as { message?: string })?.message || t("prisma.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -192,7 +194,7 @@ export default function PrismaFlowPage() {
     if (!nextStage) return;
 
     try {
-      setActionMsg("正在推进...");
+      setActionMsg(t("prisma.advancing"));
       const resp = await fetch(`${API_BASE_URL}/api/staging-papers/batch-screening`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -200,14 +202,14 @@ export default function PrismaFlowPage() {
       });
       const result = await resp.json();
       setActionMsg(
-        `已推进 ${result.updated_count} 篇` +
-        (result.skipped_count > 0 ? `，跳过 ${result.skipped_count} 篇（阶段不匹配）` : ""),
+        t("prisma.advanced", { count: result.updated_count }) +
+        (result.skipped_count > 0 ? t("prisma.advancedSkipped", { count: result.skipped_count }) : ""),
       );
       setSelectedIds([]);
       await refreshAll();
       setTimeout(() => setActionMsg(""), 3000);
     } catch (err) {
-      setActionMsg(`推进失败: ${(err as { message?: string })?.message || "未知错误"}`);
+      setActionMsg(t("prisma.advanceFailed", { error: (err as { message?: string })?.message || t("prisma.unknownError") }));
     }
   };
 
@@ -216,7 +218,7 @@ export default function PrismaFlowPage() {
     if (selectedIds.length === 0) return;
     try {
       setShowExcludeModal(false);
-      setActionMsg("正在排除...");
+      setActionMsg(t("prisma.excluding"));
       await fetch(`${API_BASE_URL}/api/staging-papers/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -225,13 +227,13 @@ export default function PrismaFlowPage() {
           exclusion_reason: exclusionReasonInput.trim() || undefined,
         }),
       });
-      setActionMsg(`已排除 ${selectedIds.length} 篇`);
+      setActionMsg(t("prisma.excludedDone", { count: selectedIds.length }));
       setSelectedIds([]);
       setExclusionReasonInput("");
       await refreshAll();
       setTimeout(() => setActionMsg(""), 3000);
     } catch (err) {
-      setActionMsg(`排除失败: ${(err as { message?: string })?.message || "未知错误"}`);
+      setActionMsg(t("prisma.excludeFailed", { error: (err as { message?: string })?.message || t("prisma.unknownError") }));
     }
   };
 
@@ -241,7 +243,7 @@ export default function PrismaFlowPage() {
     try {
       setShowAIScreenModal(false);
       setAiScreening(true);
-      setActionMsg("AI 正在筛选...");
+      setActionMsg(t("prisma.aiScreeningMsg"));
       const payload: Record<string, unknown> = { topic: aiScreenTopic.trim() };
       if (selectedIds.length > 0) {
         payload.ids = selectedIds;
@@ -255,14 +257,14 @@ export default function PrismaFlowPage() {
       });
       const result = await resp.json();
       setActionMsg(
-        `AI 筛选完成：推荐 ${result.promoted}，待复核 ${result.pending_review}，拒绝 ${result.rejected}` +
-          (result.pre_filtered ? `，预过滤 ${result.pre_filtered}` : ""),
+        t("prisma.aiScreenComplete", { promoted: result.promoted, pending_review: result.pending_review, rejected: result.rejected }) +
+          (result.pre_filtered ? t("prisma.aiScreenPreFiltered", { count: result.pre_filtered }) : ""),
       );
       setSelectedIds([]);
       await refreshAll();
       setTimeout(() => setActionMsg(""), 5000);
     } catch (err) {
-      setActionMsg(`AI 筛选失败: ${(err as { message?: string })?.message || "未知错误"}`);
+      setActionMsg(t("prisma.aiScreenFailed", { error: (err as { message?: string })?.message || t("prisma.unknownError") }));
     } finally {
       setAiScreening(false);
     }
@@ -293,9 +295,9 @@ export default function PrismaFlowPage() {
     <div className="page-container">
       <header className="page-header">
         <div className="page-title">
-          <h1>PRISMA-ScR 筛选流程</h1>
+          <h1>{t("prisma.pageTitle")}</h1>
           <p>
-            点击阶段卡片展开论文列表，可推进阶段、排除文献或触发 AI 筛选
+            {t("prisma.pageSubtitle")}
           </p>
         </div>
       </header>
@@ -313,7 +315,7 @@ export default function PrismaFlowPage() {
         }}
       >
         <label style={{ fontSize: 13, color: "#64748b", fontWeight: 500 }}>
-          抓取任务过滤:
+          {t("prisma.filterLabel")}
         </label>
         <select
           value={crawlJobId}
@@ -324,7 +326,7 @@ export default function PrismaFlowPage() {
             color: "#0f172a", fontSize: 13, minWidth: 280, cursor: "pointer",
           }}
         >
-          <option value="">全部任务（汇总）</option>
+          <option value="">{t("prisma.allJobs")}</option>
           {crawlJobs.map((job) => (
             <option key={job.id} value={job.id}>
               #{job.id} — {job.query} ({job.created_at?.slice(0, 10) || "?"})
@@ -341,7 +343,7 @@ export default function PrismaFlowPage() {
             cursor: loading ? "default" : "pointer", opacity: loading ? 0.7 : 1,
           }}
         >
-          {loading ? "加载中..." : "查询"}
+          {loading ? t("common.loading") : t("prisma.query")}
         </button>
         <button
           onClick={() => fetchStats()}
@@ -351,7 +353,7 @@ export default function PrismaFlowPage() {
             color: "#374151", fontSize: 13, cursor: "pointer",
           }}
         >
-          🔄 刷新
+          🔄 {t("prisma.refresh")}
         </button>
         {actionMsg && (
           <span style={{ fontSize: 12, color: "#6366f1", fontWeight: 500 }}>
@@ -384,12 +386,12 @@ export default function PrismaFlowPage() {
             }}
           >
             <span style={{ fontSize: 14, color: "#475569" }}>
-              暂存文献总量:{" "}
-              <strong style={{ color: "#0f172a", fontSize: 18 }}>{stats.total}</strong> 篇
+              {t("prisma.stagingTotal")}{" "}
+              <strong style={{ color: "#0f172a", fontSize: 18 }}>{stats.total}</strong> {t("prisma.papers")}
             </span>
             {stats.crawl_job_id && (
               <span style={{ fontSize: 12, color: "#94a3b8" }}>
-                过滤: 抓取任务 #{stats.crawl_job_id}
+                {t("prisma.filterJob", { id: String(stats.crawl_job_id) })}
               </span>
             )}
           </div>
@@ -402,7 +404,7 @@ export default function PrismaFlowPage() {
             }}
           >
             {stats.stages.map((stage, idx) => {
-              const meta = STAGE_META[stage.stage];
+              const meta = STAGE_STYLE[stage.stage];
               if (!meta) return null;
               const isExpanded = expandedStage === stage.stage;
               return (
@@ -438,13 +440,13 @@ export default function PrismaFlowPage() {
                         <span style={{ fontSize: 24 }}>{meta.icon}</span>
                         <div>
                           <div style={{ fontSize: 15, fontWeight: 600, color: "#0f172a" }}>
-                            {meta.label}
+                            {t(meta.labelKey as any)}
                           </div>
                           <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                            {stage.stage === "identification" && "数据库检索返回的全部记录"}
-                            {stage.stage === "screening" && "标题/摘要初筛后保留的记录"}
-                            {stage.stage === "eligibility" && "全文审查后符合资格的记录"}
-                            {stage.stage === "included" && "最终纳入综述分析的记录"}
+                            {stage.stage === "identification" && t("prisma.stage.identificationDesc")}
+                            {stage.stage === "screening" && t("prisma.stage.screeningDesc")}
+                            {stage.stage === "eligibility" && t("prisma.stage.eligibilityDesc")}
+                            {stage.stage === "included" && t("prisma.stage.includedDesc")}
                           </div>
                         </div>
                       </div>
@@ -453,14 +455,14 @@ export default function PrismaFlowPage() {
                           <div style={{ fontSize: 28, fontWeight: 700, color: meta.color }}>
                             {stage.count}
                           </div>
-                          <div style={{ fontSize: 11, color: "#94a3b8" }}>篇</div>
+                          <div style={{ fontSize: 11, color: "#94a3b8" }}>{t("prisma.papers")}</div>
                         </div>
                         {stage.excluded_count > 0 && (
                           <div style={{ borderLeft: "1px solid #e2e8f0", paddingLeft: 16 }}>
                             <div style={{ fontSize: 16, fontWeight: 600, color: "#ef4444" }}>
                               -{stage.excluded_count}
                             </div>
-                            <div style={{ fontSize: 11, color: "#ef4444" }}>排除</div>
+                            <div style={{ fontSize: 11, color: "#ef4444" }}>{t("prisma.excluded")}</div>
                           </div>
                         )}
                         <span style={{ fontSize: 16, color: "#94a3b8", marginLeft: 8 }}>
@@ -475,7 +477,7 @@ export default function PrismaFlowPage() {
                     <div style={{ width: "100%", maxWidth: 700 }}>
                       <PrismaStagePanel
                         stage={stage.stage}
-                        stageLabel={meta.label}
+                        stageLabel={meta ? t(meta.labelKey as any) : stage.stage}
                         stageColor={meta.color}
                         papers={stagePapers}
                         loading={stagePapersLoading}
@@ -491,7 +493,7 @@ export default function PrismaFlowPage() {
                         onExclude={() => setShowExcludeModal(true)}
                         onClose={() => { setExpandedStage(null); setSelectedIds([]); }}
                         onPageChange={(p) => { setStagePage(p); fetchStagePapers(stage.stage, p); }}
-                        nextStageLabel={NEXT_STAGE_LABEL[stage.stage]}
+                        nextStageLabel={NEXT_STAGE_LABEL_KEY[stage.stage] ? t(NEXT_STAGE_LABEL_KEY[stage.stage] as any) : undefined}
                         canAdvance={stage.stage !== "included"}
                         canRunAI={stage.stage === "identification"}
                         onRunAI={() => setShowAIScreenModal(true)}
@@ -503,7 +505,7 @@ export default function PrismaFlowPage() {
                   {stage.excluded_count > 0 && !isExpanded && (
                     <div style={{ display: "flex", width: "100%", maxWidth: 700, justifyContent: "flex-end", marginTop: -8, paddingRight: 20 }}>
                       <div style={{ padding: "4px 10px", borderRadius: 6, backgroundColor: "#fef2f2", border: "1px solid #fecaca", fontSize: 11, color: "#dc2626" }}>
-                        ← 排除 {stage.excluded_count} 篇
+                        ← {t("prisma.excludedCount", { count: stage.excluded_count })}
                       </div>
                     </div>
                   )}
@@ -541,13 +543,13 @@ export default function PrismaFlowPage() {
                       display: "flex", justifyContent: "space-between", alignItems: "center",
                     }}>
                       <span style={{ fontSize: 14, fontWeight: 600, color: "#991b1b" }}>
-                        📊 排除文献详情
+                        📊 {t("prisma.exclusionDetails")}
                       </span>
                       <span style={{
                         fontSize: 12, color: "#dc2626", fontWeight: 500,
                         padding: "2px 10px", backgroundColor: "#fee2e2", borderRadius: 10,
                       }}>
-                        共 {totalExcluded} 篇排除
+                        {t("prisma.totalExcluded", { count: totalExcluded })}
                       </span>
                     </div>
 
@@ -560,7 +562,7 @@ export default function PrismaFlowPage() {
                             padding: "4px 12px", borderRadius: 16, fontSize: 12, fontWeight: 500,
                             backgroundColor: "#fee2e2", color: "#991b1b", border: "1px solid #fecaca",
                           }}>
-                            {label}: {count} 篇 ({pct}%)
+                            {label}: {t("prisma.reasonCount", { count, pct })}
                           </span>
                         );
                       })}
@@ -618,7 +620,7 @@ export default function PrismaFlowPage() {
                       borderBottom: "1px solid #bae6fd",
                       fontSize: 14, fontWeight: 600, color: "#0c4a6e",
                     }}>
-                      🔬 搜索策略与筛选摘要
+                      🔬 {t("prisma.searchStrategy")}
                     </div>
                     <div style={{ padding: "16px 20px", flex: 1 }}>
                       {/* Strategy details */}
@@ -626,7 +628,7 @@ export default function PrismaFlowPage() {
                         {!!stats.search_strategy!.query_keywords && (
                           <div>
                             <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
-                              检索关键词
+                              {t("prisma.queryKeywords")}
                             </div>
                             <div style={{ fontSize: 13, color: "#0f172a", lineHeight: 1.5 }}>
                               {String(stats.search_strategy!.query_keywords)}
@@ -636,7 +638,7 @@ export default function PrismaFlowPage() {
                         {!!stats.search_strategy!.sources && (
                           <div>
                             <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
-                              数据源
+                              {t("prisma.dataSourcesLabel")}
                             </div>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                               {(Array.isArray(stats.search_strategy!.sources)
@@ -657,7 +659,7 @@ export default function PrismaFlowPage() {
                         {!!stats.search_strategy!.year_range && (
                           <div>
                             <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
-                              年份范围
+                              {t("prisma.yearRangeLabel")}
                             </div>
                             <div style={{ fontSize: 13, color: "#0f172a" }}>
                               {String(stats.search_strategy!.year_range)}
@@ -672,11 +674,11 @@ export default function PrismaFlowPage() {
                         borderRadius: 8, border: "1px solid #e2e8f0",
                       }}>
                         <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>
-                          筛选漏斗
+                          {t("prisma.screeningFunnel")}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           {stats.stages.map((stage, idx) => {
-                            const meta = STAGE_META[stage.stage];
+                            const meta = STAGE_STYLE[stage.stage];
                             if (!meta) return null;
                             return (
                               <span key={stage.stage} style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -694,7 +696,7 @@ export default function PrismaFlowPage() {
                         </div>
                         {totalExcluded > 0 && (
                           <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
-                            通过率:{" "}
+                            {t("prisma.passRate")}{" "}
                             <strong style={{ color: "#22c55e" }}>
                               {stats.stages.length > 0 && stats.stages[0].count > 0
                                 ? ((stats.stages[stats.stages.length - 1].count / stats.stages[0].count) * 100).toFixed(1)
@@ -711,7 +713,7 @@ export default function PrismaFlowPage() {
                 {/* No reasons yet */}
                 {!hasReasons && !hasStrategy && stats.total > 0 && (
                   <div style={{ padding: 24, textAlign: "center", color: "#94a3b8", fontSize: 13, borderRadius: 10, border: "1px dashed #e2e8f0" }}>
-                    尚无排除原因记录。点击上方阶段卡片展开论文列表，可排除文献并填写原因。
+                    {t("prisma.noExclusionYet")}
                   </div>
                 )}
               </div>
@@ -722,7 +724,7 @@ export default function PrismaFlowPage() {
 
       {!stats && !loading && !error && (
         <div style={{ padding: "48px 24px", textAlign: "center", color: "#94a3b8", fontSize: 14 }}>
-          点击"查询"按钮加载 PRISMA 筛选统计数据
+          {t("prisma.clickToLoad")}
         </div>
       )}
 
@@ -742,34 +744,34 @@ export default function PrismaFlowPage() {
       {showAIScreenModal && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
           <div style={{ backgroundColor: "white", padding: 24, borderRadius: 12, maxWidth: 480, width: "90%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
-            <h3 style={{ marginTop: 0, color: "#7c3aed" }}>🤖 AI 相关度筛选</h3>
+            <h3 style={{ marginTop: 0, color: "#7c3aed" }}>{t("prisma.aiScreenTitle")}</h3>
             <p style={{ color: "#4b5563", fontSize: 14 }}>
               {selectedIds.length > 0
-                ? `将对选中的 ${selectedIds.length} 篇 identification 阶段文献进行 AI 评分。`
-                : "将对 identification 阶段的所有 pending 文献进行 AI 评分。"}
+                ? t("prisma.aiScreenSelected", { count: selectedIds.length })
+                : t("prisma.aiScreenAll")}
             </p>
             <p style={{ color: "#6b7280", fontSize: 12 }}>
-              7-10 分推荐入库 / 4-6 分待人工复核 / 0-3 分自动拒绝
+              {t("prisma.aiScreenCriteria")}
             </p>
             <div style={{ marginTop: 12 }}>
-              <label style={{ fontSize: 13, color: "#374151", fontWeight: 500 }}>研究主题 (必填):</label>
+              <label style={{ fontSize: 13, color: "#374151", fontWeight: 500 }}>{t("prisma.aiScreenTopicLabel")}</label>
               <textarea
                 value={aiScreenTopic}
                 onChange={(e) => setAiScreenTopic(e.target.value)}
-                placeholder="例如: Transit-Oriented Development and pedestrian safety"
+                placeholder={t("prisma.aiScreenPlaceholder")}
                 style={{ width: "100%", marginTop: 6, padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13, minHeight: 60, resize: "vertical", fontFamily: "inherit" }}
               />
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 24 }}>
               <button onClick={() => setShowAIScreenModal(false)} style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #d1d5db", backgroundColor: "white", cursor: "pointer" }}>
-                取消
+                {t("common.cancel")}
               </button>
               <button
                 onClick={handleAIScreen}
                 disabled={!aiScreenTopic.trim() || aiScreening}
                 style={{ padding: "8px 16px", borderRadius: 6, border: "none", backgroundColor: aiScreenTopic.trim() && !aiScreening ? "#7c3aed" : "#d1d5db", color: "white", fontWeight: 500, cursor: aiScreenTopic.trim() && !aiScreening ? "pointer" : "default" }}
               >
-                {aiScreening ? "筛选中..." : "开始筛选"}
+                {aiScreening ? t("prisma.aiScreeningBtn") : t("prisma.aiScreenStart")}
               </button>
             </div>
           </div>

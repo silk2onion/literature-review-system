@@ -1,13 +1,14 @@
 import { List, Loader } from "lucide-react";
 import type { CrawlJob, JobStatusCode } from "../../types";
 import CrawlJobRow from "./CrawlJobRow";
+import { useLocale } from "../../hooks/useLocale";
 
-const STATUS_LABELS: Record<JobStatusCode, string> = {
-  pending: "等待中",
-  running: "进行中",
-  completed: "已完成",
-  failed: "失败",
-  paused: "已暂停",
+const STATUS_LABEL_KEYS: Record<JobStatusCode, string> = {
+  pending: "crawl.history.pending",
+  running: "crawl.history.running",
+  completed: "crawl.history.completed",
+  failed: "crawl.history.failed",
+  paused: "crawl.history.paused",
 };
 
 // Helper for status colors
@@ -38,7 +39,7 @@ interface CrawlJobHistoryProps {
   ) => void;
 }
 
-export { STATUS_LABELS, getStatusStyle };
+export { STATUS_LABEL_KEYS, getStatusStyle };
 
 export default function CrawlJobHistory({
   jobs,
@@ -46,6 +47,8 @@ export default function CrawlJobHistory({
   actioningJobId,
   onJobAction,
 }: CrawlJobHistoryProps) {
+  const { t } = useLocale();
+
   if (jobsLoading && jobs.length === 0) {
     return (
       <div
@@ -58,7 +61,7 @@ export default function CrawlJobHistory({
         }}
       >
         <Loader size={32} style={{ marginBottom: "16px" }} />
-        <p>加载任务中...</p>
+        <p>{t("crawl.history.loading")}</p>
       </div>
     );
   }
@@ -78,7 +81,7 @@ export default function CrawlJobHistory({
           size={48}
           style={{ marginBottom: "16px", opacity: 0.2 }}
         />
-        <p>暂无历史任务</p>
+        <p>{t("crawl.history.empty")}</p>
       </div>
     );
   }
@@ -103,10 +106,10 @@ export default function CrawlJobHistory({
             ID
           </th>
           <th style={{ padding: "12px 24px", fontWeight: 500 }}>
-            关键词
+            {t("crawl.history.keywords")}
           </th>
           <th style={{ padding: "12px 24px", fontWeight: 500 }}>
-            状态
+            {t("crawl.history.status")}
           </th>
           <th
             style={{
@@ -115,7 +118,7 @@ export default function CrawlJobHistory({
               textAlign: "right",
             }}
           >
-            进度
+            {t("crawl.history.progress")}
           </th>
           <th
             style={{
@@ -124,7 +127,7 @@ export default function CrawlJobHistory({
               textAlign: "right",
             }}
           >
-            操作
+            {t("crawl.history.actions")}
           </th>
         </tr>
       </thead>
@@ -135,7 +138,7 @@ export default function CrawlJobHistory({
             job={job}
             actioningJobId={actioningJobId}
             onJobAction={onJobAction}
-            statusLabel={STATUS_LABELS[job.status] || job.status}
+            statusLabel={t(STATUS_LABEL_KEYS[job.status] as any) || job.status}
             statusStyle={getStatusStyle(job.status)}
           />
         ))}

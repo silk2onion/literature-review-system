@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../api/config";
+import { useLocale } from "../../hooks/useLocale";
 
 type CrawlerConfig = {
   delay_min: number;
@@ -11,6 +12,7 @@ type CrawlerConfig = {
 type Props = { open: boolean };
 
 export default function CrawlerSettings({ open }: Props) {
+  const { t } = useLocale();
   const [crawlerConfig, setCrawlerConfig] = useState<CrawlerConfig>({
     delay_min: 1,
     delay_max: 3,
@@ -28,20 +30,20 @@ export default function CrawlerSettings({ open }: Props) {
     fetch(`${API_BASE_URL}/api/settings/crawler`)
       .then((res) => res.json())
       .then((data: CrawlerConfig) => setCrawlerConfig(data))
-      .catch((err) => console.error("加载爬虫配置失败", err));
+      .catch((err) => console.error("Failed to load crawler config", err));
   }, [open]);
 
   return (
     <section className="settings-section">
-      <h3>🕷️ 爬虫配置</h3>
+      <h3>🕷️ {t("settings.crawler.title")}</h3>
       <p className="settings-description">
-        控制学术爬虫的请求速率、超时和重试策略。修改后立即热生效。
+        {t("settings.crawler.description")}
       </p>
 
-      {error && <div className="settings-error">错误: {error}</div>}
+      {error && <div className="settings-error">{t("common.error")} {error}</div>}
 
       <label className="settings-row">
-        <span>最小延迟 (秒)</span>
+        <span>{t("settings.crawler.minDelay")}</span>
         <div
           style={{
             display: "flex",
@@ -69,7 +71,7 @@ export default function CrawlerSettings({ open }: Props) {
         </div>
       </label>
       <label className="settings-row">
-        <span>最大延迟 (秒)</span>
+        <span>{t("settings.crawler.maxDelay")}</span>
         <div
           style={{
             display: "flex",
@@ -97,7 +99,7 @@ export default function CrawlerSettings({ open }: Props) {
         </div>
       </label>
       <label className="settings-row">
-        <span>最大重试次数</span>
+        <span>{t("settings.crawler.maxRetries")}</span>
         <div
           style={{
             display: "flex",
@@ -125,7 +127,7 @@ export default function CrawlerSettings({ open }: Props) {
         </div>
       </label>
       <label className="settings-row">
-        <span>请求超时 (秒)</span>
+        <span>{t("settings.crawler.timeout")}</span>
         <div
           style={{
             display: "flex",
@@ -166,11 +168,11 @@ export default function CrawlerSettings({ open }: Props) {
                   body: JSON.stringify(crawlerConfig),
                 },
               );
-              if (!res.ok) throw new Error("保存失败");
+              if (!res.ok) throw new Error(t("common.saveFailed"));
               setSaved(true);
             } catch (err) {
               console.error(err);
-              setError("保存爬虫配置失败");
+              setError(t("settings.crawler.saveError"));
             } finally {
               setSaving(false);
             }
@@ -178,10 +180,10 @@ export default function CrawlerSettings({ open }: Props) {
           disabled={saving}
         >
           {saving
-            ? "保存中..."
+            ? t("common.saving")
             : saved
-              ? "✓ 已保存"
-              : "保存爬虫配置"}
+              ? t("common.saved")
+              : t("settings.crawler.saveCrawlerConfig")}
         </button>
       </div>
     </section>

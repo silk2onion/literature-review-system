@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../api/config";
+import { useLocale } from "../../hooks/useLocale";
 
 type InstitutionalConfig = {
   enabled: boolean;
@@ -23,6 +24,7 @@ type SessionStatus = {
 type Props = { open: boolean };
 
 export default function InstitutionalAccessSettings({ open }: Props) {
+  const { t } = useLocale();
   const [config, setConfig] = useState<InstitutionalConfig>({
     enabled: false,
     institution_name: "",
@@ -43,7 +45,6 @@ export default function InstitutionalAccessSettings({ open }: Props) {
   } | null>(null);
   const [status, setStatus] = useState<SessionStatus | null>(null);
 
-  // 加载配置
   useEffect(() => {
     if (!open) return;
     setSaved(false);
@@ -52,9 +53,8 @@ export default function InstitutionalAccessSettings({ open }: Props) {
     fetch(`${API_BASE_URL}/api/settings/institutional-access`)
       .then((res) => res.json())
       .then((data: InstitutionalConfig) => setConfig(data))
-      .catch((err) => console.error("加载机构访问配置失败", err));
+      .catch((err) => console.error("Failed to load institutional config", err));
 
-    // 加载 session 状态
     fetch(`${API_BASE_URL}/api/settings/institutional-access/status`)
       .then((res) => res.json())
       .then((data: SessionStatus) => setStatus(data))
@@ -73,18 +73,17 @@ export default function InstitutionalAccessSettings({ open }: Props) {
           body: JSON.stringify(config),
         }
       );
-      if (!res.ok) throw new Error("保存失败");
+      if (!res.ok) throw new Error(t("common.saveFailed"));
       setSaved(true);
     } catch (err) {
       console.error(err);
-      setError("保存配置失败");
+      setError(t("settings.institutional.saveError"));
     } finally {
       setSaving(false);
     }
   };
 
   const handleTest = async () => {
-    // 先保存再测试
     await handleSave();
 
     setTesting(true);
@@ -97,11 +96,11 @@ export default function InstitutionalAccessSettings({ open }: Props) {
       const data = await res.json();
       setTestResult({
         success: data.success,
-        message: data.message || (data.success ? "登录成功" : "登录失败"),
+        message: data.message || (data.success ? t("settings.institutional.loginSuccess") : t("settings.institutional.loginFailed")),
       });
       if (data.status) setStatus(data.status);
     } catch (err) {
-      setTestResult({ success: false, message: "测试请求失败" });
+      setTestResult({ success: false, message: t("settings.institutional.testFailed") });
     } finally {
       setTesting(false);
     }
@@ -120,15 +119,14 @@ export default function InstitutionalAccessSettings({ open }: Props) {
 
   return (
     <section className="settings-section">
-      <h3>🏛️ 机构访问</h3>
+      <h3>🏛️ {t("settings.institutional.title")}</h3>
       <p className="settings-description">
-        配置大学/机构的 EZProxy 或 Shibboleth 登录信息，用于下载付费期刊 PDF
-        全文。配置后可在文献库中一键下载或批量下载论文 PDF。
+        {t("settings.institutional.description")}
       </p>
 
-      {error && <div className="settings-error">错误: {error}</div>}
+      {error && <div className="settings-error">{t("common.error")} {error}</div>}
 
-      {/* Session 状态指示 */}
+      {/* Session status indicator */}
       {status && (
         <div
           style={{
@@ -155,24 +153,24 @@ export default function InstitutionalAccessSettings({ open }: Props) {
           />
           <span style={{ color: status.authenticated ? "#22c55e" : "#94a3b8" }}>
             {status.authenticated
-              ? `已认证 (${status.cookie_count} cookies)`
-              : "未认证"}
+              ? t("settings.institutional.authenticated", { cookieCount: status.cookie_count })
+              : t("settings.institutional.notAuthenticated")}
           </span>
           {status.last_login_time && (
             <span style={{ color: "#64748b", fontSize: "12px" }}>
-              上次登录:{" "}
-              {new Date(status.last_login_time).toLocaleString("zh-CN")}
+              {t("settings.institutional.lastLogin")}{" "}
+              {new Date(status.last_login_time).toLocaleString()}
             </span>
           )}
         </div>
       )}
 
-      {/* 启用开关 */}
+      {/* Enable toggle */}
       <label
         className="settings-row"
         style={{ cursor: "pointer", userSelect: "none" }}
       >
-        <span>启用机构访问</span>
+        <span>{t("settings.institutional.enableAccess")}</span>
         <div
           onClick={() =>
             setConfig((prev) => ({ ...prev, enabled: !prev.enabled }))
@@ -202,13 +200,13 @@ export default function InstitutionalAccessSettings({ open }: Props) {
         </div>
       </label>
 
-      {/* 配置表单 */}
+      {/* Config form */}
       <label className="settings-row">
-        <span>机构名称</span>
+        <span>{t("settings.institutional.institutionName")}</span>
         <input
           type="text"
           value={config.institution_name}
-          placeholder="例: University of Nottingham"
+          placeholder={t("settings.institutional.institutionNamePlaceholder")}
           onChange={(e) =>
             setConfig((prev) => ({
               ...prev,
@@ -220,7 +218,7 @@ export default function InstitutionalAccessSettings({ open }: Props) {
       </label>
 
       <label className="settings-row">
-        <span>认证类型</span>
+        <span>{t("settings.institutional.authType")}</span>
         <select
           value={config.auth_type}
           onChange={(e) =>
@@ -234,11 +232,11 @@ export default function InstitutionalAccessSettings({ open }: Props) {
       </label>
 
       <label className="settings-row">
-        <span>登录页 URL</span>
+        <span>{t("settings.institutional.loginUrl")}</span>
         <input
           type="text"
           value={config.login_url}
-          placeholder="例: https://ezproxy.nottingham.ac.uk/login"
+          placeholder={t("settings.institutional.loginUrlPlaceholder")}
           onChange={(e) =>
             setConfig((prev) => ({ ...prev, login_url: e.target.value }))
           }
@@ -248,11 +246,11 @@ export default function InstitutionalAccessSettings({ open }: Props) {
 
       {config.auth_type === "ezproxy" && (
         <label className="settings-row">
-          <span>EZProxy 前缀</span>
+          <span>{t("settings.institutional.ezproxyPrefix")}</span>
           <input
             type="text"
             value={config.ezproxy_prefix}
-            placeholder="例: https://ezproxy.nottingham.ac.uk/login?url="
+            placeholder={t("settings.institutional.ezproxyPrefixPlaceholder")}
             onChange={(e) =>
               setConfig((prev) => ({
                 ...prev,
@@ -265,11 +263,11 @@ export default function InstitutionalAccessSettings({ open }: Props) {
       )}
 
       <label className="settings-row">
-        <span>用户名</span>
+        <span>{t("settings.institutional.username")}</span>
         <input
           type="text"
           value={config.username}
-          placeholder="大学用户名 / 学号"
+          placeholder={t("settings.institutional.usernamePlaceholder")}
           onChange={(e) =>
             setConfig((prev) => ({ ...prev, username: e.target.value }))
           }
@@ -278,11 +276,11 @@ export default function InstitutionalAccessSettings({ open }: Props) {
       </label>
 
       <label className="settings-row">
-        <span>密码</span>
+        <span>{t("settings.institutional.password")}</span>
         <input
           type="password"
           value={config.password}
-          placeholder="大学密码"
+          placeholder={t("settings.institutional.passwordPlaceholder")}
           onChange={(e) =>
             setConfig((prev) => ({ ...prev, password: e.target.value }))
           }
@@ -290,17 +288,17 @@ export default function InstitutionalAccessSettings({ open }: Props) {
         />
       </label>
 
-      {/* Headless 开关 */}
+      {/* Headless toggle */}
       <label
         className="settings-row"
         style={{ cursor: "pointer", userSelect: "none" }}
       >
         <div>
-          <span>无头浏览器模式</span>
+          <span>{t("settings.institutional.headlessMode")}</span>
           <div
             style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}
           >
-            关闭后可看到浏览器窗口（用于 MFA 手动验证）
+            {t("settings.institutional.headlessDescription")}
           </div>
         </div>
         <div
@@ -333,7 +331,7 @@ export default function InstitutionalAccessSettings({ open }: Props) {
         </div>
       </label>
 
-      {/* 测试结果 */}
+      {/* Test result */}
       {testResult && (
         <div
           style={{
@@ -351,7 +349,7 @@ export default function InstitutionalAccessSettings({ open }: Props) {
         </div>
       )}
 
-      {/* 操作按钮 */}
+      {/* Action buttons */}
       <div
         className="settings-row"
         style={{ marginTop: "12px", gap: "8px", display: "flex" }}
@@ -361,7 +359,7 @@ export default function InstitutionalAccessSettings({ open }: Props) {
           onClick={handleSave}
           disabled={saving}
         >
-          {saving ? "保存中..." : saved ? "✓ 已保存" : "保存配置"}
+          {saving ? t("common.saving") : saved ? t("common.saved") : t("settings.institutional.saveConfig")}
         </button>
         <button
           className="settings-secondary"
@@ -374,7 +372,7 @@ export default function InstitutionalAccessSettings({ open }: Props) {
               testing || !config.login_url || !config.username ? 0.5 : 1,
           }}
         >
-          {testing ? "测试登录中..." : "测试登录"}
+          {testing ? t("settings.institutional.testingLogin") : t("settings.institutional.testLogin")}
         </button>
       </div>
     </section>

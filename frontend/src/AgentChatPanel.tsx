@@ -20,50 +20,41 @@ import type {
   ChatMode,
   ActionResult,
 } from "./components/agent";
+import { useLocale } from "./hooks/useLocale";
 
-// ── persistence ─────────────────────────────────────
+// ── persistence ─────────────────────────────────
 
 const STORAGE_KEY = "agent_chat_sessions";
 
-const WELCOME_MESSAGES: Record<ChatMode, string> = {
-  agent:
-    "👋 你好！我是文献综述助手。你可以用自然语言告诉我你想做什么，比如：\n\n" +
-    "• 「搜索 transit oriented development 的论文」\n" +
-    "• 「暂存库有哪些论文」\n" +
-    "• 「把暂存库的论文提升为正式库」\n" +
-    "• 「系统现在什么状态」",
-  ask:
-    "👋 你好！我是学术研究助手。你可以问我任何学术问题，比如：\n\n" +
-    "• 「TOD 是什么概念」\n" +
-    "• 「步行性评价有哪些常用方法」\n" +
-    "• 「5Ds 框架包含哪些维度」\n" +
-    "• 「如何写文献综述的理论框架」",
-};
-
-function makeWelcomeMsg(mode: ChatMode): ChatMessageData {
+function makeWelcomeMsg(mode: ChatMode, t: (key: string) => string): ChatMessageData {
   return {
     id: "welcome",
     role: "assistant",
-    content: WELCOME_MESSAGES[mode],
+    content: mode === "agent" ? t("agent.welcomeAgent") : t("agent.welcomeAsk"),
     timestamp: new Date().toISOString(),
   };
 }
 
-function createNewSession(mode: ChatMode = "agent"): ChatSession {
+function createNewSession(mode: ChatMode = "agent", t?: (key: string) => string): ChatSession {
   return {
     id: `sess-${Date.now()}`,
-    title: "新对话",
+    title: t ? t("agent.newConversation") : "新对话",
     updatedAt: new Date().toISOString(),
     mode,
-    messages: [makeWelcomeMsg(mode)],
+    messages: t ? [makeWelcomeMsg(mode, t)] : [{
+      id: "welcome",
+      role: "assistant",
+      content: "",
+      timestamp: new Date().toISOString(),
+    }],
   };
 }
 
-function loadSessions(): ChatSession[] {
+function loadSessions(t?: (key: string) => string): ChatSession[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return [createNewSession("agent")];
+      return [createNewSession("agent", t)];
     }
     const parsed = JSON.parse(raw);
 
@@ -76,7 +67,7 @@ function loadSessions(): ChatSession[] {
         (sessionStorage.getItem("agent_chat_mode") as ChatMode) || "agent";
       const migratedSession: ChatSession = {
         id: `sess-legacy-${Date.now()}`,
-        title: "之前的对话",
+        title: t ? t("agent.previousChat") : "之前的对话",
         updatedAt: new Date().toISOString(),
         mode,
         messages: parsed,
@@ -98,7 +89,7 @@ function loadSessions(): ChatSession[] {
           (sessionStorage.getItem("agent_chat_mode") as ChatMode) || "agent";
         const migratedSession: ChatSession = {
           id: `sess-legacy-${Date.now()}`,
-          title: "之前的对话",
+          title: t ? t("agent.previousChat") : "之前的对话",
           updatedAt: new Date().toISOString(),
           mode,
           messages: oldHistory,
@@ -112,9 +103,9 @@ function loadSessions(): ChatSession[] {
       return [...legacySessions, ...parsed];
     }
     if (legacySessions.length > 0) return legacySessions;
-    return [createNewSession("agent")];
+    return [createNewSession("agent", t)];
   } catch {
-    return [createNewSession("agent")];
+    return [createNewSession("agent", t)];
   }
 }
 
@@ -177,6 +168,8 @@ export default function AgentChatPanel({
   onClose,
   onNavigate,
 }: AgentChatPanelProps) {
+  const { t } = useLocale();
+
   useEffect(() => {
     (window as any).onAgentNavigate = onNavigate;
     return () => {
@@ -185,7 +178,7 @@ export default function AgentChatPanel({
   }, [onNavigate]);
 
   // Session State
-  const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions());
+  const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions(t));
   const [activeSessionId, setActiveSessionId] = useState<string>(
     () => sessions[0]?.id,
   );
@@ -278,7 +271,7 @@ export default function AgentChatPanel({
   // ── Session management ─────────────────────────────
 
   const handleNewChat = () => {
-    const newSession = createNewSession("agent");
+    const newSession = createNewSession("agent", t);
     setSessions((prev) => [newSession, ...prev]);
     setActiveSessionId(newSession.id);
   };
@@ -288,7 +281,7 @@ export default function AgentChatPanel({
     setSessions((prev) => {
       const updated = prev.filter((s) => s.id !== id);
       if (updated.length === 0) {
-        const fresh = createNewSession("agent");
+        const fresh = createNewSession("agent", t);
         setActiveSessionId(fresh.id);
         return [fresh];
       }
@@ -328,7 +321,7 @@ export default function AgentChatPanel({
       const updatedMessages = [...base, userMsg];
 
       let newTitle = activeSession.title;
-      if (newTitle === "新对话" && base.length <= 1) {
+      if (newTitle === t("agent.newConversation") && base.length <= 1) {
         newTitle = text.length > 15 ? text.slice(0, 15) + "..." : text;
       }
 
@@ -352,7 +345,7 @@ export default function AgentChatPanel({
         const aiMsg: ChatMessageData = {
           id: `ai-${Date.now()}`,
           role: "assistant",
-          content: data.reply || "(空回复)",
+          content: data.reply || t("agent.emptyReply"),
           action: data.action,
           timestamp: new Date().toISOString(),
         };
@@ -365,12 +358,12 @@ export default function AgentChatPanel({
       } catch (err) {
         const errName =
           (err as Error).name === "AbortError"
-            ? "请求超时（5分钟），请检查后端日志"
+            ? t("agent.requestTimeout")
             : (err as Error).message;
         const errorMsg: ChatMessageData = {
           id: `err-${Date.now()}`,
           role: "assistant",
-          content: `请求失败 😥：${errName}\n\n💡 提示：请检查后端是否正在运行（端口 5444）`,
+          content: `${t("agent.requestFailed")}${errName}\n\n${t("agent.errorHint")}`,
           timestamp: new Date().toISOString(),
         };
         updateActiveSession((s) => ({
@@ -382,7 +375,7 @@ export default function AgentChatPanel({
         setLoading(false);
       }
     },
-    [loading, messages, activeSession.title, activeSessionId, mode],
+    [loading, messages, activeSession.title, activeSessionId, mode, t],
   );
 
   const regenerate = useCallback(() => {
@@ -427,8 +420,8 @@ export default function AgentChatPanel({
   const clearHistory = () => {
     updateActiveSession((s) => ({
       ...s,
-      messages: [makeWelcomeMsg(s.mode)],
-      title: "新对话",
+      messages: [makeWelcomeMsg(s.mode, t)],
+      title: t("agent.newConversation"),
     }));
   };
 
@@ -437,7 +430,7 @@ export default function AgentChatPanel({
     updateActiveSession((s) => {
       let newMessages = s.messages;
       if (s.messages.length === 1 && s.messages[0].id === "welcome") {
-        newMessages = [makeWelcomeMsg(newMode)];
+        newMessages = [makeWelcomeMsg(newMode, t)];
       }
       return { ...s, mode: newMode, messages: newMessages };
     });
@@ -473,7 +466,7 @@ export default function AgentChatPanel({
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="agent-close-btn"
-              title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"}
+              title={sidebarOpen ? t("agent.collapseSidebar") : t("agent.expandSidebar")}
             >
               {sidebarOpen ? (
                 <PanelLeftClose size={18} />
@@ -482,7 +475,7 @@ export default function AgentChatPanel({
               )}
             </button>
             <Bot size={18} />
-            <span style={{ fontWeight: 600, fontSize: 14 }}>AI 助手</span>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>{t("agent.title")}</span>
             <span
               style={{
                 fontSize: 11,
@@ -492,14 +485,14 @@ export default function AgentChatPanel({
                 borderRadius: 8,
               }}
             >
-              {messages.filter((m) => m.id !== "welcome").length} 条
+              {t("agent.messageCount", { count: messages.filter((m) => m.id !== "welcome").length })}
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
             <button
               onClick={clearHistory}
               className="agent-close-btn"
-              title="清除当前记录"
+              title={t("agent.clearHistory")}
             >
               <Trash2 size={14} />
             </button>
@@ -561,7 +554,7 @@ export function AgentToggleButton({
     <button
       onClick={onClick}
       className={`agent-toggle-btn ${isOpen ? "active" : ""}`}
-      title="AI 助手"
+      title="AI Assistant"
     >
       <MessageSquare size={18} />
     </button>

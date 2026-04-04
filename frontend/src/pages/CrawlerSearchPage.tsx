@@ -8,8 +8,10 @@ import type {
 } from "../types";
 import { API_BASE_URL } from "../api/config";
 import { CrawlJobForm, CrawlJobHistory } from "../components/crawler";
+import { useLocale } from "../hooks/useLocale";
 
 export default function CrawlerSearchPage() {
+  const { t } = useLocale();
   // 从 sessionStorage 恢复表单状态
   const [activeTab, setActiveTab] = useState<"new" | "history">(() => {
     return (
@@ -109,11 +111,11 @@ export default function CrawlerSearchPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!keywords.trim()) {
-      setSubmitMessage({ type: "error", text: "请输入关键词" });
+      setSubmitMessage({ type: "error", text: t("crawl.enterKeywords") });
       return;
     }
     if (selectedSources.length === 0) {
-      setSubmitMessage({ type: "error", text: "请至少选择一个数据源" });
+      setSubmitMessage({ type: "error", text: t("crawl.selectSource") });
       return;
     }
 
@@ -153,13 +155,13 @@ export default function CrawlerSearchPage() {
 
       if (!resp.ok) {
         const text = await resp.text();
-        throw new Error(`创建任务失败: ${text}`);
+        throw new Error(t("crawl.createFailed", { error: text }));
       }
 
       const data: CrawlJobResponse = await resp.json();
       setSubmitMessage({
         type: "success",
-        text: `任务已创建 (ID: ${data.id})`,
+        text: t("crawl.taskCreated", { id: String(data.id) }),
       });
 
       // Switch to history tab after short delay
@@ -181,7 +183,7 @@ export default function CrawlerSearchPage() {
   ) => {
     if (
       action === "retry" &&
-      !window.confirm("确定要重置该任务进度并重新开始吗？")
+      !window.confirm(t("crawl.confirmRetry"))
     )
       return;
 
@@ -286,10 +288,10 @@ export default function CrawlerSearchPage() {
                 margin: 0,
               }}
             >
-              文献检索
+              {t("crawl.pageTitle")}
             </h1>
             <p style={{ fontSize: "14px", color: "#6b7280", marginTop: "4px" }}>
-              创建新的检索任务或管理现有任务进度
+              {t("crawl.pageSubtitle")}
             </p>
           </div>
         </div>
@@ -300,14 +302,14 @@ export default function CrawlerSearchPage() {
             style={getTabStyle(activeTab === "new")}
           >
             <Plus size={16} />
-            新建任务
+            {t("crawl.newTask")}
           </button>
           <button
             onClick={() => setActiveTab("history")}
             style={getTabStyle(activeTab === "history")}
           >
             <List size={16} />
-            任务历史
+            {t("crawl.taskHistory")}
           </button>
         </div>
       </div>
