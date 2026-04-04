@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import CitationGraphPanel from "../components/CitationGraphPanel";
 import GroupManager from "../components/GroupManager";
 import SemanticSearchDebugPanel from "../components/SemanticSearchDebugPanel";
@@ -983,8 +984,8 @@ export default function LibraryPage({
           </div>
         </div>
 
-        {/* Citation Graph Modal */}
-        {selectedPaperId !== null && (
+        {/* Citation Graph Modal — portal to body to escape overflow */}
+        {selectedPaperId !== null && createPortal(
           <div
             onClick={() => { setSelectedPaperId(null); setSelectedPaperTitle(""); }}
             style={{
@@ -992,7 +993,7 @@ export default function LibraryPage({
               inset: 0,
               backgroundColor: "rgba(0,0,0,0.3)",
               backdropFilter: "blur(4px)",
-              zIndex: 2000,
+              zIndex: 9999,
               display: "flex",
               justifyContent: "center",
               alignItems: "center",
@@ -1045,7 +1046,8 @@ export default function LibraryPage({
                 />
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
       </section>
 
