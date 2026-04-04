@@ -15,6 +15,8 @@ export type StagingPaper = {
   pdf_url?: string | null;
   llm_score?: number | null;
   llm_tags?: string[] | null;
+  journal?: string | null;
+  citations_count?: number | null;
   created_at: string;
 };
 

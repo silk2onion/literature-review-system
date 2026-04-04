@@ -1,3 +1,4 @@
+import React, { useState } from "react";
 import type { StagingPaper } from "./types";
 import { useLocale } from "../../hooks/useLocale";
 
@@ -49,6 +50,7 @@ export default function PrismaStagePanel({
   onRunAI,
 }: PrismaStagePanelProps) {
   const { t } = useLocale();
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   void _stage; // used by parent for key identification
   return (
     <div
@@ -188,63 +190,112 @@ export default function PrismaStagePanel({
             )}
             {papers.map((p) => {
               const checked = selectedIds.includes(p.id);
+              const isExpanded = expandedId === p.id;
+              const aiReason = Array.isArray(p.llm_tags) && p.llm_tags.length > 1 ? p.llm_tags[1] : null;
               return (
-                <tr
-                  key={p.id}
-                  style={{
-                    borderBottom: "1px solid #f1f5f9",
-                    backgroundColor: checked ? "#eff6ff" : "transparent",
-                  }}
-                >
-                  <td style={{ padding: "6px 8px" }}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => onToggleSelect(p.id)}
-                    />
-                  </td>
-                  <td
+                <React.Fragment key={p.id}>
+                  <tr
+                    onClick={() => setExpandedId(isExpanded ? null : p.id)}
                     style={{
-                      padding: "6px 8px",
-                      maxWidth: 400,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
+                      borderBottom: isExpanded ? "none" : "1px solid #f1f5f9",
+                      backgroundColor: checked ? "#eff6ff" : "transparent",
+                      cursor: "pointer",
                     }}
-                    title={p.title}
                   >
-                    {p.title}
-                  </td>
-                  <td style={{ padding: "6px 8px", textAlign: "center", color: "#4b5563" }}>
-                    {p.year ?? "-"}
-                  </td>
-                  <td style={{ padding: "6px 8px", textAlign: "center", color: "#6b7280" }}>
-                    {p.source || "-"}
-                  </td>
-                  <td style={{ padding: "6px 8px", textAlign: "center" }}>
-                    {p.llm_score != null ? (
-                      <span
-                        style={{
-                          padding: "1px 6px",
-                          borderRadius: 999,
-                          fontSize: 10,
-                          fontWeight: 600,
-                          backgroundColor:
-                            p.llm_score >= 7 ? "#dcfce7" : p.llm_score >= 4 ? "#fef9c3" : "#fee2e2",
-                          color:
-                            p.llm_score >= 7 ? "#16a34a" : p.llm_score >= 4 ? "#ca8a04" : "#dc2626",
-                        }}
-                      >
-                        {p.llm_score}/10
-                      </span>
-                    ) : (
-                      <span style={{ color: "#d1d5db" }}>-</span>
-                    )}
-                  </td>
-                  <td style={{ padding: "6px 8px", textAlign: "center", color: "#6b7280" }}>
-                    {p.status || "-"}
-                  </td>
-                </tr>
+                    <td style={{ padding: "6px 8px" }} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => onToggleSelect(p.id)}
+                      />
+                    </td>
+                    <td style={{ padding: "6px 8px", maxWidth: 400 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ color: "#94a3b8", fontSize: 10, flexShrink: 0 }}>{isExpanded ? "▼" : "▶"}</span>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding: "6px 8px", textAlign: "center", color: "#4b5563" }}>
+                      {p.year ?? "-"}
+                    </td>
+                    <td style={{ padding: "6px 8px", textAlign: "center", color: "#6b7280" }}>
+                      {p.source || "-"}
+                    </td>
+                    <td style={{ padding: "6px 8px", textAlign: "center" }}>
+                      {p.llm_score != null ? (
+                        <span
+                          style={{
+                            padding: "1px 6px", borderRadius: 999, fontSize: 10, fontWeight: 600,
+                            backgroundColor: p.llm_score >= 7 ? "#dcfce7" : p.llm_score >= 4 ? "#fef9c3" : "#fee2e2",
+                            color: p.llm_score >= 7 ? "#16a34a" : p.llm_score >= 4 ? "#ca8a04" : "#dc2626",
+                          }}
+                        >
+                          {p.llm_score}/10
+                        </span>
+                      ) : (
+                        <span style={{ color: "#d1d5db" }}>-</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "6px 8px", textAlign: "center", color: "#6b7280" }}>
+                      {p.status || "-"}
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td colSpan={6} style={{ padding: "0 8px 12px 36px" }}>
+                        <div style={{ backgroundColor: "#f8fafc", borderRadius: 8, padding: "12px 16px", fontSize: 12 }}>
+                          {/* Authors */}
+                          {p.authors && p.authors.length > 0 && (
+                            <div style={{ marginBottom: 6, color: "#475569" }}>
+                              <strong>Authors:</strong> {p.authors.join(", ")}
+                            </div>
+                          )}
+                          {/* Journal */}
+                          {p.journal && (
+                            <div style={{ marginBottom: 6, color: "#475569" }}>
+                              <strong>Journal:</strong> <em>{p.journal}</em>
+                            </div>
+                          )}
+                          {/* Abstract */}
+                          {p.abstract ? (
+                            <div style={{ marginBottom: 8, color: "#374151", lineHeight: 1.6, maxHeight: 150, overflowY: "auto" }}>
+                              <strong>Abstract:</strong> {p.abstract}
+                            </div>
+                          ) : (
+                            <div style={{ marginBottom: 8, color: "#cbd5e1", fontStyle: "italic" }}>No abstract available</div>
+                          )}
+                          {/* AI Reason */}
+                          {aiReason && (
+                            <div style={{ marginBottom: 6, padding: "6px 10px", borderRadius: 6, backgroundColor: "#f5f3ff", border: "1px solid #ede9fe", color: "#6d28d9", fontSize: 11 }}>
+                              🤖 AI: {aiReason}
+                            </div>
+                          )}
+                          {/* Links */}
+                          <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#94a3b8" }}>
+                            {p.doi && (
+                              <a href={`https://doi.org/${p.doi}`} target="_blank" rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ color: "#2563eb", textDecoration: "none" }}>
+                                DOI: {p.doi}
+                              </a>
+                            )}
+                            {p.url && !p.doi && (
+                              <a href={p.url} target="_blank" rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ color: "#2563eb", textDecoration: "none" }}>
+                                Link
+                              </a>
+                            )}
+                            {p.citations_count != null && p.citations_count > 0 && (
+                              <span>Cited: {p.citations_count}</span>
+                            )}
+                            <span>ID: {p.id}</span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
           </tbody>

@@ -17,7 +17,9 @@ import {
 } from "../components/phd";
 import type {
   Claim,
+  ClaimEvidence,
   ClaimWithEvidence,
+  SectionClaimTable,
   Framework,
   AutoSearchResult,
   AssembleStats,
@@ -86,6 +88,15 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
     ClaimWithEvidence[]
   >([]);
   const [finalRender, setFinalRender] = useState<string>("");
+
+  // 核心数据：后端 SectionClaimTable，贯穿 Step 1→2→3
+  const [sectionClaimTable, setSectionClaimTable] = useState<SectionClaimTable | null>(null);
+  const [renderedSections, setRenderedSections] = useState<Array<{
+    section_id: string;
+    section_title: string;
+    text: string;
+    citation_map: Record<string, unknown>;
+  }>>([]);
 
   const [reviewId, setReviewId] = useState<number | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
@@ -203,16 +214,11 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
     setError(null);
 
     try {
-      const renderedSections = finalRender
-        ? [
-            {
-              section_id: "1",
-              section_title: framework?.title || "Literature Review",
-              text: finalRender,
-              citation_map: {},
-            },
-          ]
-        : [];
+      const sectionsToAssemble = renderedSections.length > 0
+        ? renderedSections
+        : finalRender
+          ? [{ section_id: "1", section_title: framework?.title || "Literature Review", text: finalRender, citation_map: {} }]
+          : [];
 
       const res = await fetch(`${API_BASE_URL}/api/reviews/phd/assemble`, {
         method: "POST",
@@ -220,7 +226,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
         body: JSON.stringify({
           review_id: reviewId,
           title: framework?.title || topic || "Literature Review",
-          rendered_sections: renderedSections,
+          rendered_sections: sectionsToAssemble,
           citation_style: citationStyle,
         }),
       });
@@ -281,7 +287,25 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
       const data = await res.json();
       setReviewId(data.review_id);
-      setClaims(data.claims);
+
+      // 后端返回 ClaimEvidence[]，构建 SectionClaimTable
+      const backendClaims: ClaimEvidence[] = data.claims || [];
+      const table: SectionClaimTable = {
+        section_id: "1",
+        section_title: framework?.title || topic || "Literature Review",
+        claims: backendClaims,
+      };
+      setSectionClaimTable(table);
+
+      // 同时映射为前端展示用的简化 Claim
+      setClaims(
+        backendClaims.map((c: ClaimEvidence) => ({
+          id: c.claim_id,
+          text: c.text,
+          topic: c.section_title || "",
+          sub_topic: c.rag_query || "",
+        })),
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -290,7 +314,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   };
 
   const handleStep2_AttachEvidence = async () => {
-    if (!reviewId) {
+    if (!reviewId || !sectionClaimTable) {
       setError(t("phd.errorNoReviewId"));
       return;
     }
@@ -304,7 +328,10 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ review_id: reviewId }),
+          body: JSON.stringify({
+            section_claim_table: sectionClaimTable,
+            top_k: 5,
+          }),
         },
       );
 
@@ -314,7 +341,24 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
       }
 
       const data = await res.json();
-      setClaimsWithEvidence(data.claims_with_evidence);
+      // 更新 sectionClaimTable（现在 claims 里有 support_papers 了）
+      const updatedTable: SectionClaimTable = data.section_claim_table;
+      setSectionClaimTable(updatedTable);
+
+      // 映射为前端展示用的 ClaimWithEvidence
+      setClaimsWithEvidence(
+        updatedTable.claims.map((c: ClaimEvidence) => ({
+          id: c.claim_id,
+          text: c.text,
+          topic: c.section_title || updatedTable.section_title || "",
+          sub_topic: c.rag_query || "",
+          evidence: (c.support_papers || []).map((pid: number) => ({
+            id: pid,
+            title: `Paper #${pid}`,
+          })),
+          support_snippets: c.support_snippets || [],
+        })),
+      );
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -323,7 +367,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   };
 
   const handleStep3_RenderSection = async () => {
-    if (!reviewId) {
+    if (!reviewId || !sectionClaimTable) {
       setError(t("phd.errorNoReviewId"));
       return;
     }
@@ -339,7 +383,9 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             review_id: reviewId,
-            section_key: "introduction",
+            section_claim_table: sectionClaimTable,
+            language: "zh-CN",
+            citation_start_index: 1,
           }),
         },
       );
@@ -350,7 +396,17 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
       }
 
       const data = await res.json();
-      setFinalRender(data.rendered_section.content);
+      const rendered = data.rendered_section;
+      setFinalRender(rendered.text);  // 后端字段是 text，不是 content
+      setRenderedSections((prev) => [
+        ...prev,
+        {
+          section_id: data.section_id || sectionClaimTable.section_id,
+          section_title: sectionClaimTable.section_title,
+          text: rendered.text,
+          citation_map: rendered.citation_map || {},
+        },
+      ]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
