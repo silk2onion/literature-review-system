@@ -72,7 +72,7 @@ class LLMConnectionConfig(BaseModel):
 class ReviewDefaultsConfig(BaseModel):
     citation_style: str = Field(default="harvard", description="默认引用格式: harvard/apa/ieee/chicago/vancouver")
     language: str = Field(default="zh-CN", description="默认语言: zh-CN / en")
-    paper_limit: int = Field(default=30, ge=5, le=100, description="每节最大检索文献数")
+    paper_limit: int = Field(default=30, ge=5, le=500, description="每节最大检索文献数（Scoping Review 可设更高）")
     section_temperature: float = Field(default=0.4, ge=0.0, le=1.0, description="章节生成温度")
     framework_temperature: float = Field(default=0.3, ge=0.0, le=1.0, description="框架生成温度")
     section_max_tokens: int = Field(default=8000, ge=1000, le=32000, description="章节生成最大 token 数")

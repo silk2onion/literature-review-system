@@ -761,7 +761,7 @@ class PipelineTaskRunner:
                             keywords=kws,
                             sources=self.task.sources,
                             max_results=self.task.papers_per_section,
-                            page_size=min(self.task.papers_per_section, 50),
+                            page_size=min(self.task.papers_per_section, 200),
                         )
 
                     job_payload = _make_job()

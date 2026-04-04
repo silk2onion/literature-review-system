@@ -371,7 +371,7 @@ async def auto_search_for_framework(
                 keywords=keywords,
                 sources=sources if isinstance(sources, list) else [sources],
                 max_results=papers_per_section,
-                page_size=min(papers_per_section, 50),
+                page_size=min(papers_per_section, 200),
                 year_from=year_from,
                 year_to=year_to,
             )

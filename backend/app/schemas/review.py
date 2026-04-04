@@ -147,7 +147,7 @@ class ReviewGenerate(BaseModel):
         default=None,
         description="指定使用的文献分组 ID。如果提供，将使用该分组下的所有文献（受 paper_limit 限制）。"
     )
-    paper_limit: int = Field(default=20, ge=5, le=100, description="使用的文献数量限制")
+    paper_limit: int = Field(default=20, ge=5, le=500, description="使用的文献数量限制（Scoping Review 可设更高）")
     sort_by: str = Field(
         default="year_desc",
         description="文献排序策略 (仅当使用 group_id 时有效): 'year_desc' (最新), 'year_asc' (最旧), 'citations_desc' (引用最高), 'random' (随机)"
@@ -369,8 +369,8 @@ class OrchestrationRequest(BaseModel):
         ..., description="研究关键词列表", min_length=1
     )
     paper_limit: int = Field(
-        default=30, ge=5, le=100,
-        description="每节检索的文献数量上限"
+        default=30, ge=5, le=500,
+        description="每节检索的文献数量上限（Scoping Review 可设更高）"
     )
     language: str = Field(
         default="zh-CN",
