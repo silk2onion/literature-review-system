@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { API_BASE_URL } from "../api/config";
 import { useAbortableFetch } from "../hooks/useAbortableFetch";
+import { useLocale } from "../hooks/useLocale";
 import type { Review, ValidationResult, ClaimsEvidenceResponse, EditingSection } from "../types/review";
 import type { PaperInfo } from "../types/paper";
 import {
@@ -11,6 +12,7 @@ import {
 } from "../components/review";
 
 export default function ReviewListPage() {
+  const { t } = useLocale();
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,7 +122,7 @@ export default function ReviewListPage() {
 
   // ─── Handlers ───
   const handleDelete = async (id: number) => {
-    if (!confirm("确定要永久删除这份文献综述吗？")) return;
+    if (!confirm(t("review.list.deleteConfirm"))) return;
     try {
       const resp = await fetch(`${API_BASE_URL}/api/reviews/${id}`, {
         method: "DELETE",
@@ -130,7 +132,7 @@ export default function ReviewListPage() {
         if (selectedReview?.id === id) setSelectedReview(null);
       }
     } catch {
-      alert("删除失败");
+      alert(t("review.list.deleteFailed"));
     }
   };
 
@@ -171,7 +173,7 @@ export default function ReviewListPage() {
       setEditingSection(null);
       setEditText("");
     } catch (err) {
-      alert(`保存失败: ${err instanceof Error ? err.message : String(err)}`);
+      alert(`${t("review.list.saveFailed")}: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setSaving(false);
     }
@@ -220,7 +222,7 @@ export default function ReviewListPage() {
       document.body.removeChild(a);
     } catch (err) {
       console.error(err);
-      alert("Markdown 导出失败");
+      alert(t("review.list.exportMarkdownFailed"));
     } finally {
       setExporting(null);
     }
@@ -245,7 +247,7 @@ export default function ReviewListPage() {
       document.body.removeChild(a);
     } catch (err) {
       console.error(err);
-      alert("DOCX 导出失败");
+      alert(t("review.list.exportDocxFailed"));
     } finally {
       setExporting(null);
     }
@@ -276,7 +278,7 @@ export default function ReviewListPage() {
     } catch (err) {
       console.error(err);
       alert(
-        `PDF 导出失败: ${err instanceof Error ? err.message : String(err)}`,
+        `${t("review.list.exportPdfFailed")}: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       setExporting(null);
@@ -292,7 +294,7 @@ export default function ReviewListPage() {
       );
       if (!resp.ok) throw new Error("Abstract generation failed");
       const data = await resp.json();
-      alert(`✅ 摘要生成成功！\n\n${data.abstract?.substring(0, 200)}...`);
+      alert(`${t("review.list.abstractGenerated")}\n\n${data.abstract?.substring(0, 200)}...`);
       if (selectedReview) {
         const rr = await fetch(`${API_BASE_URL}/api/reviews/${reviewId}`);
         if (rr.ok) setSelectedReview(await rr.json());
@@ -300,7 +302,7 @@ export default function ReviewListPage() {
       fetchReviews();
     } catch (err: unknown) {
       alert(
-        `摘要生成失败: ${err instanceof Error ? err.message : String(err)}`,
+        `${t("review.list.abstractFailed")}: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       setGenerating(null);
@@ -316,7 +318,7 @@ export default function ReviewListPage() {
       );
       if (!resp.ok) throw new Error("Conclusion generation failed");
       const data = await resp.json();
-      alert(`✅ 结论生成成功！\n\n${data.conclusion?.substring(0, 200)}...`);
+      alert(`${t("review.list.conclusionGenerated")}\n\n${data.conclusion?.substring(0, 200)}...`);
       if (selectedReview) {
         const rr = await fetch(`${API_BASE_URL}/api/reviews/${reviewId}`);
         if (rr.ok) setSelectedReview(await rr.json());
@@ -324,7 +326,7 @@ export default function ReviewListPage() {
       fetchReviews();
     } catch (err: unknown) {
       alert(
-        `结论生成失败: ${err instanceof Error ? err.message : String(err)}`,
+        `${t("review.list.conclusionFailed")}: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       setGenerating(null);
@@ -344,7 +346,7 @@ export default function ReviewListPage() {
       setShowValidation(true);
     } catch (err: unknown) {
       alert(
-        `引用校验失败: ${err instanceof Error ? err.message : String(err)}`,
+        `${t("review.list.validationFailed")}: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       setValidating(false);
@@ -362,7 +364,7 @@ export default function ReviewListPage() {
       setShowClaims(true);
     } catch (err: unknown) {
       alert(
-        `获取论点-证据数据失败: ${err instanceof Error ? err.message : String(err)}`,
+        `${t("review.list.claimsEvidenceFailed")}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   };

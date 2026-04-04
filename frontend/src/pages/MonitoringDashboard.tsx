@@ -10,6 +10,7 @@ import {
   FileText,
 } from "lucide-react";
 import { API_BASE_URL } from "../api/config";
+import { useLocale } from "../hooks/useLocale";
 
 interface PipelineTask {
   task_id: string;
@@ -33,6 +34,7 @@ interface CrawlerJob {
 }
 
 export default function MonitoringDashboard() {
+  const { t } = useLocale();
   const [pipelineTasks, setPipelineTasks] = useState<PipelineTask[]>([]);
   const [crawlerJobs, setCrawlerJobs] = useState<CrawlerJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,13 +124,13 @@ export default function MonitoringDashboard() {
             <Activity size={20} color="#6366f1" />
           </div>
           <div>
-            <h2 style={styles.title}>任务监控中心</h2>
-            <p style={styles.subtitle}>实时跟踪文献生成与数据爬取进度</p>
+            <h2 style={styles.title}>{t("monitoring.title")}</h2>
+            <p style={styles.subtitle}>{t("monitoring.subtitle")}</p>
           </div>
         </div>
         <button onClick={fetchData} style={styles.refreshBtn}>
           <RefreshCw size={14} />
-          刷新
+          {t("monitoring.refresh")}
         </button>
       </header>
 
@@ -141,7 +143,7 @@ export default function MonitoringDashboard() {
           onClick={() => setActiveTab("phd")}
         >
           <FileText size={16} />
-          PhD 生成管线
+          {t("monitoring.phdPipeline")}
           {pipelineTasks.filter((t) => t.status === "running").length > 0 && (
             <span style={styles.badge}>
               {pipelineTasks.filter((t) => t.status === "running").length}
@@ -156,7 +158,7 @@ export default function MonitoringDashboard() {
           onClick={() => setActiveTab("crawler")}
         >
           <Database size={16} />
-          数据爬取任务
+          {t("monitoring.crawlerJobs")}
           {crawlerJobs.filter((t) => t.status === "running").length > 0 && (
             <span style={styles.badge}>
               {crawlerJobs.filter((t) => t.status === "running").length}
@@ -169,14 +171,14 @@ export default function MonitoringDashboard() {
         {loading && (
           <div style={styles.loadingState}>
             <Loader2 size={32} className="animate-spin" color="#6366f1" />
-            <p>正在获取最新状态...</p>
+            <p>{t("monitoring.loadingStatus")}</p>
           </div>
         )}
 
         {!loading && activeTab === "phd" && (
           <div style={styles.taskList}>
             {pipelineTasks.length === 0 ? (
-              <div style={styles.emptyState}>暂无文献生成任务</div>
+              <div style={styles.emptyState}>{t("monitoring.noPhdTasks")}</div>
             ) : (
               pipelineTasks.map((task) => (
                 <div key={task.task_id} style={styles.taskCard}>
@@ -238,14 +240,14 @@ export default function MonitoringDashboard() {
 
                   {task.status === "running" && (
                     <div style={styles.currentStep}>
-                      <span style={{ color: "#94a3b8" }}>当前步骤: </span>
+                      <span style={{ color: "#94a3b8" }}>{t("monitoring.currentStep")}: </span>
                       <span style={{ color: "#f59e0b" }}>
                         {task.steps.find(
                           (s) =>
                             s.status === "running" || s.status === "retrying",
-                        )?.label || "进行中..."}
+                        )?.label || t("monitoring.inProgress")}
                         {task.steps.find((s) => s.status === "retrying") &&
-                          " (重试中)"}
+                          ` (${t("monitoring.retrying")})`}
                       </span>
                     </div>
                   )}
@@ -271,14 +273,14 @@ export default function MonitoringDashboard() {
                             );
                             if (!res.ok) {
                               const errText = await res.text();
-                              alert(`恢复失败: ${errText}`);
+                              alert(`${t("monitoring.resumeFailed")}: ${errText}`);
                               setResumingTaskId(null);
                               return;
                             }
                             // Refresh data immediately
                             await fetchData();
                           } catch (e) {
-                            alert(`恢复请求失败: ${e}`);
+                            alert(`${t("monitoring.resumeRequestFailed")}: ${e}`);
                           } finally {
                             setResumingTaskId(null);
                           }
@@ -309,8 +311,8 @@ export default function MonitoringDashboard() {
                           "▶️"
                         )}
                         {resumingTaskId === task.task_id
-                          ? "正在恢复..."
-                          : "断点续跑"}
+                          ? t("monitoring.resuming")
+                          : t("monitoring.resumeFromCheckpoint")}
                       </button>
                     </div>
                   )}
@@ -323,7 +325,7 @@ export default function MonitoringDashboard() {
         {!loading && activeTab === "crawler" && (
           <div style={styles.taskList}>
             {crawlerJobs.length === 0 ? (
-              <div style={styles.emptyState}>暂无爬虫任务</div>
+              <div style={styles.emptyState}>{t("monitoring.noCrawlerJobs")}</div>
             ) : (
               crawlerJobs.map((job) => (
                 <div key={job.id} style={styles.taskCard}>
@@ -358,7 +360,7 @@ export default function MonitoringDashboard() {
                     <div style={{ textAlign: "right" }}>
                       <div style={styles.taskId}>JOB #{job.id}</div>
                       <div style={styles.progressText}>
-                        {job.fetched_count} / {job.max_results} 篇
+                        {job.fetched_count} / {job.max_results} {t("monitoring.papers")}
                       </div>
                     </div>
                   </div>

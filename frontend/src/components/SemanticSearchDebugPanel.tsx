@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { API_BASE_URL } from "../api/config";
+import { useLocale } from "../hooks/useLocale";
 
 interface Paper {
   id: number;
@@ -70,6 +71,7 @@ function scoreBg(score: number) {
 }
 
 function SemanticSearchDebugPanel() {
+  const { t } = useLocale();
   const [searchMode, setSearchMode] = useState<SearchMode>("paper");
   const [keywordInput, setKeywordInput] = useState("");
   const [yearFrom, setYearFrom] = useState("");
@@ -110,7 +112,7 @@ function SemanticSearchDebugPanel() {
 
     try {
       const keywords = keywordInput.split(",").map((k) => k.trim()).filter(Boolean);
-      if (keywords.length === 0) throw new Error("请先输入至少一个关键词");
+      if (keywords.length === 0) throw new Error(t("rag.errorNoKeywords"));
 
       const body: SemanticSearchRequestPayload = { keywords };
       if (yearFrom) body.year_from = Number(yearFrom);
@@ -134,14 +136,14 @@ function SemanticSearchDebugPanel() {
           } else if (data.type === "done") {
             setLoading(false);
           } else if (data.type === "error") {
-            setError(data.message || "语义检索时出现错误"); setLoading(false);
+            setError(data.message || t("rag.errorSearch")); setLoading(false);
           }
-        } catch { setError("解析 WebSocket 消息时出现错误"); setLoading(false); }
+        } catch { setError(t("rag.errorParseWs")); setLoading(false); }
       };
-      ws.onerror = () => { setError("WebSocket 连接出现错误"); setLoading(false); };
+      ws.onerror = () => { setError(t("rag.errorWsConnection")); setLoading(false); };
       ws.onclose = () => { wsRef.current = null; };
     } catch (e) {
-      setError((e as Error).message || "语义检索时出现错误");
+      setError((e as Error).message || t("rag.errorSearch"));
       setItems([]); setDebugInfo(null); setLoading(false);
     }
   }
@@ -150,7 +152,7 @@ function SemanticSearchDebugPanel() {
     setChunkError(null); setChunkLoading(true); setChunkResults([]); setExpandedChunks(new Set());
     try {
       const keywords = keywordInput.split(",").map((k) => k.trim()).filter(Boolean);
-      if (keywords.length === 0) throw new Error("请先输入至少一个关键词");
+      if (keywords.length === 0) throw new Error(t("rag.errorNoKeywords"));
       const resp = await fetch(`${API_BASE_URL}/api/semantic-search/chunks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -159,7 +161,7 @@ function SemanticSearchDebugPanel() {
       if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`); }
       const data = await resp.json();
       setChunkResults(data.items || []);
-    } catch (e) { setChunkError((e as Error).message || "Chunk 检索失败"); }
+    } catch (e) { setChunkError((e as Error).message || t("rag.errorChunkSearch")); }
     finally { setChunkLoading(false); }
   }
 
@@ -171,10 +173,10 @@ function SemanticSearchDebugPanel() {
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: "#0f172a", margin: "0 0 6px" }}>
-          RAG 语义检索可视化调试
+          {t("rag.title")}
         </h2>
         <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
-          输入关键词，查看语义组扩展、相似度排序结果。支持 Paper 级和 Chunk 级两种检索模式。
+          {t("rag.description")}
         </p>
       </div>
 
@@ -198,7 +200,7 @@ function SemanticSearchDebugPanel() {
               fontSize: 13,
             }}
           >
-            {mode === "paper" ? "Paper 级检索" : "Chunk 级检索 (含页码)"}
+            {mode === "paper" ? t("rag.paperSearch") : t("rag.chunkSearch")}
           </button>
         ))}
       </div>
@@ -213,12 +215,12 @@ function SemanticSearchDebugPanel() {
         }}
       >
         <div style={{ flex: 1, minWidth: 200 }}>
-          <label style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>关键词（逗号分隔）</label>
+          <label style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>{t("rag.keywordsLabel")}</label>
           <input
             value={keywordInput}
             onChange={(e) => setKeywordInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
-            placeholder="例如：urban design, public space"
+            placeholder={t("rag.keywordsPlaceholder")}
             style={{
               width: "100%", marginTop: 4, padding: "8px 12px", borderRadius: 6,
               border: "1px solid #cbd5e1", fontSize: 13, backgroundColor: "#fff",
@@ -228,7 +230,7 @@ function SemanticSearchDebugPanel() {
         {searchMode === "paper" && (
           <div style={{ display: "flex", alignItems: "flex-end", gap: 6 }}>
             <div>
-              <label style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>年份</label>
+              <label style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>{t("rag.yearLabel")}</label>
               <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
                 <input value={yearFrom} onChange={(e) => setYearFrom(e.target.value)} placeholder="2015"
                   style={{ width: 60, padding: "8px 8px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 13 }} />
@@ -253,7 +255,7 @@ function SemanticSearchDebugPanel() {
             color: "#fff", fontSize: 13, fontWeight: 600, cursor: isLoading ? "default" : "pointer",
           }}
         >
-          {isLoading ? "检索中..." : "执行检索"}
+          {isLoading ? t("rag.searching") : t("rag.search")}
         </button>
       </div>
 
@@ -273,10 +275,10 @@ function SemanticSearchDebugPanel() {
       {/* Debug Info */}
       {searchMode === "paper" && debugInfo && (
         <div style={{ padding: "16px 20px", borderRadius: 10, backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", marginBottom: 20 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", margin: "0 0 12px" }}>调试信息</h3>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", margin: "0 0 12px" }}>{t("rag.debugInfo")}</h3>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 24, fontSize: 13 }}>
             <div>
-              <span style={{ color: "#64748b", fontWeight: 500 }}>扩展关键词: </span>
+              <span style={{ color: "#64748b", fontWeight: 500 }}>{t("rag.expandedKeywords")}: </span>
               {debugInfo.expanded_keywords.length > 0 ? (
                 <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
                   {debugInfo.expanded_keywords.map((k, i) => (
@@ -286,21 +288,21 @@ function SemanticSearchDebugPanel() {
                     }}>{k}</span>
                   ))}
                 </span>
-              ) : <span style={{ color: "#94a3b8" }}>无扩展</span>}
+              ) : <span style={{ color: "#94a3b8" }}>{t("rag.noExpansion")}</span>}
             </div>
             <div>
-              <span style={{ color: "#64748b", fontWeight: 500 }}>候选文献: </span>
-              <strong style={{ color: "#0f172a" }}>{debugInfo.total_candidates}</strong> 篇
+              <span style={{ color: "#64748b", fontWeight: 500 }}>{t("rag.candidates")}: </span>
+              <strong style={{ color: "#0f172a" }}>{debugInfo.total_candidates}</strong> {t("rag.papers")}
             </div>
             {Object.keys(debugInfo.activated_groups).length > 0 && (
               <div>
-                <span style={{ color: "#64748b", fontWeight: 500 }}>激活语义组: </span>
+                <span style={{ color: "#64748b", fontWeight: 500 }}>{t("rag.activatedGroups")}: </span>
                 <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
                   {Object.entries(debugInfo.activated_groups).map(([key, g]) => (
                     <span key={key} style={{
                       padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 500,
                       backgroundColor: "#f5f3ff", color: "#7c3aed", border: "1px solid #ddd6fe",
-                    }} title={`匹配词: ${(g.matched_words || []).join(", ")}`}>
+                    }} title={`${t("rag.matchedWords")}: ${(g.matched_words || []).join(", ")}`}>
                       {g.name || key} ({((g.strength ?? 0) * 100).toFixed(0)}%)
                     </span>
                   ))}
@@ -316,10 +318,10 @@ function SemanticSearchDebugPanel() {
         <div style={{ borderRadius: 10, border: "1px solid #e2e8f0", backgroundColor: "#fff", overflow: "hidden" }}>
           <div style={{ padding: "12px 20px", backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 1 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", margin: 0 }}>
-              检索结果
+              {t("rag.searchResults")}
             </h3>
             <span style={{ fontSize: 12, color: "#94a3b8" }}>
-              共 {items.length} 篇，按相似度降序
+              {t("rag.totalPapersSorted", { count: items.length })}
             </span>
           </div>
           <div style={{ maxHeight: "calc(100vh - 380px)", overflowY: "auto" }}>
@@ -397,7 +399,7 @@ function SemanticSearchDebugPanel() {
                       )}
                       {isExpanded && !item.paper.abstract && (
                         <div style={{ marginTop: 10, fontSize: 12, color: "#cbd5e1", fontStyle: "italic" }}>
-                          无摘要
+                          {t("rag.noAbstract")}
                         </div>
                       )}
                     </div>
@@ -419,10 +421,10 @@ function SemanticSearchDebugPanel() {
         <div style={{ borderRadius: 10, border: "1px solid #e2e8f0", backgroundColor: "#fff", overflow: "hidden" }}>
           <div style={{ padding: "12px 20px", backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 1 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: "#0f172a", margin: 0 }}>
-              Chunk 检索结果
+              {t("rag.chunkResults")}
             </h3>
             <span style={{ fontSize: 12, color: "#94a3b8" }}>
-              共 {chunkResults.length} 条，来自 {new Set(chunkResults.map((c) => c.paper_id)).size} 篇论文
+              {t("rag.totalChunksSorted", { count: chunkResults.length, papers: new Set(chunkResults.map((c) => c.paper_id)).size })}
             </span>
           </div>
           <div style={{ maxHeight: "calc(100vh - 380px)", overflowY: "auto" }}>
@@ -508,14 +510,14 @@ function SemanticSearchDebugPanel() {
       {/* Empty states */}
       {searchMode === "paper" && !loading && items.length === 0 && !error && !debugInfo && (
         <div style={{ textAlign: "center", color: "#94a3b8", marginTop: 48, fontSize: 14 }}>
-          输入关键词执行 Paper 级语义检索
+          {t("rag.emptyPaperHint")}
         </div>
       )}
       {searchMode === "chunk" && !chunkLoading && chunkResults.length === 0 && !chunkError && (
         <div style={{ textAlign: "center", color: "#94a3b8", marginTop: 48, fontSize: 14 }}>
-          输入关键词执行 Chunk 级检索，查看 PDF 文本片段及其页码。
+          {t("rag.emptyChunkHint")}
           <br />
-          <span style={{ fontSize: 12 }}>需要先对论文执行 PDF 分段 (Chunking) 操作。</span>
+          <span style={{ fontSize: 12 }}>{t("rag.emptyChunkNote")}</span>
         </div>
       )}
     </div>

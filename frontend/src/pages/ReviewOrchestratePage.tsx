@@ -5,6 +5,7 @@
 import { useState, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { API_BASE_URL } from "../api/config";
+import { useLocale } from "../hooks/useLocale";
 
 interface FrameworkSection {
   id: string;
@@ -47,18 +48,22 @@ type PipelineStage =
   | "done"
   | "error";
 
-const STAGE_LABELS: Record<PipelineStage, string> = {
-  idle: "等待开始",
-  framework: "正在生成综述框架…",
-  searching: "正在批量检索文献…",
-  embedding: "正在生成文献向量…",
-  generating: "正在按节生成综述（RAG + LLM）…",
-  references: "正在生成参考文献列表…",
-  done: "生成完成",
-  error: "生成失败",
-};
+// STAGE_LABELS will be resolved inside the component via t() calls
 
 export default function ReviewOrchestratePage() {
+  const { t } = useLocale();
+
+  const STAGE_LABELS: Record<PipelineStage, string> = {
+    idle: t("review.orchestrate.stage.idle"),
+    framework: t("review.orchestrate.stage.framework"),
+    searching: t("review.orchestrate.stage.searching"),
+    embedding: t("review.orchestrate.stage.embedding"),
+    generating: t("review.orchestrate.stage.generating"),
+    references: t("review.orchestrate.stage.references"),
+    done: t("review.orchestrate.stage.done"),
+    error: t("review.orchestrate.stage.error"),
+  };
+
   // --- Form State ---
   const [topic, setTopic] = useState("");
   const [keywords, setKeywords] = useState("");
@@ -81,7 +86,7 @@ export default function ReviewOrchestratePage() {
   // --- Submit ---
   const handleSubmit = async () => {
     if (!topic.trim() || !keywords.trim()) {
-      setError("请填写研究主题和关键词");
+      setError(t("review.orchestrate.errorTopicKeywords"));
       return;
     }
 
@@ -121,7 +126,7 @@ export default function ReviewOrchestratePage() {
         resultRef.current?.scrollIntoView({ behavior: "smooth" });
       }, 200);
     } catch (err: any) {
-      setError(err.message || "未知错误");
+      setError(err.message || t("review.orchestrate.unknownError"));
       setStage("error");
     }
   };
@@ -138,32 +143,32 @@ export default function ReviewOrchestratePage() {
     <div style={styles.container}>
       {/* === 输入区域 === */}
       <div style={styles.inputCard}>
-        <h2 style={styles.cardTitle}>一键生成文献综述</h2>
+        <h2 style={styles.cardTitle}>{t("review.orchestrate.title")}</h2>
         <p style={styles.subtitle}>
-          输入研究主题，自动完成框架生成、文献检索、RAG 召回与带引用标注的综述写作
+          {t("review.orchestrate.subtitle")}
         </p>
 
         <div style={styles.formGrid}>
           {/* 主题 */}
           <div style={styles.formGroup}>
-            <label style={styles.label}>研究主题</label>
+            <label style={styles.label}>{t("review.orchestrate.topic")}</label>
             <input
               style={styles.input}
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
-              placeholder="例如：TOD 与文化遗产保护的协同机制"
+              placeholder={t("review.orchestrate.topicPlaceholder")}
               disabled={isRunning}
             />
           </div>
 
           {/* 关键词 */}
           <div style={styles.formGroup}>
-            <label style={styles.label}>关键词（逗号分隔）</label>
+            <label style={styles.label}>{t("review.orchestrate.keywords")}</label>
             <input
               style={styles.input}
               value={keywords}
               onChange={(e) => setKeywords(e.target.value)}
-              placeholder="例如：TOD, heritage conservation, sustainable urban design"
+              placeholder={t("review.orchestrate.keywordsPlaceholder")}
               disabled={isRunning}
             />
           </div>
@@ -171,7 +176,7 @@ export default function ReviewOrchestratePage() {
           {/* 配置行 */}
           <div style={styles.configRow}>
             <div style={styles.configItem}>
-              <label style={styles.label}>文献数</label>
+              <label style={styles.label}>{t("review.orchestrate.paperLimit")}</label>
               <input
                 type="number"
                 style={{ ...styles.input, width: 80 }}
@@ -184,7 +189,7 @@ export default function ReviewOrchestratePage() {
             </div>
 
             <div style={styles.configItem}>
-              <label style={styles.label}>语言</label>
+              <label style={styles.label}>{t("review.orchestrate.language")}</label>
               <select
                 style={{ ...styles.input, width: 110 }}
                 value={language}
@@ -192,12 +197,12 @@ export default function ReviewOrchestratePage() {
                 disabled={isRunning}
               >
                 <option value="en">English</option>
-                <option value="zh-CN">中文</option>
+                <option value="zh-CN">{t("review.orchestrate.langZh")}</option>
               </select>
             </div>
 
             <div style={styles.configItem}>
-              <label style={styles.label}>引用格式</label>
+              <label style={styles.label}>{t("review.orchestrate.citationStyle")}</label>
               <select
                 style={{ ...styles.input, width: 150 }}
                 value={citationStyle}
@@ -213,7 +218,7 @@ export default function ReviewOrchestratePage() {
             </div>
 
             <div style={styles.configItem}>
-              <label style={styles.label}>起始年</label>
+              <label style={styles.label}>{t("review.orchestrate.yearFrom")}</label>
               <input
                 type="number"
                 style={{ ...styles.input, width: 90 }}
@@ -225,7 +230,7 @@ export default function ReviewOrchestratePage() {
             </div>
 
             <div style={styles.configItem}>
-              <label style={styles.label}>截止年</label>
+              <label style={styles.label}>{t("review.orchestrate.yearTo")}</label>
               <input
                 type="number"
                 style={{ ...styles.input, width: 90 }}
@@ -244,19 +249,19 @@ export default function ReviewOrchestratePage() {
                   onChange={(e) => setUseLocalOnly(e.target.checked)}
                   disabled={isRunning}
                 />
-                仅本地库
+                {t("review.orchestrate.localOnly")}
               </label>
             </div>
           </div>
 
           {/* 自定义指令 */}
           <div style={styles.formGroup}>
-            <label style={styles.label}>自定义指令（可选）</label>
+            <label style={styles.label}>{t("review.orchestrate.customInstructions")}</label>
             <textarea
               style={{ ...styles.input, minHeight: 60, resize: "vertical" as const }}
               value={customInstructions}
               onChange={(e) => setCustomInstructions(e.target.value)}
-              placeholder="例如：请重点关注亚洲案例"
+              placeholder={t("review.orchestrate.customInstructionsPlaceholder")}
               disabled={isRunning}
             />
           </div>
@@ -272,7 +277,7 @@ export default function ReviewOrchestratePage() {
             cursor: isRunning ? "not-allowed" : "pointer",
           }}
         >
-          {isRunning ? "正在生成中…" : "一键生成综述"}
+          {isRunning ? t("review.orchestrate.generating") : t("review.orchestrate.generate")}
         </button>
 
         {/* Pipeline 进度 */}
@@ -307,12 +312,12 @@ export default function ReviewOrchestratePage() {
                   ...(activeResultTab === tab ? styles.tabActive : {}),
                 }}
               >
-                {tab === "preview" ? "综述预览" : tab === "framework" ? "框架" : "统计"}
+                {tab === "preview" ? t("review.orchestrate.tabPreview") : tab === "framework" ? t("review.orchestrate.tabFramework") : t("review.orchestrate.tabStats")}
               </button>
             ))}
             <div style={{ flex: 1 }} />
             <button onClick={handleCopy} style={styles.copyBtn}>
-              复制 Markdown
+              {t("review.orchestrate.copyMarkdown")}
             </button>
           </div>
 
@@ -354,10 +359,10 @@ export default function ReviewOrchestratePage() {
               <div>
                 {[
                   ["Review ID", result.review_id],
-                  ["总检索文献数", result.stats.total_papers_searched],
-                  ["实际引用文献数", result.stats.total_papers_cited],
-                  ["章节数", result.stats.sections_count],
-                  ["引用映射", `${Object.keys(result.citation_map).length} 条`],
+                  [t("review.orchestrate.statTotalSearched"), result.stats.total_papers_searched],
+                  [t("review.orchestrate.statTotalCited"), result.stats.total_papers_cited],
+                  [t("review.orchestrate.statSections"), result.stats.sections_count],
+                  [t("review.orchestrate.statCitationMap"), `${Object.keys(result.citation_map).length} ${t("review.orchestrate.statEntries")}`],
                 ].map(([label, value]) => (
                   <div key={String(label)} style={styles.statRow}>
                     <span style={{ color: "#3C3C43" }}>{label}</span>
@@ -368,7 +373,7 @@ export default function ReviewOrchestratePage() {
                 {Object.keys(result.citation_map).length > 0 && (
                   <div style={{ marginTop: 20 }}>
                     <h4 style={{ color: "#1C1C1E", margin: "0 0 10px", fontSize: 14, fontWeight: 600 }}>
-                      引用映射表
+                      {t("review.orchestrate.citationMapTable")}
                     </h4>
                     <div style={{ maxHeight: 300, overflow: "auto" }}>
                       {Object.entries(result.citation_map).map(([key, info]) => (

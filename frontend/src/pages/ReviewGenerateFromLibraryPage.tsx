@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import PhdPipelinePage from "./PhdPipelinePage";
 import { API_BASE_URL } from "../api/config";
+import { useLocale } from "../hooks/useLocale";
 
 type PaperResponse = {
   id: number;
@@ -28,6 +29,7 @@ type ReviewGenerateResponse = {
 };
 
 export default function ReviewGenerateFromLibraryPage() {
+  const { t } = useLocale();
   const [mode, setMode] = useState<"standard" | "phd">("standard");
 
   // --- Paper Selection State ---
@@ -92,11 +94,11 @@ export default function ReviewGenerateFromLibraryPage() {
 
   const handleGenerate = async () => {
     if (selectedPaperIds.size === 0) {
-      setError("请至少选择一篇文献");
+      setError(t("review.generate.errorSelectPaper"));
       return;
     }
     if (!keywords.trim()) {
-      setError("请输入综述关键词");
+      setError(t("review.generate.errorEnterKeywords"));
       return;
     }
 
@@ -126,10 +128,10 @@ export default function ReviewGenerateFromLibraryPage() {
       if (data.success) {
         setGeneratedReview(data);
       } else {
-        setError(data.message || "生成失败");
+        setError(data.message || t("review.generate.generateFailed"));
       }
     } catch (err) {
-      setError(`请求失败: ${err}`);
+      setError(`${t("review.generate.requestFailed")}: ${err}`);
     } finally {
       setGenerating(false);
     }
@@ -160,7 +162,7 @@ export default function ReviewGenerateFromLibraryPage() {
       document.body.removeChild(a);
     } catch (err) {
       console.error(err);
-      alert("导出失败");
+      alert(t("review.generate.exportFailed"));
     } finally {
       setExporting(false);
     }
@@ -170,21 +172,21 @@ export default function ReviewGenerateFromLibraryPage() {
     <div className="page-container">
       <header className="page-header">
         <div className="page-title">
-          <h1>综述生成工作台</h1>
-          <p>选择文献并生成综述，支持标准模式与 PhD 深度模式</p>
+          <h1>{t("review.generate.title")}</h1>
+          <p>{t("review.generate.subtitle")}</p>
         </div>
         <div className="view-switch">
           <button
             onClick={() => setMode("standard")}
             className={`view-switch-button ${mode === "standard" ? "active" : ""}`}
           >
-            标准综述
+            {t("review.generate.standardMode")}
           </button>
           <button
             onClick={() => setMode("phd")}
             className={`view-switch-button ${mode === "phd" ? "active" : ""}`}
           >
-            PhD 深度管线
+            {t("review.generate.phdMode")}
           </button>
         </div>
       </header>
@@ -194,12 +196,12 @@ export default function ReviewGenerateFromLibraryPage() {
         {/* Left Panel: Paper Selection */}
         <div className="paper-selection-panel">
           <div className="panel-header">
-            <h3>选择文献 ({selectedPaperIds.size} 篇)</h3>
+            <h3>{t("review.generate.selectPapers", { count: selectedPaperIds.size })}</h3>
             <div className="search-bar-small">
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索文献..."
+                placeholder={t("review.generate.searchPlaceholder")}
                 className="filter-input"
                 onKeyDown={(e) => e.key === "Enter" && fetchPapers()}
               />
@@ -207,14 +209,14 @@ export default function ReviewGenerateFromLibraryPage() {
                 onClick={fetchPapers}
                 className="action-button primary small"
               >
-                搜索
+                {t("review.generate.search")}
               </button>
             </div>
           </div>
 
           <div className="paper-list-container">
             {loadingPapers ? (
-              <div className="loading-state">加载中...</div>
+              <div className="loading-state">{t("common.loading")}</div>
             ) : (
               <table className="paper-list-table">
                 <thead>
@@ -238,9 +240,9 @@ export default function ReviewGenerateFromLibraryPage() {
                         style={{ cursor: "pointer" }}
                       />
                     </th>
-                    <th>标题</th>
-                    <th style={{ width: "60px" }}>年份</th>
-                    <th style={{ width: "80px" }}>来源</th>
+                    <th>{t("review.generate.tableTitle")}</th>
+                    <th style={{ width: "60px" }}>{t("review.generate.tableYear")}</th>
+                    <th style={{ width: "80px" }}>{t("review.generate.tableSource")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -281,24 +283,24 @@ export default function ReviewGenerateFromLibraryPage() {
             <>
               {/* Config Card */}
               <div className="config-card">
-                <h3>生成设置</h3>
+                <h3>{t("review.generate.settings")}</h3>
 
                 <div className="form-group">
-                  <label>综述关键词 (必填)</label>
+                  <label>{t("review.generate.keywordsLabel")}</label>
                   <input
                     value={keywords}
                     onChange={(e) => setKeywords(e.target.value)}
-                    placeholder="例如: Urban Design, AI, Public Space"
+                    placeholder={t("review.generate.keywordsPlaceholder")}
                     className="form-input"
                   />
                 </div>
 
                 <div className="form-group">
-                  <label>自定义提示词 (可选)</label>
+                  <label>{t("review.generate.customPromptLabel")}</label>
                   <textarea
                     value={customPrompt}
                     onChange={(e) => setCustomPrompt(e.target.value)}
-                    placeholder="例如: 请重点关注这些文献中的方法论部分..."
+                    placeholder={t("review.generate.customPromptPlaceholder")}
                     rows={3}
                     className="form-textarea"
                   />
@@ -309,7 +311,7 @@ export default function ReviewGenerateFromLibraryPage() {
                   disabled={generating}
                   className="action-button primary full-width"
                 >
-                  {generating ? "正在生成综述..." : "开始生成"}
+                  {generating ? t("review.generate.generating") : t("review.generate.startGenerate")}
                 </button>
 
                 {error && <div className="error-message">{error}</div>}
@@ -319,7 +321,7 @@ export default function ReviewGenerateFromLibraryPage() {
               {generatedReview && (
                 <div className="output-preview-card">
                   <div className="card-header">
-                    <h3 className="success-title">生成成功!</h3>
+                    <h3 className="success-title">{t("review.generate.success")}</h3>
                     <div className="card-actions">
                       <span className="review-id">
                         ID: {generatedReview.review_id}
@@ -329,7 +331,7 @@ export default function ReviewGenerateFromLibraryPage() {
                         disabled={exporting}
                         className="action-button small secondary"
                       >
-                        {exporting ? "导出中..." : "导出 MD"}
+                        {exporting ? t("review.generate.exporting") : t("review.generate.exportMd")}
                       </button>
                     </div>
                   </div>
