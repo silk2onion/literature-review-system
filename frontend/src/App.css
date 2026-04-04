@@ -727,7 +727,12 @@
   background: var(--bg-primary);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+}
+
+.data-table-container > .data-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .table-header-info {
@@ -743,6 +748,7 @@
 
 .data-table-scroll {
   flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 
