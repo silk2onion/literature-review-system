@@ -69,13 +69,13 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
         {/* Tab sidebar */}
         <nav
           style={{
-            width: "180px",
-            minWidth: "180px",
-            borderRight: "1px solid #334155",
+            width: 200,
+            minWidth: 200,
+            borderRight: "1px solid var(--border-color)",
             display: "flex",
             flexDirection: "column",
-            padding: "16px 0",
-            gap: "2px",
+            padding: "20px 0",
+            gap: 2,
             overflowY: "auto",
           }}
         >
@@ -86,79 +86,90 @@ function SettingsModal({ open, onClose }: SettingsModalProps) {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "8px",
-                padding: "10px 16px",
+                gap: 10,
+                padding: "11px 20px",
                 border: "none",
                 background:
                   activeTab === tab.key
-                    ? "rgba(96, 165, 250, 0.15)"
+                    ? "rgba(96, 165, 250, 0.12)"
                     : "transparent",
-                color: activeTab === tab.key ? "#60a5fa" : "#94a3b8",
-                fontSize: "13px",
+                color: activeTab === tab.key ? "#3b82f6" : "#64748b",
+                fontSize: 13,
+                fontWeight: activeTab === tab.key ? 600 : 400,
                 cursor: "pointer",
                 textAlign: "left",
                 borderLeft:
                   activeTab === tab.key
-                    ? "3px solid #60a5fa"
+                    ? "3px solid #3b82f6"
                     : "3px solid transparent",
                 transition: "all 0.15s ease",
+                borderRadius: 0,
               }}
             >
-              <span>{tab.icon}</span>
+              <span style={{ fontSize: 15 }}>{tab.icon}</span>
               <span>{t(tab.labelKey as TranslationKey)}</span>
             </button>
           ))}
+
+          {/* Language toggle at bottom of sidebar */}
+          <div style={{ marginTop: "auto", padding: "16px 20px", borderTop: "1px solid var(--border-color)" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                borderRadius: 8,
+                backgroundColor: "rgba(0, 0, 0, 0.04)",
+                padding: 3,
+              }}
+            >
+              <button
+                onClick={() => setLocale("zh-CN")}
+                style={{
+                  flex: 1,
+                  padding: "5px 0",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  backgroundColor: locale === "zh-CN" ? "#fff" : "transparent",
+                  color: locale === "zh-CN" ? "#1e293b" : "#94a3b8",
+                  boxShadow: locale === "zh-CN" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                  transition: "all 0.15s",
+                }}
+              >
+                中文
+              </button>
+              <button
+                onClick={() => setLocale("en")}
+                style={{
+                  flex: 1,
+                  padding: "5px 0",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  backgroundColor: locale === "en" ? "#fff" : "transparent",
+                  color: locale === "en" ? "#1e293b" : "#94a3b8",
+                  boxShadow: locale === "en" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                  transition: "all 0.15s",
+                }}
+              >
+                English
+              </button>
+            </div>
+          </div>
         </nav>
 
         {/* Main content area */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div className="settings-header">
             <h2>{t("settings.title")}</h2>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              {/* Language toggle */}
-              <div
-                style={{
-                  display: "flex",
-                  borderRadius: 6,
-                  overflow: "hidden",
-                  border: "1px solid #475569",
-                  fontSize: 12,
-                }}
-              >
-                <button
-                  onClick={() => setLocale("zh-CN")}
-                  style={{
-                    padding: "3px 10px",
-                    border: "none",
-                    cursor: "pointer",
-                    backgroundColor: locale === "zh-CN" ? "#3b82f6" : "transparent",
-                    color: locale === "zh-CN" ? "#fff" : "#94a3b8",
-                    fontWeight: locale === "zh-CN" ? 600 : 400,
-                    transition: "all 0.15s",
-                  }}
-                >
-                  中文
-                </button>
-                <button
-                  onClick={() => setLocale("en")}
-                  style={{
-                    padding: "3px 10px",
-                    border: "none",
-                    borderLeft: "1px solid #475569",
-                    cursor: "pointer",
-                    backgroundColor: locale === "en" ? "#3b82f6" : "transparent",
-                    color: locale === "en" ? "#fff" : "#94a3b8",
-                    fontWeight: locale === "en" ? 600 : 400,
-                    transition: "all 0.15s",
-                  }}
-                >
-                  EN
-                </button>
-              </div>
-              <button className="settings-close" onClick={onClose}>
-                ×
-              </button>
-            </div>
+            <button className="settings-close" onClick={onClose}>
+              ×
+            </button>
           </div>
 
           <div className="settings-body" style={{ flex: 1, overflowY: "auto" }}>

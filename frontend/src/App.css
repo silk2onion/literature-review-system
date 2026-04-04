@@ -847,19 +847,19 @@
 }
 
 .settings-modal {
-  width: 520px;
-  max-width: 90vw;
-  max-height: 85vh;
+  width: 780px;
+  max-width: 92vw;
+  max-height: 88vh;
   background: var(--bg-primary);
-  border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.25);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .settings-header {
-  padding: 16px 24px;
+  padding: 20px 28px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
@@ -867,39 +867,59 @@
 }
 
 .settings-header h2 {
-  font-size: 18px;
+  font-size: 17px;
+  font-weight: 600;
   color: var(--text-primary);
   margin: 0;
 }
 
 .settings-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 24px;
+  font-size: 18px;
   cursor: pointer;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.settings-close:hover {
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .settings-body {
-  padding: 24px;
+  padding: 28px;
   overflow-y: auto;
 }
 
 .settings-section {
-  margin-bottom: 24px;
-  padding: 16px;
+  margin-bottom: 20px;
+  padding: 20px;
   border-radius: 12px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
+}
+
+.settings-section h3 {
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
+.settings-description {
+  margin-top: 0;
 }
 
 .settings-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 16px;
+  margin-top: 14px;
 }
 
 .settings-row input[type="text"] {
