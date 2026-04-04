@@ -20,6 +20,7 @@ import {
 import LibraryPage from "./pages/LibraryPage";
 import StagingPapersPage from "./pages/StagingPapersPage";
 import ReviewGenerateFromLibraryPage from "./pages/ReviewGenerateFromLibraryPage";
+import PhdPipelinePage from "./pages/PhdPipelinePage";
 import RagDebugPage from "./pages/RagDebugPage";
 import AgentChatPanel, { AgentToggleButton } from "./AgentChatPanel";
 import SettingsModal from "./pages/SettingsModal";
@@ -137,7 +138,7 @@ function App() {
       case "rag":
         return <RagDebugPage />;
       case "draft":
-        return <ReviewGenerateFromLibraryPage />;
+        return <PhdPipelinePage />;
       case "orchestrate":
         return <ReviewOrchestratePage />;
       case "screening":
