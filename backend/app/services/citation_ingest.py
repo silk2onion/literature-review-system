@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models.citation import PaperCitation
 from app.models.paper import Paper
+from app.models.staging_paper import StagingPaper
 from app.services.embedding_service import get_embedding_service
 
 logger = logging.getLogger(__name__)
@@ -148,13 +149,10 @@ class CitationIngestService:
         ref_norm: Dict[str, Optional[object]],
     ) -> Optional[int]:
         """
-        当引用在本地未匹配到任何 Paper 且包含 DOI 时，基于引用信息创建一个占位 Paper。
+        当引用在本地未匹配到任何 Paper 且包含 DOI 时，
+        将引用信息写入暂存库（StagingPaper），等待 PRISMA 筛选后再入正式库。
 
-        只填充最小必要字段：
-        - title: 尽量使用引用中的标题；若缺失则回退到 DOI
-        - year: 引用中解析出的年份（可为空）
-        - doi: 引用 DOI
-        - source: 标记为 crossref_citation_only，便于后续区分
+        同时仍然创建一个最小占位 Paper 以维持引用图谱边的完整性。
         """
         doi = ref_norm.get("doi")
         if not isinstance(doi, str) or not doi.strip():
@@ -162,7 +160,7 @@ class CitationIngestService:
 
         doi_norm = doi.strip().lower()
 
-        # 双重保障：再次确认不存在同 DOI 的 Paper（避免并发下重复插入）
+        # 双重保障：再次确认不存在同 DOI 的 Paper
         existing = (
             db.query(Paper)
             .filter(Paper.doi.isnot(None))
@@ -177,32 +175,35 @@ class CitationIngestService:
         title = raw_title.strip() if isinstance(raw_title, str) and raw_title.strip() else doi_norm
         year = ref_norm.get("year") if isinstance(ref_norm.get("year"), int) else None
 
+        # 写入暂存库（如果同 DOI 不存在的话）
+        existing_staging = (
+            db.query(StagingPaper)
+            .filter(StagingPaper.doi.isnot(None))
+            .filter(StagingPaper.doi.ilike(doi_norm))
+            .first()
+        )
+        if not existing_staging:
+            staging = StagingPaper(
+                title=title,
+                authors=[],
+                year=year,
+                doi=doi_norm,
+                source="citation_analysis",
+                status="pending",
+                screening_stage="identification",
+            )
+            db.add(staging)
+
+        # 仍然创建占位 Paper 以保持引用图谱完整
         paper = Paper(
             title=title,
             authors=[],
-            abstract=None,
-            publication_date=None,
             year=year,
-            journal=None,
-            venue=None,
-            journal_issn=None,
-            journal_impact_factor=None,
-            journal_quartile=None,
-            indexing=None,
             doi=doi_norm,
-            arxiv_id=None,
-            pmid=None,
-            url=None,
-            pdf_url=None,
-            pdf_path=None,
             source="crossref_citation_only",
-            categories=None,
-            keywords=None,
             citations_count=0,
-            embedding=None,
         )
         db.add(paper)
-        # 只 flush 不 commit，由上层 sync_citations_for_paper 统一提交
         db.flush()
 
         pid = getattr(paper, "id", None)

@@ -235,6 +235,7 @@ def resolve_ref_placeholders(
     db: Session,
     citation_style: str = "harvard",
     collect_missing: bool = True,
+    linkable: bool = False,
 ) -> tuple[str, list[int], list[int]]:
     """Replace all [[REF_x]] placeholders with formatted inline citations.
 
@@ -295,11 +296,14 @@ def resolve_ref_placeholders(
 
         # Append page number if present: (Author, Year, p.N)
         if page_num is not None:
-            # Insert page number before the closing parenthesis
             if inline.endswith(")"):
                 inline = inline[:-1] + f", p.{page_num})"
             else:
                 inline = f"{inline} (p.{page_num})"
+
+        # Wrap in Markdown hyperlink to reference list anchor
+        if linkable:
+            inline = f"[{inline}](#ref-{paper_id})"
 
         return inline
 
@@ -388,6 +392,7 @@ def generate_reference_list(
     cited_ids: list[int],
     db: Session,
     citation_style: str = "harvard",
+    linkable: bool = False,
 ) -> str:
     """Generate a formatted reference list for all cited papers.
 
@@ -395,6 +400,7 @@ def generate_reference_list(
         cited_ids: List of paper IDs that were cited in the text.
         db: SQLAlchemy database session.
         citation_style: Citation format style.
+        linkable: If True, add HTML anchor IDs for hyperlink jumping.
 
     Returns:
         Formatted reference list as markdown string.
@@ -403,12 +409,12 @@ def generate_reference_list(
         return ""
 
     papers = db.query(Paper).filter(Paper.id.in_(cited_ids)).all()
+    paper_id_map = {p.id: p for p in papers}
 
     # Sort by first author surname, then year
     def sort_key(p):
         authors = p.authors or ""
         first_author = authors.split(",")[0].split(";")[0].strip()
-        # Extract surname (last word)
         surname = first_author.split()[-1] if first_author else ""
         year = p.year or getattr(p, 'publication_year', 0) or 0
         return (surname.lower(), year)
@@ -424,7 +430,11 @@ def generate_reference_list(
 
     for idx, p in enumerate(papers, start=1):
         ref_entry = formatter.format_one(p, style=style_enum, index=idx)
-        lines.append(f"- {ref_entry}")
+        if linkable:
+            # Add anchor for hyperlink jumping from inline citations
+            lines.append(f'- <a id="ref-{p.id}"></a>{ref_entry}')
+        else:
+            lines.append(f"- {ref_entry}")
 
     return "\n".join(lines)
 
@@ -433,6 +443,7 @@ def generate_reference_list_from_map(
     paper_map: dict[int, object],
     cited_ids: list[int],
     citation_style: str = "harvard",
+    linkable: bool = False,
 ) -> str:
     """Generate reference list from pre-loaded paper map.
 
@@ -471,6 +482,10 @@ def generate_reference_list_from_map(
 
     for idx, p in enumerate(papers, start=1):
         ref_entry = formatter.format_one(p, style=style_enum, index=idx)
-        lines.append(f"- {ref_entry}")
+        pid = p.get("id") if isinstance(p, dict) else getattr(p, "id", None)
+        if linkable and pid:
+            lines.append(f'- <a id="ref-{pid}"></a>{ref_entry}')
+        else:
+            lines.append(f"- {ref_entry}")
 
     return "\n".join(lines)

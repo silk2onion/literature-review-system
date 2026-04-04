@@ -117,7 +117,11 @@ def references_json_to_markdown(refs_json: Any) -> str:
     lines = ["## References\n"]
     for item in items:
         formatted = item.get("formatted", "")
+        paper_id = item.get("paper_id")
         if formatted:
-            lines.append(f"- {formatted}")
+            if paper_id:
+                lines.append(f'- <a id="ref-{paper_id}"></a>{formatted}')
+            else:
+                lines.append(f"- {formatted}")
 
     return "\n".join(lines)

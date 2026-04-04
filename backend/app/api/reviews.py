@@ -930,15 +930,18 @@ def export_review_docx(
         logger.error(f"DOCX export failed for review {review_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"DOCX 导出失败: {e}")
 
-    # Sanitize filename
-    safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:60]
-    filename = f"{safe_title}.docx" if safe_title else f"review_{review_id}.docx"
+    # Sanitize filename — 中文需要 RFC 5987 编码
+    from urllib.parse import quote
+    safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_', '\u4e00-\u9fff')).strip()[:60]
+    fallback_name = f"review_{review_id}.docx"
+    display_name = f"{safe_title}.docx" if safe_title else fallback_name
+    encoded_name = quote(display_name)
 
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": f"attachment; filename=\"{fallback_name}\"; filename*=UTF-8''{encoded_name}",
         },
     )
 
@@ -977,15 +980,18 @@ def export_review_pdf(
         logger.error(f"PDF export failed for review {review_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"PDF 导出失败: {e}")
 
-    # Sanitize filename
-    safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()[:60]
-    filename = f"{safe_title}.pdf" if safe_title else f"review_{review_id}.pdf"
+    # Sanitize filename — 中文需要 RFC 5987 编码
+    from urllib.parse import quote
+    safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_', '\u4e00-\u9fff')).strip()[:60]
+    fallback_name = f"review_{review_id}.pdf"
+    display_name = f"{safe_title}.pdf" if safe_title else fallback_name
+    encoded_name = quote(display_name)
 
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": f"attachment; filename=\"{fallback_name}\"; filename*=UTF-8''{encoded_name}",
         },
     )
 

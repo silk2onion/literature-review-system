@@ -882,3 +882,45 @@ async def backfill_chunk_embeddings(
     except Exception as e:
         logger.error(f"Backfill chunk embeddings failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── 正式库信息补齐 ──────────────────────────────────────────
+
+
+class LibraryEnrichRequest(BaseModel):
+    ids: Optional[List[int]] = None
+    only_missing_abstract: bool = True
+
+
+@router.post("/enrich")
+async def enrich_library_papers_endpoint(
+    payload: LibraryEnrichRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    批量补齐正式文献库的 abstract 和其他元数据。
+    通过 DOI 从 CrossRef / Semantic Scholar / OpenAlex 交叉补齐。
+    """
+    from app.services.enrichment_service import enrich_library_papers
+
+    result = await enrich_library_papers(
+        db=db,
+        paper_ids=payload.ids,
+        only_missing_abstract=payload.only_missing_abstract,
+    )
+
+    return {
+        "success": True,
+        "total": result.total,
+        "enriched": result.enriched,
+        "skipped": result.skipped,
+        "failed": result.failed,
+        "details": [
+            {
+                "paper_id": d.paper_id,
+                "enriched_fields": d.enriched_fields,
+                "sources_used": d.sources_used,
+            }
+            for d in result.details
+        ],
+    }

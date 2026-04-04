@@ -316,7 +316,7 @@ export default function StagingPapersPage() {
       setTaskStatus("done");
       setTaskMessage(
         t("staging.msg.enrichComplete", { total: result.total, enriched: result.enriched }) +
-        (result.skipped_no_doi > 0 ? t("staging.msg.enrichSkippedNoDoi", { count: result.skipped_no_doi }) : "") +
+        (result.skipped > 0 ? `，${result.skipped} 篇无法补齐` : "") +
         (result.failed > 0 ? t("staging.msg.enrichFailedCount", { count: result.failed }) : ""),
       );
       setSelectedIds([]);
