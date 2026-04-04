@@ -388,10 +388,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
   return (
     <div className="phd-pipeline-page">
-      <PipelineHeader
-        reviewId={reviewId}
-        onExit={onExit}
-      />
+      <PipelineHeader reviewId={reviewId} />
 
       {error && (
         <div className="error-text" style={{ marginBottom: "20px" }}>
