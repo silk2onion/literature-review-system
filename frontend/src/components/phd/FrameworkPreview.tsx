@@ -1,4 +1,5 @@
 import React from "react";
+import { useLocale } from "../../hooks/useLocale";
 import type { Framework } from "./types";
 
 interface FrameworkPreviewProps {
@@ -18,9 +19,11 @@ const FrameworkPreview: React.FC<FrameworkPreviewProps> = ({
   onGenerate,
   onConfirm,
 }) => {
+  const { t } = useLocale();
+
   return (
     <div className="pipeline-step">
-      <h3>Step 0: Generate Review Framework</h3>
+      <h3>{t("phd.step0Title")}</h3>
       <button
         onClick={onGenerate}
         disabled={frameworkLoading || topicEmpty || frameworkConfirmed}
@@ -29,9 +32,9 @@ const FrameworkPreview: React.FC<FrameworkPreviewProps> = ({
           borderRadius: "6px",
           border: "none",
           background: frameworkConfirmed
-            ? "#334155"
+            ? "#d1d5db"
             : "linear-gradient(135deg, #8b5cf6, #6d28d9)",
-          color: "#fff",
+          color: frameworkConfirmed ? "#6b7280" : "#fff",
           fontWeight: 600,
           cursor:
             frameworkLoading || topicEmpty || frameworkConfirmed
@@ -44,15 +47,15 @@ const FrameworkPreview: React.FC<FrameworkPreviewProps> = ({
         }}
       >
         {frameworkLoading
-          ? "Generating..."
+          ? t("phd.generating")
           : frameworkConfirmed
-            ? "Framework Confirmed"
-            : "Generate Framework"}
+            ? t("phd.frameworkConfirmed")
+            : t("phd.generateFramework")}
       </button>
 
       {framework && (
         <div className="step-result" style={{ marginTop: "12px" }}>
-          <h4>{framework.title || "Review Framework"}</h4>
+          <h4 style={{ color: "var(--text-primary)" }}>{framework.title || t("phd.reviewFramework")}</h4>
           {framework.abstract_description && (
             <p
               style={{
@@ -81,9 +84,9 @@ const FrameworkPreview: React.FC<FrameworkPreviewProps> = ({
                   key={idx}
                   style={{
                     padding: "10px 14px",
-                    backgroundColor: "#1e293b",
-                    borderRadius: "6px",
-                    border: "1px solid #334155",
+                    backgroundColor: "#f8fafc",
+                    borderRadius: "8px",
+                    border: "1px solid #e2e8f0",
                   }}
                 >
                   <div
@@ -94,7 +97,7 @@ const FrameworkPreview: React.FC<FrameworkPreviewProps> = ({
                       marginBottom: "4px",
                     }}
                   >
-                    <strong style={{ color: "#e2e8f0", fontSize: "14px" }}>
+                    <strong style={{ color: "#1e293b", fontSize: "14px" }}>
                       {sec.id}. {sec.title}
                     </strong>
                   </div>
@@ -121,11 +124,11 @@ const FrameworkPreview: React.FC<FrameworkPreviewProps> = ({
                           key={ki}
                           style={{
                             padding: "2px 8px",
-                            backgroundColor: "rgba(139, 92, 246, 0.2)",
-                            border: "1px solid rgba(139, 92, 246, 0.4)",
+                            backgroundColor: "rgba(139, 92, 246, 0.08)",
+                            border: "1px solid rgba(139, 92, 246, 0.25)",
                             borderRadius: "12px",
                             fontSize: "11px",
-                            color: "#c4b5fd",
+                            color: "#7c3aed",
                           }}
                         >
                           {kw}
@@ -152,7 +155,7 @@ const FrameworkPreview: React.FC<FrameworkPreviewProps> = ({
                   cursor: "pointer",
                 }}
               >
-                Confirm Framework
+                {t("phd.confirmFramework")}
               </button>
               <button
                 onClick={onGenerate}
@@ -160,13 +163,13 @@ const FrameworkPreview: React.FC<FrameworkPreviewProps> = ({
                 style={{
                   padding: "8px 16px",
                   borderRadius: "6px",
-                  border: "1px solid #334155",
+                  border: "1px solid #e2e8f0",
                   background: "transparent",
                   color: "#94a3b8",
                   cursor: "pointer",
                 }}
               >
-                Regenerate
+                {t("phd.regenerate")}
               </button>
             </div>
           )}

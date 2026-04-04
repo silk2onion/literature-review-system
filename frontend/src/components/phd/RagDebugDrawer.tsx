@@ -17,11 +17,11 @@ const RagDebugDrawer: React.FC<RagDebugDrawerProps> = ({ show, onClose }) => {
         right: 0,
         width: "600px",
         height: "100vh",
-        backgroundColor: "#0f172a",
-        borderLeft: "1px solid #334155",
+        backgroundColor: "#ffffff",
+        borderLeft: "1px solid #e2e8f0",
         zIndex: 1000,
         overflowY: "auto",
-        boxShadow: "-4px 0 15px rgba(0,0,0,0.5)",
+        boxShadow: "-4px 0 15px rgba(0,0,0,0.08)",
         padding: "20px",
         boxSizing: "border-box",
       }}
@@ -43,7 +43,7 @@ const RagDebugDrawer: React.FC<RagDebugDrawerProps> = ({ show, onClose }) => {
             fontSize: "20px",
           }}
         >
-          ×
+          x
         </button>
       </div>
       <SemanticSearchDebugPanel />

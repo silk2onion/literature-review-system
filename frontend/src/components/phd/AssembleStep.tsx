@@ -1,6 +1,7 @@
 import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useLocale } from "../../hooks/useLocale";
 import type { AssembleStats } from "./types";
 
 interface AssembleStepProps {
@@ -24,11 +25,13 @@ const AssembleStep: React.FC<AssembleStepProps> = ({
   fullReviewMarkdown,
   onAssemble,
 }) => {
+  const { t } = useLocale();
+
   return (
     <div className="pipeline-step">
-      <h3>Step 4: Assemble Complete Review</h3>
+      <h3>{t("phd.step4Title")}</h3>
       <p style={{ color: "#94a3b8", fontSize: "13px", marginBottom: "12px" }}>
-        Combine all rendered sections and generate a reference list.
+        {t("phd.step4Desc")}
       </p>
       <div
         style={{
@@ -39,17 +42,17 @@ const AssembleStep: React.FC<AssembleStepProps> = ({
         }}
       >
         <label style={{ color: "#9ca3af", fontSize: "13px" }}>
-          Citation Style:
+          {t("phd.citationStyle")}
         </label>
         <select
           value={citationStyle}
           onChange={(e) => onCitationStyleChange(e.target.value)}
           style={{
             padding: "6px 10px",
-            borderRadius: "4px",
-            border: "1px solid #334155",
-            backgroundColor: "#1e293b",
-            color: "#fff",
+            borderRadius: "8px",
+            border: "1px solid #e2e8f0",
+            backgroundColor: "#ffffff",
+            color: "#1e293b",
           }}
         >
           <option value="harvard">Harvard</option>
@@ -67,9 +70,9 @@ const AssembleStep: React.FC<AssembleStepProps> = ({
           borderRadius: "6px",
           border: "none",
           background: assembleStats
-            ? "#334155"
+            ? "#d1d5db"
             : "linear-gradient(135deg, #ec4899, #be185d)",
-          color: "#fff",
+          color: assembleStats ? "#6b7280" : "#fff",
           fontWeight: 600,
           cursor:
             assembleLoading || (!finalRender && !reviewId)
@@ -79,16 +82,18 @@ const AssembleStep: React.FC<AssembleStepProps> = ({
         }}
       >
         {assembleLoading
-          ? "Assembling..."
+          ? t("phd.assembling")
           : assembleStats
-            ? "Assembly Complete"
-            : "Assemble Full Review"}
+            ? t("phd.assemblyComplete")
+            : t("phd.assembleFullReview")}
       </button>
 
       {assembleStats && (
         <div style={{ marginTop: "8px", color: "#10b981", fontSize: "13px" }}>
-          Assembled {assembleStats.sections} sections, {assembleStats.cited}{" "}
-          papers cited.
+          {t("phd.assembledStats", {
+            sections: assembleStats.sections,
+            cited: assembleStats.cited,
+          })}
         </div>
       )}
 
@@ -102,7 +107,7 @@ const AssembleStep: React.FC<AssembleStepProps> = ({
               marginBottom: "8px",
             }}
           >
-            <h4>Complete Review:</h4>
+            <h4 style={{ color: "var(--text-primary)" }}>{t("phd.completeReview")}:</h4>
             <button
               onClick={() => {
                 const blob = new Blob([fullReviewMarkdown], {
@@ -118,14 +123,14 @@ const AssembleStep: React.FC<AssembleStepProps> = ({
               style={{
                 padding: "6px 14px",
                 borderRadius: "6px",
-                border: "1px solid #334155",
+                border: "1px solid #e2e8f0",
                 background: "transparent",
-                color: "#60a5fa",
+                color: "#3b82f6",
                 cursor: "pointer",
                 fontSize: "13px",
               }}
             >
-              Download .md
+              {t("phd.downloadMd")}
             </button>
           </div>
           <div
@@ -133,9 +138,9 @@ const AssembleStep: React.FC<AssembleStepProps> = ({
               maxHeight: "500px",
               overflow: "auto",
               padding: "16px",
-              backgroundColor: "#0f172a",
+              backgroundColor: "#f8fafc",
               borderRadius: "8px",
-              border: "1px solid #1e293b",
+              border: "1px solid #e2e8f0",
             }}
           >
             <ReactMarkdown remarkPlugins={[remarkGfm]}>

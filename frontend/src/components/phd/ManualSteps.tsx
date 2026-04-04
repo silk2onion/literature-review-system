@@ -1,6 +1,7 @@
 import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useLocale } from "../../hooks/useLocale";
 import type { Claim, ClaimWithEvidence } from "./types";
 
 interface ManualStepsProps {
@@ -28,27 +29,29 @@ const ManualSteps: React.FC<ManualStepsProps> = ({
   onRenderSection,
   onExportMarkdown,
 }) => {
+  const { t } = useLocale();
+
   return (
     <>
       {/* Step 1: Generate Claims */}
       <div className="pipeline-step">
-        <h3>步骤 1: 生成主张 (Claims)</h3>
+        <h3>{t("phd.step1Title")}</h3>
         <button
           onClick={onGenerateClaims}
           disabled={loading || claims.length > 0}
         >
-          {loading && step === 1 ? "生成中..." : "开始生成主张"}
+          {loading && step === 1 ? t("phd.generatingClaims") : t("phd.startGenerateClaims")}
         </button>
         {claims.length > 0 && (
           <div className="step-result">
-            <h4>生成的主张 ({claims.length}):</h4>
+            <h4 style={{ color: "var(--text-primary)" }}>{t("phd.generatedClaims")} ({claims.length}):</h4>
             <div className="claims-grid">
               {claims.map((claim) => (
                 <div key={claim.id} className="claim-card">
                   <p>{claim.text}</p>
                   <div className="claim-meta">
-                    <span>主题: {claim.topic}</span>
-                    <span>子主题: {claim.sub_topic}</span>
+                    <span>{t("phd.topic")}: {claim.topic}</span>
+                    <span>{t("phd.subTopic")}: {claim.sub_topic}</span>
                   </div>
                 </div>
               ))}
@@ -59,29 +62,29 @@ const ManualSteps: React.FC<ManualStepsProps> = ({
 
       {/* Step 2: Attach Evidence */}
       <div className="pipeline-step">
-        <h3>步骤 2: 关联证据 (Evidence)</h3>
+        <h3>{t("phd.step2Title")}</h3>
         <button
           onClick={onAttachEvidence}
           disabled={
             loading || claims.length === 0 || claimsWithEvidence.length > 0
           }
         >
-          {loading && step === 2 ? "关联中..." : "为上述主张关联证据"}
+          {loading && step === 2 ? t("phd.attachingEvidence") : t("phd.attachEvidence")}
         </button>
         {claimsWithEvidence.length > 0 && (
           <div className="step-result">
-            <h4>带证据的主张 ({claimsWithEvidence.length}):</h4>
+            <h4 style={{ color: "var(--text-primary)" }}>{t("phd.claimsWithEvidence")} ({claimsWithEvidence.length}):</h4>
             <div className="claims-with-evidence-list">
               {claimsWithEvidence.map((claim) => (
                 <div key={claim.id} className="claim-with-evidence-card">
                   <div className="claim-card-content">
                     <p>{claim.text}</p>
                     <div className="claim-meta">
-                      <span>主题: {claim.topic}</span>
-                      <span>子主题: {claim.sub_topic}</span>
+                      <span>{t("phd.topic")}: {claim.topic}</span>
+                      <span>{t("phd.subTopic")}: {claim.sub_topic}</span>
                     </div>
                   </div>
-                  <h5>关联证据 ({claim.evidence.length}):</h5>
+                  <h5>{t("phd.relatedEvidence")} ({claim.evidence.length}):</h5>
                   <ul className="evidence-list">
                     {claim.evidence.map((paper) => (
                       <li key={paper.id} className="evidence-item">
@@ -101,18 +104,18 @@ const ManualSteps: React.FC<ManualStepsProps> = ({
 
       {/* Step 3: Render Section */}
       <div className="pipeline-step">
-        <h3>步骤 3: 渲染最终综述</h3>
+        <h3>{t("phd.step3Title")}</h3>
         <button
           onClick={onRenderSection}
           disabled={
             loading || claimsWithEvidence.length === 0 || !!finalRender
           }
         >
-          {loading && step === 3 ? "渲染中..." : "渲染最终综述章节"}
+          {loading && step === 3 ? t("phd.rendering") : t("phd.renderSection")}
         </button>
         {finalRender && (
           <div className="step-result">
-            <h4>最终综述:</h4>
+            <h4 style={{ color: "var(--text-primary)" }}>{t("phd.finalReview")}:</h4>
             <div className="final-render-container prose prose-invert max-w-none">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {finalRender}
@@ -139,7 +142,7 @@ const ManualSteps: React.FC<ManualStepsProps> = ({
                   opacity: exportLoading ? 0.7 : 1,
                 }}
               >
-                {exportLoading ? "导出中..." : "导出 Markdown"}
+                {exportLoading ? t("phd.exporting") : t("phd.exportMarkdown")}
               </button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import React from "react";
+import { useLocale } from "../../hooks/useLocale";
 
 interface PipelineHeaderProps {
   reviewId: number | null;
@@ -13,6 +14,8 @@ const PipelineHeader: React.FC<PipelineHeaderProps> = ({
   onToggleRagDebug,
   onExit,
 }) => {
+  const { t } = useLocale();
+
   return (
     <div
       style={{
@@ -23,10 +26,10 @@ const PipelineHeader: React.FC<PipelineHeaderProps> = ({
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-        <h2>PhD 级多阶段综述管线</h2>
+        <h2 style={{ color: "var(--text-primary)", margin: 0 }}>{t("phd.title")}</h2>
         {reviewId && (
-          <span style={{ fontSize: "12px", opacity: 0.7 }}>
-            当前综述 ID: {reviewId}
+          <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+            {t("phd.currentReviewId")} {reviewId}
           </span>
         )}
       </div>
@@ -38,17 +41,17 @@ const PipelineHeader: React.FC<PipelineHeaderProps> = ({
             borderRadius: "6px",
             border: "1px solid #3b82f6",
             backgroundColor: showRagDebug
-              ? "rgba(59, 130, 246, 0.2)"
+              ? "rgba(59, 130, 246, 0.08)"
               : "transparent",
             color: "#3b82f6",
             cursor: "pointer",
             fontSize: "13px",
           }}
         >
-          {showRagDebug ? "关闭 RAG 调试" : "RAG 调试"}
+          {showRagDebug ? t("phd.closeRagDebug") : t("phd.ragDebug")}
         </button>
         <button onClick={onExit} className="link-button">
-          返回综述助手
+          {t("phd.backToAssistant")}
         </button>
       </div>
     </div>

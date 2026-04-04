@@ -1,4 +1,5 @@
 import React from "react";
+import { useLocale } from "../../hooks/useLocale";
 import type { AutoSearchResult } from "./types";
 
 interface SearchResultsPanelProps {
@@ -20,15 +21,17 @@ const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
   autoSearchResults,
   onAutoSearch,
 }) => {
+  const { t } = useLocale();
+
   return (
     <div className="pipeline-step">
-      <h3>Step 0.5: Auto-Search Literature</h3>
+      <h3>{t("phd.step05Title")}</h3>
       <p
         style={{ color: "#94a3b8", fontSize: "13px", marginBottom: "12px" }}
       >
         {frameworkConfirmed
-          ? "Framework confirmed. Search papers for each section using its keywords."
-          : "Generate and confirm a framework first."}
+          ? t("phd.step05ConfirmedDesc")
+          : t("phd.step05PendingDesc")}
       </p>
       <div
         style={{
@@ -39,17 +42,17 @@ const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
         }}
       >
         <label style={{ color: "#9ca3af", fontSize: "13px" }}>
-          Papers per section:
+          {t("phd.papersPerSection")}
         </label>
         <select
           value={papersPerSection}
           onChange={(e) => onPapersPerSectionChange(parseInt(e.target.value))}
           style={{
             padding: "6px 10px",
-            borderRadius: "4px",
-            border: "1px solid #334155",
-            backgroundColor: "#1e293b",
-            color: "#fff",
+            borderRadius: "8px",
+            border: "1px solid #e2e8f0",
+            backgroundColor: "#ffffff",
+            color: "#1e293b",
           }}
         >
           <option value={5}>5</option>
@@ -69,9 +72,9 @@ const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
           borderRadius: "6px",
           border: "none",
           background: autoSearchDone
-            ? "#334155"
+            ? "#d1d5db"
             : "linear-gradient(135deg, #f59e0b, #d97706)",
-          color: "#fff",
+          color: autoSearchDone ? "#6b7280" : "#fff",
           fontWeight: 600,
           cursor:
             autoSearchLoading || !frameworkConfirmed || autoSearchDone
@@ -84,15 +87,15 @@ const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
         }}
       >
         {autoSearchLoading
-          ? "Searching..."
+          ? t("phd.searching")
           : autoSearchDone
-            ? "Search Complete"
-            : "Auto-Search Papers"}
+            ? t("phd.searchComplete")
+            : t("phd.autoSearch")}
       </button>
 
       {autoSearchResults.length > 0 && (
         <div className="step-result" style={{ marginTop: "12px" }}>
-          <h4>Search Results:</h4>
+          <h4 style={{ color: "var(--text-primary)" }}>{t("phd.searchResults")}</h4>
           <div
             style={{ display: "flex", flexDirection: "column", gap: "6px" }}
           >
@@ -104,12 +107,12 @@ const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
                     display: "flex",
                     justifyContent: "space-between",
                     padding: "8px 12px",
-                    backgroundColor: "#1e293b",
-                    borderRadius: "6px",
-                    border: "1px solid #334155",
+                    backgroundColor: "#f8fafc",
+                    borderRadius: "8px",
+                    border: "1px solid #e2e8f0",
                   }}
                 >
-                  <span style={{ color: "#e2e8f0", fontSize: "13px" }}>
+                  <span style={{ color: "#1e293b", fontSize: "13px" }}>
                     {r.section_title}
                   </span>
                   <span
@@ -120,8 +123,8 @@ const SearchResultsPanel: React.FC<SearchResultsPanelProps> = ({
                     }}
                   >
                     {r.error
-                      ? "Error"
-                      : `+${r.new_papers} new (${r.fetched || 0} total)`}
+                      ? t("phd.error")
+                      : `+${r.new_papers} ${t("phd.newPapers")} (${r.fetched || 0} ${t("phd.total")})`}
                   </span>
                 </div>
               ),

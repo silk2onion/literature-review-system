@@ -1,4 +1,5 @@
 import React from "react";
+import { useLocale } from "../../hooks/useLocale";
 import { AsyncTaskPanel } from "../../AsyncTaskPanel";
 
 interface AsyncPipelineStepProps {
@@ -16,13 +17,15 @@ const AsyncPipelineStep: React.FC<AsyncPipelineStepProps> = ({
   sources,
   citationStyle,
 }) => {
+  const { t } = useLocale();
+
   return (
     <>
       <div className="pipeline-step">
         <div style={{ marginBottom: "8px" }}>
-          <h3 style={{ marginBottom: "4px" }}>🤖 全自动一键模式（推荐）</h3>
+          <h3 style={{ marginBottom: "4px" }}>{t("phd.autoModeTitle")}</h3>
           <p style={{ color: "#94a3b8", fontSize: "13px", margin: 0 }}>
-            全流程自动完成 · 后台运行 · 失败自动重试 · 实时进度
+            {t("phd.autoModeDesc")}
           </p>
         </div>
         <AsyncTaskPanel
@@ -43,15 +46,15 @@ const AsyncPipelineStep: React.FC<AsyncPipelineStepProps> = ({
           style={{
             padding: "8px 14px",
             background: "rgba(148,163,184,0.05)",
-            border: "1px dashed #334155",
+            border: "1px dashed #e2e8f0",
             borderRadius: "8px",
-            color: "#475569",
+            color: "#94a3b8",
             fontSize: "12px",
             marginBottom: "12px",
             textAlign: "center",
           }}
         >
-          — 或选择下面的手动分步控制模式 —
+          {t("phd.orManualMode")}
         </div>
       </div>
     </>

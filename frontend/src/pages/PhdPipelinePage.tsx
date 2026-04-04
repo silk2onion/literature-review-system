@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { API_BASE_URL } from "../api/config";
+import { useLocale } from "../hooks/useLocale";
 import {
   PipelineHeader,
   StepConfigForm,
@@ -44,6 +45,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   onExit,
   embedded: _embedded = false, // eslint-disable-line @typescript-eslint/no-unused-vars
 }) => {
+  const { t } = useLocale();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -135,7 +137,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
   const handleStep05_AutoSearch = async () => {
     if (!framework || !framework.sections) {
-      setError("Please generate and confirm a framework first.");
+      setError(t("phd.errorNoFramework"));
       return;
     }
     setAutoSearchLoading(true);
@@ -172,7 +174,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
   const handleStep4_Assemble = async () => {
     if (!finalRender && !reviewId) {
-      setError("Please complete rendering before assembly.");
+      setError(t("phd.errorCompleteRenderFirst"));
       return;
     }
     setAssembleLoading(true);
@@ -267,7 +269,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
   const handleStep2_AttachEvidence = async () => {
     if (!reviewId) {
-      setError("Cannot proceed to step 2 without a review ID from step 1.");
+      setError(t("phd.errorNoReviewId"));
       return;
     }
     setLoading(true);
@@ -300,7 +302,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
   const handleStep3_RenderSection = async () => {
     if (!reviewId) {
-      setError("Cannot proceed to step 3 without a review ID.");
+      setError(t("phd.errorNoReviewId"));
       return;
     }
     setLoading(true);
@@ -336,7 +338,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
   const handleExportMarkdown = async () => {
     if (!reviewId) {
-      setError("当前还没有可导出的综述，请先完成前面的生成步骤。");
+      setError(t("phd.errorNoExportableReview"));
       return;
     }
     setExportLoading(true);
@@ -357,7 +359,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
       if (!res.ok) {
         const errorText = await res.text();
-        throw new Error(errorText || `导出失败，状态码 ${res.status}`);
+        throw new Error(errorText || `Export failed: ${res.status}`);
       }
 
       const data = await res.json();
@@ -397,7 +399,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
       {error && (
         <div className="error-text" style={{ marginBottom: "20px" }}>
-          错误：{error}
+          {t("phd.errorLabel")}{error}
         </div>
       )}
 

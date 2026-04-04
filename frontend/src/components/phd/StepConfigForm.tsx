@@ -1,4 +1,5 @@
 import React from "react";
+import { useLocale } from "../../hooks/useLocale";
 
 interface StepConfigFormProps {
   topic: string;
@@ -35,40 +36,42 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
   onSortByChange,
   groupId,
 }) => {
+  const { t } = useLocale();
+
   return (
     <div
       style={{
         marginBottom: "24px",
-        padding: "16px",
-        backgroundColor: "#0f172a",
-        borderRadius: "8px",
-        border: "1px solid #1f2937",
+        padding: "20px",
+        backgroundColor: "#f8fafc",
+        borderRadius: "12px",
+        border: "1px solid #e2e8f0",
       }}
     >
-      <h3 style={{ marginTop: 0, marginBottom: "16px", fontSize: "16px" }}>
-        管线配置
+      <h3 style={{ marginTop: 0, marginBottom: "16px", fontSize: "16px", color: "var(--text-primary)" }}>
+        {t("phd.config")}
       </h3>
 
       {groupId ? (
         <div
           style={{
             padding: "12px",
-            backgroundColor: "rgba(59, 130, 246, 0.1)",
-            border: "1px solid rgba(59, 130, 246, 0.3)",
-            borderRadius: "6px",
+            backgroundColor: "rgba(59, 130, 246, 0.06)",
+            border: "1px solid rgba(59, 130, 246, 0.2)",
+            borderRadius: "8px",
             marginBottom: "16px",
-            color: "#93c5fd",
+            color: "#1e40af",
             fontSize: "14px",
           }}
         >
-          <strong>已选择文献分组 (ID: {groupId})</strong>
+          <strong>{t("phd.groupSelected")} (ID: {groupId})</strong>
           <p style={{ margin: "4px 0 0 0", fontSize: "13px", opacity: 0.9 }}>
-            将直接使用该分组下的文献生成综述。您可以调整下方的"文献数量上限"和"排序策略"来控制上下文长度。
+            {t("phd.groupSelectedDesc")}
           </p>
         </div>
       ) : null}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
         <div
           style={{
             opacity: groupId ? 0.5 : 1,
@@ -80,10 +83,10 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
               display: "block",
               fontSize: "13px",
               color: "#9ca3af",
-              marginBottom: "4px",
+              marginBottom: "6px",
             }}
           >
-            Research Topic (Step 0)
+            {t("phd.researchTopic")}
           </label>
           <input
             value={topic}
@@ -91,11 +94,11 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
             placeholder="e.g., Transit-Oriented Development and Cultural Heritage"
             style={{
               width: "100%",
-              padding: "8px",
-              borderRadius: "4px",
-              border: "1px solid #334155",
-              backgroundColor: "#1e293b",
-              color: "#fff",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              backgroundColor: "#ffffff",
+              color: "#1e293b",
               boxSizing: "border-box",
             }}
           />
@@ -111,21 +114,21 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
               display: "block",
               fontSize: "13px",
               color: "#9ca3af",
-              marginBottom: "4px",
+              marginBottom: "6px",
             }}
           >
-            Keywords (comma-separated)
+            {t("phd.keywords")}
           </label>
           <input
             value={keywords}
             onChange={(e) => onKeywordsChange(e.target.value)}
             style={{
               width: "100%",
-              padding: "8px",
-              borderRadius: "4px",
-              border: "1px solid #334155",
-              backgroundColor: "#1e293b",
-              color: "#fff",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              backgroundColor: "#ffffff",
+              color: "#1e293b",
               boxSizing: "border-box",
             }}
           />
@@ -143,10 +146,10 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
               display: "block",
               fontSize: "13px",
               color: "#9ca3af",
-              marginBottom: "4px",
+              marginBottom: "6px",
             }}
           >
-            数据源
+            {t("phd.dataSources")}
           </label>
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
             {[
@@ -162,7 +165,7 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
                   display: "flex",
                   alignItems: "center",
                   gap: "6px",
-                  color: "#fff",
+                  color: "#1e293b",
                   fontSize: "13px",
                   cursor: "pointer",
                 }}
@@ -178,7 +181,7 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
                     }
                   }}
                 />
-                {src === "local_rag" ? "本地 RAG (增强)" : src}
+                {src === "local_rag" ? t("phd.localRag") : src}
               </label>
             ))}
           </div>
@@ -196,10 +199,10 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
                 display: "block",
                 fontSize: "13px",
                 color: "#9ca3af",
-                marginBottom: "4px",
+                marginBottom: "6px",
               }}
             >
-              起始年份
+              {t("phd.yearFrom")}
             </label>
             <input
               type="number"
@@ -208,11 +211,11 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
               placeholder="2015"
               style={{
                 width: "100px",
-                padding: "8px",
-                borderRadius: "4px",
-                border: "1px solid #334155",
-                backgroundColor: "#1e293b",
-                color: "#fff",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                backgroundColor: "#ffffff",
+                color: "#1e293b",
               }}
             />
           </div>
@@ -227,10 +230,10 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
                 display: "block",
                 fontSize: "13px",
                 color: "#9ca3af",
-                marginBottom: "4px",
+                marginBottom: "6px",
               }}
             >
-              结束年份
+              {t("phd.yearTo")}
             </label>
             <input
               type="number"
@@ -239,11 +242,11 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
               placeholder="2025"
               style={{
                 width: "100px",
-                padding: "8px",
-                borderRadius: "4px",
-                border: "1px solid #334155",
-                backgroundColor: "#1e293b",
-                color: "#fff",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                backgroundColor: "#ffffff",
+                color: "#1e293b",
               }}
             />
           </div>
@@ -253,10 +256,10 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
                 display: "block",
                 fontSize: "13px",
                 color: "#9ca3af",
-                marginBottom: "4px",
+                marginBottom: "6px",
               }}
             >
-              文献数量上限
+              {t("phd.paperLimit")}
             </label>
             <input
               type="number"
@@ -264,11 +267,11 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
               onChange={(e) => onPaperLimitChange(e.target.value)}
               style={{
                 width: "100px",
-                padding: "8px",
-                borderRadius: "4px",
-                border: "1px solid #334155",
-                backgroundColor: "#1e293b",
-                color: "#fff",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                backgroundColor: "#ffffff",
+                color: "#1e293b",
               }}
             />
           </div>
@@ -278,27 +281,27 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
                 display: "block",
                 fontSize: "13px",
                 color: "#9ca3af",
-                marginBottom: "4px",
+                marginBottom: "6px",
               }}
             >
-              排序策略
+              {t("phd.sortStrategy")}
             </label>
             <select
               value={sortBy}
               onChange={(e) => onSortByChange(e.target.value)}
               style={{
                 width: "140px",
-                padding: "8px",
-                borderRadius: "4px",
-                border: "1px solid #334155",
-                backgroundColor: "#1e293b",
-                color: "#fff",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                backgroundColor: "#ffffff",
+                color: "#1e293b",
               }}
             >
-              <option value="year_desc">年份 (降序)</option>
-              <option value="year_asc">年份 (升序)</option>
-              <option value="citations_desc">引用数 (降序)</option>
-              <option value="random">随机</option>
+              <option value="year_desc">{t("phd.sortYearDesc")}</option>
+              <option value="year_asc">{t("phd.sortYearAsc")}</option>
+              <option value="citations_desc">{t("phd.sortCitationsDesc")}</option>
+              <option value="random">{t("phd.sortRandom")}</option>
             </select>
           </div>
         </div>
