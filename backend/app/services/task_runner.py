@@ -942,12 +942,18 @@ class PipelineTaskRunner:
         sem = get_semantic_search_service()
         pipeline = SectionReviewPipelineService(db=self.db, llm_service=llm, semantic_search_service=sem)
 
-        for i, (sec_id, claims) in enumerate(sections_map.items()):
+        prev_summary = ""
+        section_items = list(sections_map.items())
+
+        import re as _re
+        def _is_discussion(title: str) -> bool:
+            return bool(_re.search(r'讨论|总结|结论|展望|discussion|conclusion|future|summary', title, _re.IGNORECASE))
+
+        for i, (sec_id, claims) in enumerate(section_items):
             if step:
                 step.message = f"渲染第 {i+1}/{total_sections} 节..."
             self._emit("step_update", self.task.to_dict())
 
-            # Fallback for section_title if it's missing or None
             sec_title = getattr(claims[0], "section_title", None) or f"Section {i+1}"
             mini_table = SectionClaimTable(
                 section_id=str(sec_id),
@@ -955,11 +961,26 @@ class PipelineTaskRunner:
                 claims=claims,
             )
 
-            async def _call(tbl=mini_table):
+            # 讨论/结论章节或最后一章：传全文各章节汇总
+            is_last = (i == len(section_items) - 1)
+            is_disc = _is_discussion(str(sec_title))
+            all_summary = None
+            if (is_disc or is_last) and self._rendered_sections:
+                all_summary = "\n\n".join(
+                    f"【{s['section_title']}】{s['text'][:300]}..."
+                    for s in self._rendered_sections
+                )
+
+            _prev = prev_summary or None
+            _all = all_summary
+
+            async def _call(tbl=mini_table, ps=_prev, als=_all):
                 return await pipeline.render_section_from_claims(
                     table=tbl,
                     language=self.task.language,
                     review_id=self.task.review_id,
+                    previous_sections_summary=ps,
+                    all_sections_summary=als,
                 )
 
             try:
@@ -972,6 +993,8 @@ class PipelineTaskRunner:
                     "citation_map": rendered.citation_map or {},
                 })
                 self._all_citation_map.update(rendered.citation_map or {})
+                # 累积前文摘要
+                prev_summary += f"【{sec_title}】{rendered.text[:200]}...\n"
             except Exception as e:
                 logger.warning(f"[Task] Render failed for section {sec_id}: {e}")
                 self._rendered_sections.append({

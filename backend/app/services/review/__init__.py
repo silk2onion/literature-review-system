@@ -297,6 +297,8 @@ class SectionReviewPipelineService:
         language: str = "zh-CN",
         citation_start_index: int = 1,
         review_id: Optional[int] = None,
+        previous_sections_summary: Optional[str] = None,
+        all_sections_summary: Optional[str] = None,
     ) -> RenderedSection:
         """
         Render section text from claim-evidence table.
@@ -405,6 +407,32 @@ class SectionReviewPipelineService:
             prompt_template = RENDER_SECTION_FROM_CLAIMS_PROMPT_ZH
 
         prompt = prompt_template.format(claims_payload=claims_payload)
+
+        # 注入上下文：前面章节的摘要（章节间连贯性）
+        if previous_sections_summary:
+            context_block = (
+                "\n\n【前面章节内容摘要（请确保本章节与之衔接，避免重复���述）】\n"
+                f"{previous_sections_summary}\n"
+                "请在本章节开头用一句过渡语自然承接前文。\n"
+            ) if language.lower() != "en" else (
+                "\n\n【Summary of Previous Sections (ensure this section connects naturally, avoid repetition)】\n"
+                f"{previous_sections_summary}\n"
+                "Begin this section with a transitional sentence linking to the previous content.\n"
+            )
+            prompt += context_block
+
+        # 讨论/结论章节：注入全局摘要
+        if all_sections_summary:
+            global_block = (
+                "\n\n【全文各章节核心发现汇总（请基于此进行综合讨论与批判性分析）】\n"
+                f"{all_sections_summary}\n"
+                "本章节��：1) 综合比较各章节发现的共识与矛盾；2) 指出方法论局限；3) 提出研究空白和未来方向。\n"
+            ) if language.lower() != "en" else (
+                "\n\n【Summary of All Sections (synthesize for discussion and critical analysis)】\n"
+                f"{all_sections_summary}\n"
+                "This section should: 1) Compare and contrast findings across sections; 2) Identify methodological limitations; 3) Propose research gaps and future directions.\n"
+            )
+            prompt += global_block
 
         try:
             result = await self.llm_service.complete_json(

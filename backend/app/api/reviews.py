@@ -308,6 +308,8 @@ async def render_section_from_table(
             language=payload.language,
             citation_start_index=payload.citation_start_index,
             review_id=payload.review_id,
+            previous_sections_summary=payload.previous_sections_summary,
+            all_sections_summary=payload.all_sections_summary,
         )
         return RenderSectionFromClaimsResponse(
             section_id=payload.section_claim_table.section_id,

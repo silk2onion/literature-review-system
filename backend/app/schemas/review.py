@@ -326,6 +326,8 @@ class RenderSectionFromClaimsRequest(BaseModel):
     section_claim_table: SectionClaimTable
     language: str = Field(default="zh-CN", description="输出语言，例如 zh-CN 或 en")
     citation_start_index: int = Field(default=1, ge=1, description="引用编号起始值")
+    previous_sections_summary: Optional[str] = Field(default=None, description="前面章节的摘要，用于章节间连贯过渡")
+    all_sections_summary: Optional[str] = Field(default=None, description="全文各章节核心发现汇总，用于讨论/结论章节")
 
 
 class RenderSectionFromClaimsResponse(BaseModel):

@@ -110,11 +110,17 @@ class ReviewOrchestrationService:
         # --- Step 3: 确保 embedding 存在 ---
         await self._ensure_embeddings()
 
-        # --- Step 4: 按节生成综述正文 ---
+        # --- Step 4: 按节生成综述正文（递归上下文传递） ---
         sections: List[SectionResult] = []
         all_cited_paper_ids: Set[int] = set()
+        prev_summary = ""
+        total_fw_sections = len(framework.sections)
 
-        for section in framework.sections:
+        import re as _re
+        def _is_discussion(title: str) -> bool:
+            return bool(_re.search(r'讨论|总结|结论|展望|discussion|conclusion|future|summary', title, _re.IGNORECASE))
+
+        for idx, section in enumerate(framework.sections):
             papers = section_papers.get(section.id, [])
             if not papers:
                 logger.warning(f"[Orchestrate] No papers for section {section.id}, skipping generation")
@@ -126,14 +132,30 @@ class ReviewOrchestrationService:
                 ))
                 continue
 
+            # 讨论/结论章节或最后一章：传全文汇总
+            is_last = (idx == total_fw_sections - 1)
+            is_disc = _is_discussion(section.title)
+            all_summary = None
+            if (is_disc or is_last) and sections:
+                all_summary = "\n\n".join(
+                    f"【{s.section_title}】{s.text[:300]}..."
+                    for s in sections if s.text and not s.text.startswith("*")
+                )
+
             result = await self._generate_section(
                 section=section,
                 papers=papers,
                 language=request.language,
                 citation_style=request.citation_style,
+                previous_sections_summary=prev_summary or None,
+                all_sections_summary=all_summary,
             )
             sections.append(result)
             all_cited_paper_ids.update(result.cited_paper_ids)
+
+            # 累积前文摘要
+            if result.text and not result.text.startswith("*"):
+                prev_summary += f"【{section.title}】{result.text[:200]}...\n"
 
         # --- Step 5: 构建参考文献列表 ---
         cited_papers = self._load_papers_by_ids(list(all_cited_paper_ids))
@@ -335,6 +357,8 @@ class ReviewOrchestrationService:
         papers: List[Any],
         language: str = "zh-CN",
         citation_style: str = "harvard",
+        previous_sections_summary: Optional[str] = None,
+        all_sections_summary: Optional[str] = None,
     ) -> SectionResult:
         """为单个章节生成综述正文（双层 RAG：chunk 优先 → paper 回退）
 
@@ -419,6 +443,37 @@ class ReviewOrchestrationService:
             section_description=section.description,
             papers_context=context_block,
         )
+
+        # 注入上下文
+        if previous_sections_summary:
+            lang_key = language[:2]
+            if lang_key == "zh":
+                prompt += (
+                    f"\n\n【前面章节内容摘要（请确保本章节与之衔接，避免重复论述）】\n"
+                    f"{previous_sections_summary}\n"
+                    f"请在本章节开头用一句过渡语自然承接前文。\n"
+                )
+            else:
+                prompt += (
+                    f"\n\n【Summary of Previous Sections (connect naturally, avoid repetition)】\n"
+                    f"{previous_sections_summary}\n"
+                    f"Begin with a transitional sentence linking to previous content.\n"
+                )
+
+        if all_sections_summary:
+            lang_key = language[:2]
+            if lang_key == "zh":
+                prompt += (
+                    f"\n\n【全文各章节核心发现汇总（请基于此进行综合讨论与批判性分析）】\n"
+                    f"{all_sections_summary}\n"
+                    f"本章节应：1) 综合比较各章节发现的共识与矛盾；2) 指出方法论局限；3) 提出研究空白和未来方向。\n"
+                )
+            else:
+                prompt += (
+                    f"\n\n【Summary of All Sections (synthesize for critical analysis)】\n"
+                    f"{all_sections_summary}\n"
+                    f"This section should: 1) Compare findings; 2) Identify limitations; 3) Propose future directions.\n"
+                )
 
         # 从学科配置获取基础 system_prompt，追加引用指令
         base_section_prompt = get_section_system_prompt(self.db)

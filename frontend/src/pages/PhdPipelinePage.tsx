@@ -376,37 +376,98 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
     setStep(3);
 
     try {
-      const res = await fetch(
-        `${API_BASE_URL}/api/reviews/phd/render-section`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            review_id: reviewId,
-            section_claim_table: sectionClaimTable,
-            language: "zh-CN",
-            citation_start_index: 1,
-          }),
-        },
-      );
+      // 按 section 分组 claims（如果 framework 有多个 section）
+      const sections = framework?.sections || [];
+      const claimsBySectionId: Record<string, ClaimEvidence[]> = {};
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(errorText || `Step 3 failed with status ${res.status}`);
+      for (const claim of sectionClaimTable.claims) {
+        const sid = claim.section_id || "1";
+        if (!claimsBySectionId[sid]) claimsBySectionId[sid] = [];
+        claimsBySectionId[sid].push(claim);
       }
 
-      const data = await res.json();
-      const rendered = data.rendered_section;
-      setFinalRender(rendered.text);  // 后端字段是 text，不是 content
-      setRenderedSections((prev) => [
-        ...prev,
-        {
-          section_id: data.section_id || sectionClaimTable.section_id,
-          section_title: sectionClaimTable.section_title,
-          text: rendered.text,
+      // 如果没有 section 分组信息，就整体作为一个 section 渲染
+      const sectionKeys = Object.keys(claimsBySectionId);
+      if (sectionKeys.length === 0) {
+        sectionKeys.push("1");
+        claimsBySectionId["1"] = sectionClaimTable.claims;
+      }
+
+      const allRendered: typeof renderedSections = [];
+      const allTexts: string[] = [];
+      let citationIdx = 1;
+      let prevSummary = "";
+
+      // 判断最后一个 section 是否是讨论/结论类
+      const isDiscussionSection = (title: string) =>
+        /讨论|总结|结论|展望|discussion|conclusion|future|summary/i.test(title);
+
+      for (let i = 0; i < sectionKeys.length; i++) {
+        const sid = sectionKeys[i];
+        const sectionClaims = claimsBySectionId[sid] || [];
+        if (sectionClaims.length === 0) continue;
+
+        const sectionInfo = sections.find((s) => s.id === sid);
+        const sectionTitle = sectionInfo?.title || sectionClaims[0]?.section_title || `Section ${i + 1}`;
+
+        const miniTable: SectionClaimTable = {
+          section_id: sid,
+          section_title: sectionTitle,
+          claims: sectionClaims,
+        };
+
+        // 构建上下文
+        const isLast = i === sectionKeys.length - 1;
+        const isDiscussion = isDiscussionSection(sectionTitle);
+
+        // 讨论/结论章节：传全文摘要
+        const allSectionsSummary = (isDiscussion || isLast) && allTexts.length > 0
+          ? allRendered.map((r) => `【${r.section_title}】${r.text.slice(0, 300)}...`).join("\n\n")
+          : undefined;
+
+        const res = await fetch(
+          `${API_BASE_URL}/api/reviews/phd/render-section`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              review_id: reviewId,
+              section_claim_table: miniTable,
+              language: "zh-CN",
+              citation_start_index: citationIdx,
+              previous_sections_summary: prevSummary || undefined,
+              all_sections_summary: allSectionsSummary,
+            }),
+          },
+        );
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(errorText || `Render section ${sid} failed: ${res.status}`);
+        }
+
+        const data = await res.json();
+        const rendered = data.rendered_section;
+        const sectionText = rendered.text || "";
+
+        allRendered.push({
+          section_id: sid,
+          section_title: sectionTitle,
+          text: sectionText,
           citation_map: rendered.citation_map || {},
-        },
-      ]);
+        });
+        allTexts.push(`## ${sectionTitle}\n\n${sectionText}`);
+
+        // 更新上下文：取当前章节前 200 字作为下一章的前文摘要
+        prevSummary += `【${sectionTitle}】${sectionText.slice(0, 200)}...\n`;
+
+        // 累加 citation index
+        const citationCount = Object.keys(rendered.citation_map || {}).length;
+        citationIdx += citationCount;
+      }
+
+      setRenderedSections(allRendered);
+      setFinalRender(allTexts.join("\n\n---\n\n"));
     } catch (e) {
       setError((e as Error).message);
     } finally {
