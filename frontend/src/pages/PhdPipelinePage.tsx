@@ -9,7 +9,6 @@ import {
   AsyncPipelineStep,
   ManualSteps,
   AssembleStep,
-  RagDebugDrawer,
 } from "../components/phd";
 import type {
   Claim,
@@ -75,7 +74,6 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
   const [reviewId, setReviewId] = useState<number | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
-  const [showRagDebug, setShowRagDebug] = useState(false);
 
   // Step 0: Framework generation
   const [topic, setTopic] = useState("");
@@ -392,8 +390,6 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
     <div className="phd-pipeline-page">
       <PipelineHeader
         reviewId={reviewId}
-        showRagDebug={showRagDebug}
-        onToggleRagDebug={() => setShowRagDebug(!showRagDebug)}
         onExit={onExit}
       />
 
@@ -475,10 +471,6 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
         onAssemble={handleStep4_Assemble}
       />
 
-      <RagDebugDrawer
-        show={showRagDebug}
-        onClose={() => setShowRagDebug(false)}
-      />
     </div>
   );
 };
