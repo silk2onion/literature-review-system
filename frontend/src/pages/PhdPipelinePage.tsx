@@ -43,7 +43,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   initialYearFrom,
   initialYearTo,
   initialPaperLimit = 20,
-  initialSources = ["arxiv", "crossref", "scholar_serpapi", "scopus", "semantic_scholar", "openalex"],
+  initialSources = ["crossref", "scholar_serpapi", "scopus", "semantic_scholar", "openalex"],
   initialPaperIds = [],
   initialGroupId,
   onExit,
