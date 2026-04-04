@@ -98,6 +98,33 @@ class SearchConfig(BaseModel):
     use_graph_propagation: bool = Field(default=True, description="是否启用引用图传播增强")
 
 
+# ---- 密钥脱敏 ----
+
+MASK_PLACEHOLDER = "****"
+
+
+def _mask_secret(value: str, show_prefix: int = 3, show_suffix: int = 4) -> str:
+    """将密钥脱敏，保留前缀和后缀，中间用 **** 替换。"""
+    if not value:
+        return ""
+    if len(value) < 8 or (show_prefix == 0 and show_suffix == 0):
+        return MASK_PLACEHOLDER
+    suffix = value[-show_suffix:] if show_suffix > 0 else ""
+    return value[:show_prefix] + MASK_PLACEHOLDER + suffix
+
+
+def _is_masked(value: str) -> bool:
+    """判断值是否是脱敏后的 mask 值（包含 ****）。"""
+    return MASK_PLACEHOLDER in (value or "")
+
+
+def _resolve_secret(new_value: str, original_value: str) -> str:
+    """如果新值是 mask 值，返回原始值（不覆盖）；否则返回新值。"""
+    if not new_value or _is_masked(new_value):
+        return original_value
+    return new_value
+
+
 # ---- 数据库辅助函数 ----
 
 def _get_setting(db: Session, key: str, default: Any = None) -> Any:
@@ -162,19 +189,26 @@ def get_data_sources_config(db: Session = Depends(get_db)) -> DataSourcesConfig:
             if section in final_config and isinstance(vals, dict):
                 final_config[section].update(vals)
     
+    # 脱敏 API key
+    final_config["serpapi"]["api_key"] = _mask_secret(final_config["serpapi"].get("api_key", ""))
+    final_config["scopus"]["api_key"] = _mask_secret(final_config["scopus"].get("api_key", ""))
+
     return DataSourcesConfig(**final_config)
 
 
 @router.put("/settings/data-sources", response_model=DataSourcesConfig)
 def update_data_sources_config(
-    payload: DataSourcesConfig, 
+    payload: DataSourcesConfig,
     db: Session = Depends(get_db)
 ) -> DataSourcesConfig:
     """
     更新运行时数据源配置并持久化到数据库
     """
-    serpapi_key = (payload.serpapi.api_key or "").strip()
-    scopus_key = (payload.scopus.api_key or "").strip()
+    # 解析密钥：如果是 mask 值则保留原值
+    original_serpapi = getattr(settings, "SERPAPI_API_KEY", "") or ""
+    original_scopus = getattr(settings, "SCOPUS_API_KEY", "") or ""
+    serpapi_key = _resolve_secret((payload.serpapi.api_key or "").strip(), original_serpapi)
+    scopus_key = _resolve_secret((payload.scopus.api_key or "").strip(), original_scopus)
 
     # Elsevier API Key 一般为 32 位字母数字。这里做基础校验，防止复制时丢字符。
     if payload.scopus.enabled and scopus_key:
@@ -200,6 +234,9 @@ def update_data_sources_config(
 
     setattr(settings, "RAG_ENABLED", payload.rag.enabled)
 
+    # 返回脱敏后的配置
+    sanitized["serpapi"]["api_key"] = _mask_secret(serpapi_key)
+    sanitized["scopus"]["api_key"] = _mask_secret(scopus_key)
     return DataSourcesConfig(**sanitized)
 
 
@@ -449,31 +486,33 @@ def save_agent_config(payload: AgentConfig, db: Session = Depends(get_db)):
 
 @router.get("/settings/llm-connection", response_model=LLMConnectionConfig)
 def get_llm_connection(db: Session = Depends(get_db)):
-    """获取 LLM API 连接配置（Key + Base URL）"""
+    """获取 LLM API 连接配置（Key 脱敏返回）"""
     saved = _get_setting(db, "llm_connection_config", {})
-    default = LLMConnectionConfig(
-        api_key=getattr(settings, "OPENAI_API_KEY", "") or "",
-        base_url=getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com/v1") or "https://api.openai.com/v1",
+    raw_key = (saved or {}).get("api_key") or getattr(settings, "OPENAI_API_KEY", "") or ""
+    base_url = (saved or {}).get("base_url") or getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com/v1") or "https://api.openai.com/v1"
+    return LLMConnectionConfig(
+        api_key=_mask_secret(raw_key),
+        base_url=base_url,
     )
-    if saved and isinstance(saved, dict):
-        # 合并：DB 优先
-        return LLMConnectionConfig(
-            api_key=saved.get("api_key", default.api_key),
-            base_url=saved.get("base_url", default.base_url),
-        )
-    return default
 
 
 @router.put("/settings/llm-connection", response_model=LLMConnectionConfig)
 def save_llm_connection(payload: LLMConnectionConfig, db: Session = Depends(get_db)):
     """保存 LLM API 连接配置，运行时立即生效"""
-    _set_setting(db, "llm_connection_config", payload.model_dump())
+    # 解析密钥：如果是 mask 值则保留原值
+    original_key = getattr(settings, "OPENAI_API_KEY", "") or ""
+    real_key = _resolve_secret(payload.api_key, original_key)
+
+    save_data = {"api_key": real_key, "base_url": payload.base_url}
+    _set_setting(db, "llm_connection_config", save_data)
+
     # 运行时热更新
-    if payload.api_key:
-        setattr(settings, "OPENAI_API_KEY", payload.api_key)
+    if real_key:
+        setattr(settings, "OPENAI_API_KEY", real_key)
     if payload.base_url:
         setattr(settings, "OPENAI_BASE_URL", payload.base_url)
-    return payload
+
+    return LLMConnectionConfig(api_key=_mask_secret(real_key), base_url=payload.base_url)
 
 
 # ---- 综述生成默认值 ----
@@ -577,7 +616,7 @@ def get_institutional_access_config(db: Session = Depends(get_db)):
         headless=getattr(settings, "SELENIUM_HEADLESS", True),
     )
     if saved and isinstance(saved, dict):
-        return InstitutionalAccessConfig(
+        cfg = InstitutionalAccessConfig(
             enabled=saved.get("enabled", default.enabled),
             institution_name=saved.get("institution_name", default.institution_name),
             auth_type=saved.get("auth_type", default.auth_type),
@@ -587,7 +626,11 @@ def get_institutional_access_config(db: Session = Depends(get_db)):
             password=saved.get("password", default.password),
             headless=saved.get("headless", default.headless),
         )
-    return default
+    else:
+        cfg = default
+    # 脱敏
+    cfg.password = _mask_secret(cfg.password, show_prefix=0, show_suffix=0) if cfg.password else ""
+    return cfg
 
 
 @router.put("/settings/institutional-access", response_model=InstitutionalAccessConfig)
@@ -596,7 +639,14 @@ def save_institutional_access_config(
     db: Session = Depends(get_db),
 ):
     """保存机构访问配置，运行时立即生效"""
-    _set_setting(db, "institutional_access_config", payload.model_dump())
+    # 解析密码：如果是 mask 值则保留原值
+    original_password = getattr(settings, "INSTITUTIONAL_PASSWORD", "") or ""
+    real_password = _resolve_secret(payload.password, original_password)
+
+    save_data = payload.model_dump()
+    save_data["password"] = real_password
+    _set_setting(db, "institutional_access_config", save_data)
+
     # 运行时热更新
     setattr(settings, "INSTITUTIONAL_ENABLED", payload.enabled)
     setattr(settings, "INSTITUTIONAL_NAME", payload.institution_name)
@@ -604,8 +654,11 @@ def save_institutional_access_config(
     setattr(settings, "INSTITUTIONAL_LOGIN_URL", payload.login_url)
     setattr(settings, "INSTITUTIONAL_EZPROXY_PREFIX", payload.ezproxy_prefix)
     setattr(settings, "INSTITUTIONAL_USERNAME", payload.username)
-    setattr(settings, "INSTITUTIONAL_PASSWORD", payload.password)
+    setattr(settings, "INSTITUTIONAL_PASSWORD", real_password)
     setattr(settings, "SELENIUM_HEADLESS", payload.headless)
+
+    # 返回脱敏
+    payload.password = _mask_secret(real_password, show_prefix=0, show_suffix=0) if real_password else ""
     return payload
 
 
