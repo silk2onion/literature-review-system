@@ -81,17 +81,6 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
     setPaperIds(initialPaperIds);
   }, [initialPaperIds]);
 
-  // Persist config to sessionStorage
-  useEffect(() => {
-    sessionStorage.setItem("phd_topic", topic);
-    sessionStorage.setItem("phd_keywords", keywords);
-    sessionStorage.setItem("phd_yearFrom", yearFrom);
-    sessionStorage.setItem("phd_yearTo", yearTo);
-    sessionStorage.setItem("phd_paperLimit", paperLimit);
-    sessionStorage.setItem("phd_sortBy", sortBy);
-    sessionStorage.setItem("phd_sources", JSON.stringify(sources));
-  }, [topic, keywords, yearFrom, yearTo, paperLimit, sortBy, sources]);
-
   const [claims, setClaims] = useState<Claim[]>([]);
   const [claimsWithEvidence, setClaimsWithEvidence] = useState<
     ClaimWithEvidence[]
@@ -120,6 +109,17 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   const [fullReviewMarkdown, setFullReviewMarkdown] = useState("");
   const [citationStyle, setCitationStyle] = useState("harvard");
   const [assembleStats, setAssembleStats] = useState<AssembleStats | null>(null);
+
+  // Persist config to sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem("phd_topic", topic);
+    sessionStorage.setItem("phd_keywords", keywords);
+    sessionStorage.setItem("phd_yearFrom", yearFrom);
+    sessionStorage.setItem("phd_yearTo", yearTo);
+    sessionStorage.setItem("phd_paperLimit", paperLimit);
+    sessionStorage.setItem("phd_sortBy", sortBy);
+    sessionStorage.setItem("phd_sources", JSON.stringify(sources));
+  }, [topic, keywords, yearFrom, yearTo, paperLimit, sortBy, sources]);
 
   const handleStep0_GenerateFramework = async () => {
     setFrameworkLoading(true);
