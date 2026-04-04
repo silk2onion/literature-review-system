@@ -169,19 +169,22 @@ async def generate_framework(
             max_tokens=2000,
         )
 
-        json_match = None
-        if "```json" in raw:
-            start = raw.index("```json") + 7
-            end = raw.index("```", start)
-            json_match = raw[start:end].strip()
-        elif "```" in raw:
-            start = raw.index("```") + 3
-            end = raw.index("```", start)
-            json_match = raw[start:end].strip()
-        else:
-            json_match = raw.strip()
+        # 从 LLM 输出中提取 JSON（健壮解析，兼容各种格式）
+        import re as _re
+        json_text = raw.strip()
 
-        framework = json_mod.loads(json_match)
+        # 尝试提取 ```json ... ``` 或 ``` ... ``` 代码块
+        code_block = _re.search(r"```(?:json)?\s*\n?(.*?)```", raw, _re.DOTALL)
+        if code_block:
+            json_text = code_block.group(1).strip()
+        else:
+            # 尝试找第一个 { 到最后一个 } 之间的内容
+            first_brace = raw.find("{")
+            last_brace = raw.rfind("}")
+            if first_brace != -1 and last_brace > first_brace:
+                json_text = raw[first_brace : last_brace + 1]
+
+        framework = json_mod.loads(json_text)
         return {"framework": framework}
 
     except Exception as e:
