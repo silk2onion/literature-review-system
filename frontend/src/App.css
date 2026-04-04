@@ -583,9 +583,9 @@
   padding: 0;
   background: var(--bg-primary);
   color: var(--text-primary);
-  border-radius: 12px;
-  border: 1px solid var(--border-color);
-  box-shadow: var(--card-shadow);
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -596,7 +596,7 @@
   align-items: center;
   padding: 16px 20px;
   background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
 }
 
 .page-title h1 {
@@ -1027,7 +1027,7 @@
   padding: 16px;
   background: var(--bg-primary);
   box-shadow: var(--card-shadow);
-  min-width: 0;
+  min-width: 360px;
 }
 
 .panel-header {
@@ -1051,7 +1051,7 @@
 
 .paper-list-container {
   flex: 1;
-  overflow-y: auto;
+  overflow: auto;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-secondary);
@@ -1061,6 +1061,7 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: auto;
 }
 
 .paper-list-table th {
@@ -1072,13 +1073,25 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 2px solid var(--border-color);
 }
 
 .paper-list-table td {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-color);
   color: var(--text-primary);
+}
+
+.paper-list-table td.paper-meta {
+  display: table-cell;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.paper-list-table th + th,
+.paper-list-table td + td {
+  border-left: 1px solid var(--border-color);
 }
 
 .paper-row {

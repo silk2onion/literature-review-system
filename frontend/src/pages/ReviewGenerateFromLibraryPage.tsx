@@ -240,9 +240,9 @@ export default function ReviewGenerateFromLibraryPage() {
                         style={{ cursor: "pointer" }}
                       />
                     </th>
-                    <th>{t("review.generate.tableTitle")}</th>
-                    <th style={{ width: "60px" }}>{t("review.generate.tableYear")}</th>
-                    <th style={{ width: "80px" }}>{t("review.generate.tableSource")}</th>
+                    <th style={{ minWidth: 200 }}>{t("review.generate.tableTitle")}</th>
+                    <th style={{ width: 70, whiteSpace: "nowrap" }}>{t("review.generate.tableYear")}</th>
+                    <th style={{ width: 120, whiteSpace: "nowrap" }}>{t("review.generate.tableSource")}</th>
                   </tr>
                 </thead>
                 <tbody>

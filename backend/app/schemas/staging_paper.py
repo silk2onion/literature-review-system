@@ -223,7 +223,7 @@ class EnrichResultItem(BaseModel):
     """单篇补齐结果"""
     paper_id: int
     enriched_fields: List[str]
-    source: str
+    sources_used: List[str]
 
 
 class EnrichResponse(BaseModel):
@@ -231,6 +231,6 @@ class EnrichResponse(BaseModel):
     success: bool
     total: int
     enriched: int
-    skipped_no_doi: int
+    skipped: int
     failed: int
     details: List[EnrichResultItem] = Field(default_factory=list)

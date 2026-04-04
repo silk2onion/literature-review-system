@@ -477,13 +477,13 @@ async def enrich_staging_papers_endpoint(
         success=True,
         total=result.total,
         enriched=result.enriched,
-        skipped_no_doi=result.skipped_no_doi,
+        skipped=result.skipped,
         failed=result.failed,
         details=[
             EnrichResultItem(
                 paper_id=d.paper_id,
                 enriched_fields=d.enriched_fields,
-                source=d.source,
+                sources_used=d.sources_used,
             )
             for d in result.details
         ],

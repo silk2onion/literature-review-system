@@ -18,6 +18,8 @@ interface BatchActionBarProps {
   onSyncCitations: () => void;
   onBatchDownloadPdf?: () => void;
   onGenerateReview?: () => void;
+  onEnrich?: () => void;
+  enriching?: boolean;
 }
 
 export default function BatchActionBar({
@@ -38,6 +40,8 @@ export default function BatchActionBar({
   onSyncCitations,
   onBatchDownloadPdf,
   onGenerateReview,
+  onEnrich,
+  enriching,
 }: BatchActionBarProps) {
   const { t } = useLocale();
 
@@ -91,6 +95,20 @@ export default function BatchActionBar({
       >
         {syncing ? t("batch.syncing") : t("batch.syncCitations", { count: selectedCount })}
       </button>
+      {onEnrich && (
+        <button
+          onClick={onEnrich}
+          disabled={enriching}
+          className="action-button"
+          style={{
+            borderColor: "#0ea5e9",
+            backgroundColor: "rgba(14, 165, 233, 0.1)",
+            color: "#0284c7",
+          }}
+        >
+          {enriching ? "补齐中..." : `📥 补齐信息 (${selectedCount})`}
+        </button>
+      )}
       <button
         onClick={onDelete}
         disabled={deleting}

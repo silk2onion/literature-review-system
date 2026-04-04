@@ -463,6 +463,34 @@ export default function LibraryPage({
     }
   };
 
+  const [enriching, setEnriching] = useState(false);
+
+  const handleEnrichSelected = async () => {
+    if (selectedIds.size === 0) return;
+    setEnriching(true);
+    setMessage({ type: "info", text: "正在从多源补齐文献信息..." });
+    try {
+      const resp = await fetch(`${API_BASE_URL}/api/papers/enrich`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedIds), only_missing_abstract: false }),
+      });
+      if (!resp.ok) throw new Error(`补齐失败: ${resp.status}`);
+      const result = await resp.json();
+      setMessage({
+        type: "success",
+        text: `补齐完成：${result.enriched} 篇成功` +
+          (result.skipped > 0 ? `，${result.skipped} 篇跳过` : "") +
+          (result.failed > 0 ? `，${result.failed} 篇失败` : ""),
+      });
+      fetchPapers();
+    } catch (err) {
+      setMessage({ type: "error", text: `补齐失败：${(err as Error).message}` });
+    } finally {
+      setEnriching(false);
+    }
+  };
+
   const handleBatchDownloadPdf = async () => {
     if (selectedIds.size === 0) return;
     setBatchDownloading(true);
@@ -782,6 +810,8 @@ export default function LibraryPage({
             onAddToGroup={() => setShowAddToGroupModal(true)}
             onRemoveFromGroup={handleRemoveFromGroup}
             onSyncCitations={handleSyncCitationsSelected}
+            onEnrich={handleEnrichSelected}
+            enriching={enriching}
             onBatchDownloadPdf={handleBatchDownloadPdf}
             onGenerateReview={
               selectedGroupId && onGenerateReview

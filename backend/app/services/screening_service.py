@@ -113,6 +113,8 @@ BATCH_SCORING_PROMPT = """You are a senior academic reviewer. Evaluate the relev
 - 4-6: Tangentially relevant or too broad/general.
 - 0-3: Irrelevant, different discipline, or purely coincidental keyword match.
 
+Note: Papers found via citation analysis (referenced by existing library papers) should receive a slight relevance boost (+1 to +2 points) as they are contextually connected to the research topic. Papers with higher citation counts within the library are more likely to be relevant.
+
 Return ONLY a JSON object with a "results" array, one entry per paper, in the same order:
 {{
   "results": [
@@ -123,11 +125,18 @@ Return ONLY a JSON object with a "results" array, one entry per paper, in the sa
 
 
 def _build_papers_block(papers: List[StagingPaper]) -> str:
-    """将一批论文格式化为 prompt 中的文本块。"""
+    """将一批论文格式化为 prompt 中的文本块。包含来源和被引数信息。"""
     lines = []
     for sp in papers:
         abstract = (sp.abstract or "No abstract available.")[:MAX_ABSTRACT_LEN]
-        lines.append(f"[Paper ID={sp.id}]\nTitle: {sp.title}\nAbstract: {abstract}\n")
+        meta_parts = [f"[Paper ID={sp.id}]"]
+        meta_parts.append(f"Title: {sp.title}")
+        if sp.source == "citation_analysis":
+            meta_parts.append("Note: This paper was found via citation analysis (referenced by papers already in the library).")
+        if sp.citations_count and sp.citations_count > 0:
+            meta_parts.append(f"Cited by: {sp.citations_count} papers in the library")
+        meta_parts.append(f"Abstract: {abstract}")
+        lines.append("\n".join(meta_parts) + "\n")
     return "\n".join(lines)
 
 
@@ -250,7 +259,8 @@ async def screen_staging_papers(
 
     papers_to_score: List[StagingPaper] = []
     for sp in all_papers:
-        if pre_filter_paper(sp, topic_keywords, min_match=1):
+        # 引文分析来的论文跳过预过滤（已有引用关系背书）
+        if sp.source == "citation_analysis" or pre_filter_paper(sp, topic_keywords, min_match=1):
             papers_to_score.append(sp)
         else:
             # 直接拒绝

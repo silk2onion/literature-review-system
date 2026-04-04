@@ -417,16 +417,25 @@ class MarkdownToPdfConverter:
 
     def _html_to_pdf(self, html: str) -> bytes:
         """
-        Convert HTML string to PDF bytes using xhtml2pdf.
-        
-        Falls back to a simple error message if xhtml2pdf is not installed.
+        Convert HTML string to PDF bytes.
+        Tries weasyprint first (better Python 3.14 support), falls back to xhtml2pdf.
         """
+        # Try weasyprint first
+        try:
+            from weasyprint import HTML
+            return HTML(string=html).write_pdf()
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"weasyprint failed, falling back to xhtml2pdf: {e}")
+
+        # Fallback to xhtml2pdf
         try:
             from xhtml2pdf import pisa
         except ImportError:
             raise RuntimeError(
-                "xhtml2pdf is not installed. "
-                "Install it with: pip install xhtml2pdf"
+                "Neither weasyprint nor xhtml2pdf is installed. "
+                "Install one with: pip install weasyprint"
             )
 
         buffer = io.BytesIO()

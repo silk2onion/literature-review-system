@@ -443,6 +443,7 @@ class ReviewOrchestrationService:
             text=raw_text,
             db=self.db,
             citation_style=citation_style,
+            linkable=True,
         )
 
         if missing_ids:
