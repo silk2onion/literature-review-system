@@ -1,6 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { API_BASE_URL } from "../api/config";
 import { useLocale } from "../hooks/useLocale";
+
+/** Parse comma-separated keywords string into array */
+function parseKeywords(raw: string): string[] {
+  return raw.split(/[,，]/).map((k) => k.trim()).filter((k) => k);
+}
 import {
   PipelineHeader,
   StepConfigForm,
@@ -42,7 +47,6 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   initialPaperIds = [],
   initialGroupId,
   onExit,
-  embedded: _embedded = false, // eslint-disable-line @typescript-eslint/no-unused-vars
 }) => {
   const { t } = useLocale();
   const [step, setStep] = useState(1);
@@ -60,12 +64,14 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   );
   const [sortBy, setSortBy] = useState<string>("year_desc");
   const [sources, setSources] = useState<string[]>(initialSources);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [paperIds, _setPaperIds] = useState<number[]>(initialPaperIds);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [groupId, _setGroupId] = useState<number | undefined>(initialGroupId);
+  const [paperIds, setPaperIds] = useState<number[]>(initialPaperIds);
+  const groupId = initialGroupId;
 
-  // 各阶段的产出
+  // Sync paperIds when parent selection changes
+  useEffect(() => {
+    setPaperIds(initialPaperIds);
+  }, [initialPaperIds]);
+
   const [claims, setClaims] = useState<Claim[]>([]);
   const [claimsWithEvidence, setClaimsWithEvidence] = useState<
     ClaimWithEvidence[]
@@ -85,7 +91,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
   const [papersPerSection, setPapersPerSection] = useState(20);
   const [autoSearchLoading, setAutoSearchLoading] = useState(false);
   const [autoSearchResults, setAutoSearchResults] = useState<AutoSearchResult[]>([]);
-  const [autoSearchDone, setAutoSearchDone] = useState(false);
+  const autoSearchDone = autoSearchResults.length > 0;
 
   // Step 4: Assemble state
   const [assembleLoading, setAssembleLoading] = useState(false);
@@ -100,10 +106,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
     setFrameworkConfirmed(false);
 
     try {
-      const kws = keywords
-        .split(/[,\uff0c]/)
-        .map((k) => k.trim())
-        .filter((k) => k);
+      const kws = parseKeywords(keywords);
       const res = await fetch(
         `${API_BASE_URL}/api/reviews/generate-framework`,
         {
@@ -162,7 +165,6 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
 
       const data = await res.json();
       setAutoSearchResults(data.per_section || []);
-      setAutoSearchDone(true);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -381,10 +383,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
     }
   };
 
-  const parsedKeywords = keywords
-    .split(/[,，]/)
-    .map((k) => k.trim())
-    .filter((k) => k);
+  const parsedKeywords = useMemo(() => parseKeywords(keywords), [keywords]);
 
   return (
     <div className="phd-pipeline-page">
