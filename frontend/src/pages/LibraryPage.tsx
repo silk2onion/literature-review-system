@@ -983,11 +983,58 @@ export default function LibraryPage({
           </div>
         </div>
 
+        {/* Citation Graph Panel — floating drawer */}
         {selectedPaperId !== null && (
-          <CitationGraphPanel
-            paperId={selectedPaperId}
-            title={selectedPaperTitle}
-          />
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              right: 0,
+              width: 560,
+              height: "100vh",
+              backgroundColor: "var(--bg-primary)",
+              borderLeft: "1px solid var(--border-color)",
+              boxShadow: "-4px 0 20px rgba(0,0,0,0.08)",
+              zIndex: 1000,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "14px 20px",
+                borderBottom: "1px solid var(--border-color)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+                {selectedPaperTitle}
+              </span>
+              <button
+                onClick={() => { setSelectedPaperId(null); setSelectedPaperTitle(""); }}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  fontSize: 18,
+                  cursor: "pointer",
+                  color: "var(--text-secondary)",
+                  padding: "4px 8px",
+                  borderRadius: 4,
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              <CitationGraphPanel
+                paperId={selectedPaperId}
+                title={selectedPaperTitle}
+              />
+            </div>
+          </div>
         )}
       </section>
 
