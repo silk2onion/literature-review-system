@@ -1,5 +1,6 @@
 import JournalTooltip, { type JournalInfoLookup } from "./JournalTooltip";
 import { API_BASE_URL } from "../../api/config";
+import { useLocale } from "../../hooks/useLocale";
 
 export type PaperResponse = {
   id: number;
@@ -68,6 +69,8 @@ export default function PapersTable({
   loading,
   ezproxyPrefix,
 }: PapersTableProps) {
+  const { t } = useLocale();
+
   const canEnrichJournalInfo = (paper: PaperResponse) =>
     Boolean(paper.journal || paper.journal_issn);
 
@@ -93,13 +96,13 @@ export default function PapersTable({
                 style={{ cursor: "pointer" }}
               />
             </th>
-            <th>标题</th>
-            <th style={{ width: 160 }}>作者</th>
-            <th style={{ width: 80 }}>年份</th>
-            <th style={{ width: 120 }}>来源</th>
-            <th style={{ width: 100 }}>期刊信息</th>
-            <th style={{ width: 120 }}>链接</th>
-            <th style={{ width: 100 }}>引用图</th>
+            <th>{t("library.table.title")}</th>
+            <th style={{ width: 160 }}>{t("library.table.authors")}</th>
+            <th style={{ width: 80 }}>{t("library.table.year")}</th>
+            <th style={{ width: 120 }}>{t("library.table.source")}</th>
+            <th style={{ width: 100 }}>{t("library.table.journalInfo")}</th>
+            <th style={{ width: 120 }}>{t("library.table.links")}</th>
+            <th style={{ width: 100 }}>{t("library.table.citationGraph")}</th>
           </tr>
         </thead>
         <tbody>
@@ -113,7 +116,7 @@ export default function PapersTable({
                   color: "#6b7280",
                 }}
               >
-                当前条件下没有检索到文献，可以尝试放宽关键词或年份范围。
+                {t("library.table.emptyResult")}
               </td>
             </tr>
           )}
@@ -278,8 +281,8 @@ export default function PapersTable({
                       }}
                     >
                       {enrichingIds.has(p.id)
-                        ? "增强中..."
-                        : "补全期刊信息"}
+                        ? t("library.table.enriching")
+                        : t("library.table.enrichJournal")}
                     </button>
                   )}
                   {!p.journal_quartile &&
@@ -328,7 +331,7 @@ export default function PapersTable({
                       rel="noreferrer"
                       style={{ color: "#38bdf8" }}
                     >
-                      链接
+                      {t("library.table.links")}
                     </a>
                   ) : (
                     "-"
@@ -348,7 +351,7 @@ export default function PapersTable({
                         gap: 2,
                       }}
                     >
-                      <span>📄 查看 PDF</span>
+                      <span>📄 {t("library.table.viewPdf")}</span>
                     </a>
                   ) : p.pdf_url ? (
                     <button
@@ -373,8 +376,8 @@ export default function PapersTable({
                       }}
                     >
                       {downloadingIds.has(p.id)
-                        ? "下载中..."
-                        : "⬇️ 下载 PDF"}
+                        ? t("library.table.downloading")
+                        : `⬇️ ${t("library.table.downloadPdf")}`}
                     </button>
                   ) : p.doi && ezproxyPrefix ? (
                     <button
@@ -405,7 +408,7 @@ export default function PapersTable({
                         cursor: "pointer",
                       }}
                     >
-                      🏛️ 机构下载
+                      🏛️ {t("library.table.institutionalDownload")}
                     </button>
                   ) : null}
                 </div>
@@ -425,7 +428,7 @@ export default function PapersTable({
                     onLogInteraction(p.id, "view_citations");
                   }}
                 >
-                  查看引用
+                  {t("library.table.viewCitations")}
                 </button>
               </td>
             </tr>

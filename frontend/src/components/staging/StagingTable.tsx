@@ -1,5 +1,6 @@
 import type { StagingPaper } from "./types";
 import { SCREENING_STAGE_OPTIONS } from "./types";
+import { useLocale } from "../../hooks/useLocale";
 
 interface StagingTableProps {
   items: StagingPaper[];
@@ -32,12 +33,14 @@ export default function StagingTable({
   onNextPage,
   onPageSizeChange,
 }: StagingTableProps) {
+  const { t } = useLocale();
+
   return (
     <section className="data-table-container">
       <div className="table-header-info">
-        <span>共 {total} 条暂存文献</span>
+        <span>{t("staging.totalCount", { total })}</span>
         <span>
-          第 {page} / {totalPages} 页
+          {t("staging.table.pageInfo", { page, totalPages })}
         </span>
       </div>
 
@@ -52,14 +55,14 @@ export default function StagingTable({
                   onChange={onToggleSelectAll}
                 />
               </th>
-              <th>标题</th>
-              <th style={{ width: 120 }}>来源</th>
-              <th style={{ width: 80 }}>年份</th>
-              <th style={{ width: 100 }}>状态</th>
-              <th style={{ width: 80 }}>AI 评分</th>
-              <th style={{ width: 110 }}>筛选阶段</th>
-              <th style={{ width: 140 }}>链接</th>
-              <th style={{ width: 100 }}>抓取任务</th>
+              <th>{t("staging.table.title")}</th>
+              <th style={{ width: 120 }}>{t("staging.table.source")}</th>
+              <th style={{ width: 80 }}>{t("staging.table.year")}</th>
+              <th style={{ width: 100 }}>{t("staging.table.status")}</th>
+              <th style={{ width: 80 }}>{t("staging.table.aiScore")}</th>
+              <th style={{ width: 110 }}>{t("staging.table.screeningStage")}</th>
+              <th style={{ width: 140 }}>{t("staging.table.links")}</th>
+              <th style={{ width: 100 }}>{t("staging.table.crawlJob")}</th>
             </tr>
           </thead>
           <tbody>
@@ -73,7 +76,7 @@ export default function StagingTable({
                     color: "#6b7280",
                   }}
                 >
-                  当前条件下没有暂存文献，可以在抓取任务完成后再来查看，或放宽过滤条件。
+                  {t("staging.table.emptyResult")}
                 </td>
               </tr>
             )}
@@ -235,7 +238,7 @@ export default function StagingTable({
                             border: `1px solid ${stageOpt.color}40`,
                           }}
                         >
-                          {stageOpt.label}
+                          {t(stageOpt.labelKey)}
                         </span>
                       );
                     })()}
@@ -272,7 +275,7 @@ export default function StagingTable({
                         rel="noreferrer"
                         style={{ color: "#0284c7" }}
                       >
-                        链接
+                        {t("staging.table.links")}
                       </a>
                     ) : (
                       "-"
@@ -306,11 +309,13 @@ export default function StagingTable({
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ color: "#9ca3af" }}>
-            显示第 {(page - 1) * pageSize + 1} -{" "}
-            {Math.min(page * pageSize, total)} 条
+            {t("staging.table.showing", {
+              from: (page - 1) * pageSize + 1,
+              to: Math.min(page * pageSize, total),
+            })}
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ color: "#6b7280" }}>每页</span>
+            <span style={{ color: "#6b7280" }}>{t("staging.table.perPage")}</span>
             <select
               value={pageSize}
               onChange={(e) => {
@@ -348,7 +353,7 @@ export default function StagingTable({
               opacity: loading || page <= 1 ? 0.5 : 1,
             }}
           >
-            上一页
+            {t("staging.table.prevPage")}
           </button>
           <button
             onClick={onNextPage}
@@ -364,7 +369,7 @@ export default function StagingTable({
               opacity: loading || page >= totalPages ? 0.5 : 1,
             }}
           >
-            下一页
+            {t("staging.table.nextPage")}
           </button>
         </div>
       </div>

@@ -4,6 +4,7 @@ import GroupManager from "../components/GroupManager";
 import SemanticSearchDebugPanel from "../components/SemanticSearchDebugPanel";
 import { groupsApi } from "../api/groups";
 import { useAbortableFetch } from "../hooks/useAbortableFetch";
+import { useLocale } from "../hooks/useLocale";
 import type { LiteratureGroup } from "../types";
 
 import {
@@ -133,6 +134,7 @@ export default function LibraryPage({
   const [showArchived, setShowArchived] = useState<boolean>(false);
 
   const { getSignal } = useAbortableFetch();
+  const { t } = useLocale();
 
   const totalPages = total > 0 ? Math.ceil(total / pageSize) : 1;
 
@@ -226,7 +228,7 @@ export default function LibraryPage({
     try {
       setLoading(true);
       setTaskStatus("running");
-      setTaskMessage("正在从本地文献库检索...");
+      setTaskMessage(t("library.searching"));
 
       const signal = getSignal();
 
@@ -257,7 +259,7 @@ export default function LibraryPage({
       if (!resp.ok) {
         const text = await resp.text();
         throw new Error(
-          `请求失败: ${resp.status} ${resp.statusText} - ${text}`,
+          `${resp.status} ${resp.statusText} - ${text}`,
         );
       }
 
@@ -268,22 +270,23 @@ export default function LibraryPage({
       setPage(effectivePage);
       setTaskStatus("done");
       setTaskMessage(
-        `检索完成：共 ${data.total} 篇，当前第 ${effectivePage} / ${Math.max(
-          Math.ceil((data.total || 0) / pageSize),
-          1,
-        )} 页`,
+        t("library.searchComplete", {
+          total: data.total,
+          page: effectivePage,
+          totalPages: Math.max(Math.ceil((data.total || 0) / pageSize), 1),
+        }),
       );
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
       console.error("search-local error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `检索失败：${(err as { message?: string })?.message || "未知错误"}`,
+        t("library.searchFailed", { error: (err as { message?: string })?.message || "" }),
       );
     } finally {
       setLoading(false);
     }
-  }, [query, yearFrom, yearTo, page, pageSize, selectedGroupId, showArchived, getSignal]);
+  }, [query, yearFrom, yearTo, page, pageSize, selectedGroupId, showArchived, getSignal, t]);
 
   const fetchDataRef = useRef(fetchData);
   fetchDataRef.current = fetchData;
@@ -396,10 +399,10 @@ export default function LibraryPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paper_ids: Array.from(selectedIds) }),
       });
-      if (!resp.ok) throw new Error("删除失败");
+      if (!resp.ok) throw new Error("delete failed");
       const data = await resp.json();
       setMessage({
-        text: `成功删除 ${data.deleted_count} 篇文献`,
+        text: t("library.deleteSuccess", { count: data.deleted_count }),
         type: "success",
       });
       setTimeout(() => setMessage(null), 3000);
@@ -407,7 +410,7 @@ export default function LibraryPage({
       fetchData({ resetPage: false });
     } catch (err) {
       console.error(err);
-      setMessage({ text: "删除出错", type: "error" });
+      setMessage({ text: t("library.deleteError"), type: "error" });
       setTimeout(() => setMessage(null), 3000);
     } finally {
       setDeleting(false);
@@ -417,7 +420,7 @@ export default function LibraryPage({
 
   const handleArchiveSelected = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`确定要归档选中的 ${selectedIds.size} 篇文献吗？`)) return;
+    if (!confirm(t("library.archiveConfirm", { count: selectedIds.size }))) return;
     setArchiving(true);
     try {
       const resp = await fetch(`${API_BASE_URL}/api/papers/archive`, {
@@ -425,14 +428,14 @@ export default function LibraryPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paper_ids: Array.from(selectedIds) }),
       });
-      if (!resp.ok) throw new Error("归档失败");
+      if (!resp.ok) throw new Error("archive failed");
       const data = await resp.json();
-      alert(`成功归档 ${data.count} 篇文献`);
+      alert(t("library.archiveSuccess", { count: data.count }));
       setSelectedIds(new Set());
       fetchData({ resetPage: false });
     } catch (err) {
       console.error(err);
-      alert("归档出错");
+      alert(t("library.archiveError"));
     } finally {
       setArchiving(false);
     }
@@ -447,14 +450,14 @@ export default function LibraryPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paper_ids: Array.from(selectedIds) }),
       });
-      if (!resp.ok) throw new Error("恢复失败");
+      if (!resp.ok) throw new Error("restore failed");
       const data = await resp.json();
-      alert(`成功恢复 ${data.count} 篇文献`);
+      alert(t("library.restoreSuccess", { count: data.count }));
       setSelectedIds(new Set());
       fetchData({ resetPage: false });
     } catch (err) {
       console.error(err);
-      alert("恢复出错");
+      alert(t("library.restoreError"));
     } finally {
       setRestoring(false);
     }
@@ -469,12 +472,12 @@ export default function LibraryPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paper_ids: Array.from(selectedIds) }),
       });
-      if (!resp.ok) throw new Error("批量下载请求失败");
+      if (!resp.ok) throw new Error("batch download failed");
       const data = await resp.json();
-      alert(data.message || "批量下载任务已启动");
+      alert(data.message || t("library.batchDownloadStarted"));
     } catch (err) {
       console.error(err);
-      alert("批量下载 PDF 出错");
+      alert(t("library.batchDownloadError"));
     } finally {
       setBatchDownloading(false);
     }
@@ -489,15 +492,19 @@ export default function LibraryPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paper_ids: Array.from(selectedIds) }),
       });
-      if (!resp.ok) throw new Error("同步请求失败");
+      if (!resp.ok) throw new Error("sync failed");
       const data = await resp.json();
       alert(
-        `同步完成\n处理文献: ${data.processed_count}\n匹配引用: ${data.matched_references}\n新增关系: ${data.created_edges}`,
+        t("library.syncComplete", {
+          processed: data.processed_count,
+          matched: data.matched_references,
+          created: data.created_edges,
+        }),
       );
       fetchData({ resetPage: false });
     } catch (err) {
       console.error(err);
-      alert("同步引用出错");
+      alert(t("library.syncError"));
     } finally {
       setSyncing(false);
     }
@@ -505,9 +512,7 @@ export default function LibraryPage({
 
   const handleAnalyzeCitations = async () => {
     if (
-      !confirm(
-        "确定要对全库文献执行引用网络分析吗？这将生成新的标签（世代、影响力、聚类）。",
-      )
+      !confirm(t("library.analyzeCitationConfirm"))
     )
       return;
     setAnalyzing(true);
@@ -519,12 +524,16 @@ export default function LibraryPage({
       if (!resp.ok) throw new Error("Analysis failed");
       const data = await resp.json();
       alert(
-        `分析完成\n世代标签: ${data.generation_tags}\n影响力标签: ${data.impact_tags}\n聚类标签: ${data.cluster_tags}`,
+        t("library.analysisComplete", {
+          generation: data.generation_tags,
+          impact: data.impact_tags,
+          cluster: data.cluster_tags,
+        }),
       );
       fetchData({ resetPage: false });
     } catch (err) {
       console.error(err);
-      alert("分析失败");
+      alert(t("library.analysisFailed"));
     } finally {
       setAnalyzing(false);
     }
@@ -534,7 +543,7 @@ export default function LibraryPage({
     if (selectedIds.size === 0) return;
     try {
       await groupsApi.addPapersToGroup(group.id, Array.from(selectedIds));
-      alert(`已将 ${selectedIds.size} 篇文献加入分组 "${group.name}"`);
+      alert(t("library.addedToGroup", { count: selectedIds.size, name: group.name }));
       setShowAddToGroupModal(false);
       setSelectedIds(new Set());
       if (selectedGroupId === group.id) {
@@ -542,13 +551,13 @@ export default function LibraryPage({
       }
     } catch (err) {
       console.error(err);
-      alert("加入分组失败");
+      alert(t("library.addToGroupFailed"));
     }
   };
 
   const handleRemoveFromGroup = async () => {
     if (selectedIds.size === 0 || !selectedGroupId) return;
-    if (!confirm(`确定要从当前分组移除选中的 ${selectedIds.size} 篇文献吗？`))
+    if (!confirm(t("library.removeFromGroupConfirm", { count: selectedIds.size })))
       return;
     setRemovingFromGroup(true);
     try {
@@ -556,12 +565,12 @@ export default function LibraryPage({
         selectedGroupId,
         Array.from(selectedIds),
       );
-      alert(`已从分组移除 ${selectedIds.size} 篇文献`);
+      alert(t("library.removedFromGroup", { count: selectedIds.size }));
       setSelectedIds(new Set());
       fetchData({ resetPage: false });
     } catch (err) {
       console.error(err);
-      alert("移除失败");
+      alert(t("library.removeFromGroupFailed"));
     } finally {
       setRemovingFromGroup(false);
     }
@@ -577,10 +586,10 @@ export default function LibraryPage({
       );
       if (!resp.ok) throw new Error("Download failed");
       await fetchData({ resetPage: false });
-      alert("PDF 下载任务已启动，请稍后刷新查看");
+      alert(t("library.pdfDownloadStarted"));
     } catch (err) {
       console.error(err);
-      alert("下载请求失败");
+      alert(t("library.downloadFailed"));
     } finally {
       setDownloadingIds((prev) => {
         const next = new Set(prev);
@@ -599,10 +608,10 @@ export default function LibraryPage({
       );
       const data = await resp.json().catch(() => null);
       if (!resp.ok) {
-        throw new Error(data?.detail || data?.message || "期刊信息增强失败");
+        throw new Error(data?.detail || data?.message || t("library.enrichFailed"));
       }
       setMessage({
-        text: data?.message || `已处理《${paper.title}》的期刊信息增强请求`,
+        text: data?.message || t("library.enrichSuccess", { title: paper.title }),
         type: "success",
       });
       setTimeout(() => setMessage(null), 3000);
@@ -612,7 +621,7 @@ export default function LibraryPage({
     } catch (err) {
       console.error(err);
       setMessage({
-        text: `期刊增强失败：${(err as { message?: string })?.message || "未知错误"}`,
+        text: t("library.enrichError", { error: (err as { message?: string })?.message || "" }),
         type: "error",
       });
       setTimeout(() => setMessage(null), 3000);
@@ -643,7 +652,7 @@ export default function LibraryPage({
     fetchDataRef.current({ resetPage: true }).catch((e) =>
       console.error("initial load error", e),
     );
-    // 加载 EZProxy 前缀
+    // Load EZProxy prefix
     fetch(`${API_BASE_URL}/api/settings/institutional-access`)
       .then((r) => r.json())
       .then((d) => {
@@ -720,41 +729,41 @@ export default function LibraryPage({
     <div className="page-container">
       <header className="page-header">
         <div className="page-title">
-          <h1>本地文献库</h1>
-          <p>基于 SQLite 中已有的 Paper 记录进行检索和浏览</p>
+          <h1>{t("library.pageTitle")}</h1>
+          <p>{t("library.pageSubtitle")}</p>
         </div>
         <div className="page-actions">
           <button
             onClick={() => setShowGroupManager(!showGroupManager)}
             className={`action-button ${showGroupManager ? "accent" : ""}`}
           >
-            {showGroupManager ? "关闭分组管理" : "分组管理"}
+            {showGroupManager ? t("library.closeGroupManager") : t("library.groupManager")}
           </button>
           <button
             onClick={() => setShowRagDebug(!showRagDebug)}
             className={`action-button ${showRagDebug ? "accent" : ""}`}
           >
-            {showRagDebug ? "关闭 RAG 调试" : "RAG 调试"}
+            {showRagDebug ? t("library.closeRagDebug") : t("library.ragDebug")}
           </button>
           <button
             onClick={handleAnalyzeCitations}
             disabled={analyzing}
             className={`action-button ${analyzing ? "accent" : ""}`}
           >
-            {analyzing ? "分析中..." : "引用网络分析"}
+            {analyzing ? t("library.analyzingCitations") : t("library.citationAnalysis")}
           </button>
           <button
             onClick={() => fetchData({ resetPage: false })}
             className="action-button"
-            title="刷新当前列表"
+            title={t("library.refresh")}
           >
-            🔄 刷新
+            🔄 {t("library.refresh")}
           </button>
           <button
             onClick={() => setShowUploadModal(true)}
             className="action-button primary"
           >
-            上传 PDF
+            {t("library.uploadPdf")}
           </button>
 
           <BatchActionBar
@@ -862,9 +871,9 @@ export default function LibraryPage({
       {/* Data table section */}
       <section className="data-table-container">
         <div className="table-header-info">
-          <span>共 {total} 篇文献</span>
+          <span>{t("library.totalCount", { total })}</span>
           <span>
-            第 {page} / {totalPages} 页
+            {t("library.pageInfo", { page, totalPages })}
           </span>
         </div>
 
@@ -902,11 +911,10 @@ export default function LibraryPage({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ color: "var(--text-secondary)" }}>
-              显示第 {(page - 1) * pageSize + 1} -{" "}
-              {Math.min(page * pageSize, total)} 条
+              {t("library.showRange", { from: (page - 1) * pageSize + 1, to: Math.min(page * pageSize, total) })}
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ color: "var(--text-tertiary)" }}>每页</span>
+              <span style={{ color: "var(--text-tertiary)" }}>{t("common.perPage")}</span>
               <select
                 value={pageSize}
                 onChange={(e) => {
@@ -933,14 +941,14 @@ export default function LibraryPage({
               disabled={loading || page <= 1}
               className="pagination-button"
             >
-              上一页
+              {t("common.previousPage")}
             </button>
             <button
               onClick={handleNextPage}
               disabled={loading || page >= totalPages}
               className="pagination-button"
             >
-              下一页
+              {t("common.nextPage")}
             </button>
           </div>
         </div>

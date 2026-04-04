@@ -37,15 +37,15 @@ export type StagingSearchResponse = {
   message?: string | null;
 };
 
-export const STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: "all", label: "全部" },
-  { value: "pending", label: "待审核" },
-  { value: "accepted", label: "已提升" },
-  { value: "rejected", label: "已拒绝" },
+export const STATUS_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: "all", labelKey: "staging.status.all" },
+  { value: "pending", labelKey: "staging.status.pending" },
+  { value: "accepted", labelKey: "staging.status.accepted" },
+  { value: "rejected", labelKey: "staging.status.rejected" },
 ];
 
-export const SOURCE_OPTIONS: { value: string; label: string }[] = [
-  { value: "all", label: "全部" },
+export const SOURCE_OPTIONS: { value: string; labelKey?: string; label?: string }[] = [
+  { value: "all", labelKey: "staging.source.all" },
   { value: "arxiv", label: "arXiv" },
   { value: "crossref", label: "CrossRef" },
   { value: "scholar_serpapi", label: "Google Scholar" },
@@ -55,12 +55,12 @@ export const SOURCE_OPTIONS: { value: string; label: string }[] = [
 
 export const SCREENING_STAGE_OPTIONS: {
   value: string;
-  label: string;
+  labelKey: string;
   color: string;
 }[] = [
-  { value: "all", label: "全部阶段", color: "#64748b" },
-  { value: "identification", label: "🔍 识别", color: "#6366f1" },
-  { value: "screening", label: "📋 筛选", color: "#0ea5e9" },
-  { value: "eligibility", label: "✅ 资格", color: "#f59e0b" },
-  { value: "included", label: "📎 纳入", color: "#22c55e" },
+  { value: "all", labelKey: "staging.screeningStage.all", color: "#64748b" },
+  { value: "identification", labelKey: "staging.screeningStage.identification", color: "#6366f1" },
+  { value: "screening", labelKey: "staging.screeningStage.screening", color: "#0ea5e9" },
+  { value: "eligibility", labelKey: "staging.screeningStage.eligibility", color: "#f59e0b" },
+  { value: "included", labelKey: "staging.screeningStage.included", color: "#22c55e" },
 ];

@@ -1,3 +1,5 @@
+import { useLocale } from "../../hooks/useLocale";
+
 interface StagingBatchActionsProps {
   selectedCount: number;
   promoting: boolean;
@@ -27,6 +29,8 @@ export default function StagingBatchActions({
   onAIScreen,
   onEnrich,
 }: StagingBatchActionsProps) {
+  const { t } = useLocale();
+
   const renderTaskBadge = () => {
     if (taskStatus === "idle") return null;
     let color = "#64748b";
@@ -79,7 +83,7 @@ export default function StagingBatchActions({
         className="action-button"
         style={{ padding: "6px 14px" }}
       >
-        🔄 刷新
+        🔄 {t("staging.batch.refresh")}
       </button>
       {onAIScreen && (
         <button
@@ -99,8 +103,8 @@ export default function StagingBatchActions({
           }}
         >
           {aiScreening
-            ? "AI 筛选中..."
-            : `🤖 AI 筛选${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
+            ? t("staging.batch.aiScreening")
+            : `🤖 ${t("staging.batch.aiScreen")}${selectedCount > 0 ? ` (${selectedCount})` : ""}`}
         </button>
       )}
       {onEnrich && (
@@ -120,7 +124,7 @@ export default function StagingBatchActions({
             opacity: enriching ? 0.6 : 1,
           }}
         >
-          {enriching ? "补齐中..." : "📥 补齐信息"}
+          {enriching ? t("staging.batch.enriching") : `📥 ${t("staging.batch.enrichInfo")}`}
         </button>
       )}
       <button
@@ -141,7 +145,7 @@ export default function StagingBatchActions({
           cursor: selectedCount > 0 ? "pointer" : "default",
         }}
       >
-        🗑 删除 {selectedCount > 0 ? `(${selectedCount})` : ""}
+        🗑 {t("staging.batch.delete")} {selectedCount > 0 ? `(${selectedCount})` : ""}
       </button>
       <button
         type="button"
@@ -161,7 +165,7 @@ export default function StagingBatchActions({
           cursor: selectedCount > 0 ? "pointer" : "default",
         }}
       >
-        ✕ 拒绝 {selectedCount > 0 ? `(${selectedCount})` : ""}
+        ✕ {t("staging.batch.reject")} {selectedCount > 0 ? `(${selectedCount})` : ""}
       </button>
       <button
         type="button"
@@ -170,10 +174,10 @@ export default function StagingBatchActions({
         className={`action-button ${selectedCount > 0 && !promoting ? "primary" : ""}`}
       >
         {promoting
-          ? "正在提升..."
+          ? t("staging.batch.promoting")
           : selectedCount === 0
-            ? "选择后可操作"
-            : `✓ 提升 (${selectedCount})`}
+            ? t("staging.batch.selectToOperate")
+            : `✓ ${t("staging.batch.promote", { count: selectedCount })}`}
       </button>
     </div>
   );

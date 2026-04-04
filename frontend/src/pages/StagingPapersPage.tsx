@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { API_BASE_URL } from "../api/config";
 import { useAbortableFetch } from "../hooks/useAbortableFetch";
+import { useLocale } from "../hooks/useLocale";
 import {
   StagingFilters,
   StagingTable,
@@ -14,6 +15,7 @@ import type {
 } from "../components/staging";
 
 export default function StagingPapersPage() {
+  const { t } = useLocale();
   const [q, setQ] = useState<string>("");
   const [status, setStatus] = useState<string>("pending");
   const [source, setSource] = useState<string>("all");
@@ -95,9 +97,9 @@ export default function StagingPapersPage() {
     try {
       setLoading(true);
       setError(null);
-      if (taskStatus !== "done" || taskMessage.includes("加载中")) {
+      if (taskStatus !== "done" || taskMessage.includes(t("staging.msg.loading"))) {
         setTaskStatus("running");
-        setTaskMessage("正在加载暂存文献...");
+        setTaskMessage(t("staging.msg.loading"));
       }
 
       const signal = getSignal();
@@ -131,7 +133,7 @@ export default function StagingPapersPage() {
       if (!resp.ok) {
         const text = await resp.text();
         throw new Error(
-          `请求失败: ${resp.status} ${resp.statusText} - ${text}`,
+          t("staging.msg.requestFailed", { status: resp.status, statusText: resp.statusText, body: text }),
         );
       }
 
@@ -140,15 +142,16 @@ export default function StagingPapersPage() {
       setTotal(data.total ?? 0);
       setPage(effectivePage);
       if (
-        !taskMessage.includes("已永久删除") &&
-        !taskMessage.includes("已标记拒绝")
+        !taskMessage.includes(t("staging.msg.deleteSuccess", { count: 0 }).split("0")[0]) &&
+        !taskMessage.includes(t("staging.msg.rejectSuccess", { count: 0 }).split("0")[0])
       ) {
         setTaskStatus("done");
         setTaskMessage(
-          `加载完成：共 ${data.total} 条暂存记录，当前第 ${effectivePage} / ${Math.max(
-            Math.ceil((data.total || 0) / pageSize),
-            1,
-          )} 页`,
+          t("staging.msg.loadComplete", {
+            total: data.total,
+            page: effectivePage,
+            totalPages: Math.max(Math.ceil((data.total || 0) / pageSize), 1),
+          }),
         );
       }
     } catch (err) {
@@ -156,15 +159,15 @@ export default function StagingPapersPage() {
       console.error("staging search error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `加载失败：${(err as { message?: string })?.message || "未知错误"}`,
+        t("staging.msg.loadFailed", { error: (err as { message?: string })?.message || t("staging.msg.unknownError") }),
       );
       setError(
-        (err as { message?: string })?.message || "加载暂存文献时出现错误",
+        (err as { message?: string })?.message || t("staging.msg.loadError"),
       );
     } finally {
       setLoading(false);
     }
-  }, [q, status, source, screeningStage, crawlJobId, yearFrom, yearTo, page, pageSize, taskStatus, taskMessage, getSignal]);
+  }, [q, status, source, screeningStage, crawlJobId, yearFrom, yearTo, page, pageSize, taskStatus, taskMessage, getSignal, t]);
 
   const fetchDataRef = useRef(fetchData);
   fetchDataRef.current = fetchData;
@@ -230,12 +233,12 @@ export default function StagingPapersPage() {
   };
 
   const aiScreenTargetLabel = selectedIds.length > 0
-    ? `选中的 ${selectedIds.length} 篇文献`
+    ? t("staging.aiScreen.targetSelected", { count: selectedIds.length })
     : crawlJobId
-      ? `Job #${crawlJobId} 的 pending 文献`
+      ? t("staging.aiScreen.targetJob", { jobId: crawlJobId })
       : q.trim()
-        ? `关键词「${q.trim()}」匹配的 pending 文献`
-        : "全部 pending 文献";
+        ? t("staging.aiScreen.targetKeyword", { keyword: q.trim() })
+        : t("staging.aiScreen.targetAll");
 
   const handleAIScreen = async () => {
     if (!aiScreenTopic.trim()) return;
@@ -253,7 +256,7 @@ export default function StagingPapersPage() {
       setAiScreening(true);
       setShowAIScreenModal(false);
       setTaskStatus("running");
-      setTaskMessage(`AI 正在筛选 ${aiScreenTargetLabel}...`);
+      setTaskMessage(t("staging.msg.aiScreening", { target: aiScreenTargetLabel }));
 
       const resp = await fetch(`${API_BASE_URL}/api/staging-papers/ai-screen`, {
         method: "POST",
@@ -263,15 +266,20 @@ export default function StagingPapersPage() {
 
       if (!resp.ok) {
         const text = await resp.text();
-        throw new Error(`AI 筛选失败: ${resp.status} - ${text}`);
+        throw new Error(t("staging.msg.aiScreenFailed", { status: resp.status, body: text }));
       }
 
       const result = await resp.json();
       setTaskStatus("done");
       setTaskMessage(
-        `AI 筛选完成：共 ${result.total} 篇，推荐 ${result.promoted} 篇，待复核 ${result.pending_review} 篇，拒绝 ${result.rejected} 篇` +
-          (result.pre_filtered > 0 ? `，预过滤 ${result.pre_filtered} 篇` : "") +
-          (result.failed > 0 ? `，失败 ${result.failed} 篇` : ""),
+        t("staging.msg.aiScreenComplete", {
+          total: result.total,
+          promoted: result.promoted,
+          pending_review: result.pending_review,
+          rejected: result.rejected,
+        }) +
+          (result.pre_filtered > 0 ? t("staging.msg.aiScreenPreFiltered", { count: result.pre_filtered }) : "") +
+          (result.failed > 0 ? t("staging.msg.aiScreenFailedCount", { count: result.failed }) : ""),
       );
       setSelectedIds([]);
       await fetchData({ page });
@@ -279,7 +287,7 @@ export default function StagingPapersPage() {
       console.error("AI screen error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `AI 筛选失败：${(err as { message?: string })?.message || "未知错误"}`,
+        t("staging.msg.loadFailed", { error: (err as { message?: string })?.message || t("staging.msg.unknownError") }),
       );
     } finally {
       setAiScreening(false);
@@ -290,7 +298,7 @@ export default function StagingPapersPage() {
     try {
       setEnriching(true);
       setTaskStatus("running");
-      setTaskMessage("正在从 CrossRef / Semantic Scholar 补齐缺失的摘要和元数据...");
+      setTaskMessage(t("staging.msg.enriching"));
 
       const payload: Record<string, unknown> = { only_missing_abstract: true };
       if (selectedIds.length > 0) payload.ids = selectedIds;
@@ -302,20 +310,20 @@ export default function StagingPapersPage() {
       });
       if (!resp.ok) {
         const text = await resp.text();
-        throw new Error(`补齐失败: ${resp.status} - ${text}`);
+        throw new Error(t("staging.msg.enrichFailed", { status: resp.status, body: text }));
       }
       const result = await resp.json();
       setTaskStatus("done");
       setTaskMessage(
-        `补齐完成：共 ${result.total} 篇，成功补齐 ${result.enriched} 篇` +
-        (result.skipped_no_doi > 0 ? `，${result.skipped_no_doi} 篇无 DOI 跳过` : "") +
-        (result.failed > 0 ? `，${result.failed} 篇失败` : ""),
+        t("staging.msg.enrichComplete", { total: result.total, enriched: result.enriched }) +
+        (result.skipped_no_doi > 0 ? t("staging.msg.enrichSkippedNoDoi", { count: result.skipped_no_doi }) : "") +
+        (result.failed > 0 ? t("staging.msg.enrichFailedCount", { count: result.failed }) : ""),
       );
       setSelectedIds([]);
       await fetchData({ page });
     } catch (err) {
       setTaskStatus("error");
-      setTaskMessage(`补齐失败：${(err as { message?: string })?.message || "未知错误"}`);
+      setTaskMessage(t("staging.msg.loadFailed", { error: (err as { message?: string })?.message || t("staging.msg.unknownError") }));
     } finally {
       setEnriching(false);
     }
@@ -354,7 +362,7 @@ export default function StagingPapersPage() {
     try {
       setPromoting(true);
       setTaskStatus("running");
-      setTaskMessage(`正在提升 ${selectedIds.length} 条暂存文献为正式文献...`);
+      setTaskMessage(t("staging.msg.promoting", { count: selectedIds.length }));
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
@@ -374,24 +382,24 @@ export default function StagingPapersPage() {
       if (!resp.ok) {
         const text = await resp.text();
         throw new Error(
-          `提升失败: ${resp.status} ${resp.statusText} - ${text}`,
+          t("staging.msg.promoteFailed", { status: resp.status, statusText: resp.statusText, body: text }),
         );
       }
 
       const promoted = await resp.json();
       const count = Array.isArray(promoted) ? promoted.length : 0;
       setTaskStatus("done");
-      setTaskMessage(`已成功提升 ${count} 条暂存文献为正式文献`);
+      setTaskMessage(t("staging.msg.promoteSuccess", { count }));
       setSelectedIds([]);
       await fetchData({ page });
     } catch (err) {
       console.error("promote staging error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `提升失败：${(err as { message?: string })?.message || "未知错误"}`,
+        t("staging.msg.loadFailed", { error: (err as { message?: string })?.message || t("staging.msg.unknownError") }),
       );
       setError(
-        (err as { message?: string })?.message || "提升暂存文献时出现错误",
+        (err as { message?: string })?.message || t("staging.msg.promoteError"),
       );
     } finally {
       setPromoting(false);
@@ -404,7 +412,7 @@ export default function StagingPapersPage() {
 
     try {
       setTaskStatus("running");
-      setTaskMessage(`正在将选中的 ${rejectCount} 条暂存文献标记为已拒绝...`);
+      setTaskMessage(t("staging.msg.rejecting", { count: rejectCount }));
 
       const resp = await fetch(`${API_BASE_URL}/api/staging-papers/reject`, {
         method: "POST",
@@ -421,14 +429,14 @@ export default function StagingPapersPage() {
       if (!resp.ok) {
         const text = await resp.text();
         throw new Error(
-          `拒绝失败: ${resp.status} ${resp.statusText} - ${text}`,
+          t("staging.msg.rejectFailed", { status: resp.status, statusText: resp.statusText, body: text }),
         );
       }
 
       const result = await resp.json();
       console.log("Reject result:", result);
       setTaskStatus("done");
-      setTaskMessage(`已标记拒绝 ${result.rejected_count} 条暂存文献`);
+      setTaskMessage(t("staging.msg.rejectSuccess", { count: result.rejected_count }));
       setSelectedIds([]);
       setTimeout(() => setTaskMessage(""), 3000);
       await fetchData({ page });
@@ -436,7 +444,7 @@ export default function StagingPapersPage() {
       console.error("reject staging error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `拒绝失败：${(err as { message?: string })?.message || "未知错误"}`,
+        t("staging.msg.loadFailed", { error: (err as { message?: string })?.message || t("staging.msg.unknownError") }),
       );
     }
   };
@@ -447,7 +455,7 @@ export default function StagingPapersPage() {
 
     try {
       setTaskStatus("running");
-      setTaskMessage(`正在永久删除选中的 ${deleteCount} 条暂存文献...`);
+      setTaskMessage(t("staging.msg.deleting", { count: deleteCount }));
 
       const resp = await fetch(`${API_BASE_URL}/api/staging-papers/delete`, {
         method: "POST",
@@ -461,14 +469,14 @@ export default function StagingPapersPage() {
       if (!resp.ok) {
         const text = await resp.text();
         throw new Error(
-          `删除失败: ${resp.status} ${resp.statusText} - ${text}`,
+          t("staging.msg.deleteFailed", { status: resp.status, statusText: resp.statusText, body: text }),
         );
       }
 
       const result = await resp.json();
       console.log("Delete result:", result);
       setTaskStatus("done");
-      setTaskMessage(`已永久删除 ${result.deleted_count} 条暂存文献`);
+      setTaskMessage(t("staging.msg.deleteSuccess", { count: result.deleted_count }));
       setSelectedIds([]);
       setTimeout(() => setTaskMessage(""), 3000);
       await fetchData({ page });
@@ -476,7 +484,7 @@ export default function StagingPapersPage() {
       console.error("delete staging error", err);
       setTaskStatus("error");
       setTaskMessage(
-        `删除失败：${(err as { message?: string })?.message || "未知错误"}`,
+        t("staging.msg.loadFailed", { error: (err as { message?: string })?.message || t("staging.msg.unknownError") }),
       );
     }
   };
@@ -500,9 +508,9 @@ export default function StagingPapersPage() {
     <div className="page-container">
       <header className="page-header">
         <div className="page-title">
-          <h1>暂存文献库</h1>
+          <h1>{t("staging.pageTitle")}</h1>
           <p>
-            审核和筛选由爬虫抓取的原始文献元数据，将合适的记录提升为正式文献
+            {t("staging.pageSubtitle")}
           </p>
         </div>
         <StagingBatchActions
@@ -619,22 +627,22 @@ export default function StagingPapersPage() {
             }}
           >
             <h3 style={{ marginTop: 0, color: "#7c3aed" }}>
-              🤖 AI 相关度筛选
+              {t("staging.aiScreen.title")}
             </h3>
             <p style={{ color: "#4b5563", fontSize: 14, lineHeight: 1.5 }}>
-              将对 <strong>{aiScreenTargetLabel}</strong> 进行 AI 相关度评分。
+              {t("staging.aiScreen.description", { target: aiScreenTargetLabel })}
             </p>
             <p style={{ color: "#6b7280", fontSize: 12, lineHeight: 1.5 }}>
-              评分标准：7-10 分推荐入库 / 4-6 分待人工复核 / 0-3 分自动拒绝
+              {t("staging.aiScreen.criteria")}
             </p>
             <div style={{ marginTop: 12 }}>
               <label style={{ fontSize: 13, color: "#374151", fontWeight: 500 }}>
-                研究主题 (必填):
+                {t("staging.aiScreen.topicLabel")}
               </label>
               <textarea
                 value={aiScreenTopic}
                 onChange={(e) => setAiScreenTopic(e.target.value)}
-                placeholder="例如: Transit-Oriented Development and pedestrian safety in urban areas"
+                placeholder={t("staging.aiScreen.topicPlaceholder")}
                 style={{
                   width: "100%",
                   marginTop: 6,
@@ -666,7 +674,7 @@ export default function StagingPapersPage() {
                   cursor: "pointer",
                 }}
               >
-                取消
+                {t("staging.aiScreen.cancel")}
               </button>
               <button
                 onClick={handleAIScreen}
@@ -681,7 +689,7 @@ export default function StagingPapersPage() {
                   cursor: aiScreenTopic.trim() ? "pointer" : "default",
                 }}
               >
-                开始筛选
+                {t("staging.aiScreen.start")}
               </button>
             </div>
           </div>

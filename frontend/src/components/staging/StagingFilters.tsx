@@ -1,4 +1,5 @@
 import { STATUS_OPTIONS, SOURCE_OPTIONS, SCREENING_STAGE_OPTIONS } from "./types";
+import { useLocale } from "../../hooks/useLocale";
 
 interface StagingFiltersProps {
   q: string;
@@ -37,6 +38,8 @@ export default function StagingFilters({
   loading,
   onSearch,
 }: StagingFiltersProps) {
+  const { t } = useLocale();
+
   return (
     <div
       style={{
@@ -65,7 +68,7 @@ export default function StagingFilters({
             whiteSpace: "nowrap",
           }}
         >
-          关键词:
+          {t("staging.filter.keyword")}
         </label>
         <div
           style={{
@@ -78,7 +81,7 @@ export default function StagingFilters({
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="模糊匹配标题和摘要..."
+            placeholder={t("staging.filter.keywordPlaceholder")}
             style={{
               width: "100%",
               height: 36,
@@ -119,7 +122,7 @@ export default function StagingFilters({
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
-          状态:
+          {t("staging.filter.status")}
         </label>
         <select
           value={status}
@@ -138,7 +141,7 @@ export default function StagingFilters({
         >
           {STATUS_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
-              {opt.label}
+              {t(opt.labelKey)}
             </option>
           ))}
         </select>
@@ -148,7 +151,7 @@ export default function StagingFilters({
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
-          数据源:
+          {t("staging.filter.source")}
         </label>
         <select
           value={source}
@@ -168,7 +171,7 @@ export default function StagingFilters({
         >
           {SOURCE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
-              {opt.label}
+              {opt.labelKey ? t(opt.labelKey) : opt.label}
             </option>
           ))}
         </select>
@@ -178,7 +181,7 @@ export default function StagingFilters({
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
-          筛选阶段:
+          {t("staging.filter.screeningStage")}
         </label>
         <select
           value={screeningStage}
@@ -198,7 +201,7 @@ export default function StagingFilters({
         >
           {SCREENING_STAGE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
-              {opt.label}
+              {t(opt.labelKey)}
             </option>
           ))}
         </select>
@@ -208,7 +211,7 @@ export default function StagingFilters({
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
-          年份:
+          {t("staging.filter.year")}
         </label>
         <input
           value={yearFrom}
@@ -249,12 +252,12 @@ export default function StagingFilters({
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <label style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>
-          Job ID:
+          {t("staging.filter.jobId")}
         </label>
         <input
           value={crawlJobId}
           onChange={(e) => setCrawlJobId(e.target.value)}
-          placeholder="可选"
+          placeholder={t("staging.filter.jobIdPlaceholder")}
           type="number"
           style={{
             width: 60,
@@ -288,7 +291,7 @@ export default function StagingFilters({
           marginLeft: "auto",
         }}
       >
-        {loading ? "检索中..." : "检索"}
+        {loading ? t("staging.filter.searching") : t("staging.filter.search")}
       </button>
     </div>
   );

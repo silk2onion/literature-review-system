@@ -1,3 +1,5 @@
+import { useLocale } from "../../hooks/useLocale";
+
 interface BatchActionBarProps {
   selectedCount: number;
   deleting: boolean;
@@ -37,6 +39,8 @@ export default function BatchActionBar({
   onBatchDownloadPdf,
   onGenerateReview,
 }: BatchActionBarProps) {
+  const { t } = useLocale();
+
   if (selectedCount === 0) return null;
 
   return (
@@ -45,7 +49,7 @@ export default function BatchActionBar({
         onClick={onAddToGroup}
         className="action-button"
       >
-        加入分组
+        {t("batch.addToGroup")}
       </button>
       {onBatchDownloadPdf && (
         <button
@@ -59,8 +63,8 @@ export default function BatchActionBar({
           }}
         >
           {batchDownloading
-            ? "下载中..."
-            : `批量下载 PDF (${selectedCount})`}
+            ? t("batch.downloadingPdf")
+            : t("batch.batchDownloadPdf", { count: selectedCount })}
         </button>
       )}
       {selectedGroupId && (
@@ -69,7 +73,7 @@ export default function BatchActionBar({
           disabled={removingFromGroup}
           className="action-button warning"
         >
-          {removingFromGroup ? "移除中..." : "从分组移除"}
+          {removingFromGroup ? t("batch.removingFromGroup") : t("batch.removeFromGroup")}
         </button>
       )}
       {selectedGroupId && onGenerateReview && (
@@ -77,7 +81,7 @@ export default function BatchActionBar({
           onClick={onGenerateReview}
           className="action-button accent"
         >
-          ✨ 基于此分组生成综述
+          ✨ {t("batch.generateReviewFromGroup")}
         </button>
       )}
       <button
@@ -85,14 +89,14 @@ export default function BatchActionBar({
         disabled={syncing}
         className="action-button"
       >
-        {syncing ? "同步中..." : `同步引用 (${selectedCount})`}
+        {syncing ? t("batch.syncing") : t("batch.syncCitations", { count: selectedCount })}
       </button>
       <button
         onClick={onDelete}
         disabled={deleting}
         className="action-button danger"
       >
-        {deleting ? "删除中..." : `删除选中 (${selectedCount})`}
+        {deleting ? t("batch.deleting") : t("batch.deleteSelected", { count: selectedCount })}
       </button>
 
       {!showArchived ? (
@@ -109,7 +113,7 @@ export default function BatchActionBar({
             cursor: archiving ? "not-allowed" : "pointer",
           }}
         >
-          {archiving ? "归档中..." : `归档选中 (${selectedCount})`}
+          {archiving ? t("batch.archiving") : t("batch.archiveSelected", { count: selectedCount })}
         </button>
       ) : (
         <button
@@ -125,7 +129,7 @@ export default function BatchActionBar({
             cursor: restoring ? "not-allowed" : "pointer",
           }}
         >
-          {restoring ? "恢复中..." : `恢复选中 (${selectedCount})`}
+          {restoring ? t("batch.restoring") : t("batch.restoreSelected", { count: selectedCount })}
         </button>
       )}
     </>

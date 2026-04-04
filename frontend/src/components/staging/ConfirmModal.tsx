@@ -1,3 +1,5 @@
+import { useLocale } from "../../hooks/useLocale";
+
 interface ConfirmModalProps {
   show: boolean;
   type: "delete" | "reject" | null;
@@ -6,7 +8,6 @@ interface ConfirmModalProps {
   setExclusionReasonInput: (v: string) => void;
   onCancel: () => void;
   onConfirm: () => void;
-  /** 可选：预定义排除原因模板列表 */
   exclusionTemplates?: string[];
 }
 
@@ -20,6 +21,8 @@ export default function ConfirmModal({
   onConfirm,
   exclusionTemplates,
 }: ConfirmModalProps) {
+  const { t } = useLocale();
+
   if (!show) return null;
 
   return (
@@ -55,22 +58,22 @@ export default function ConfirmModal({
           }}
         >
           {type === "delete"
-            ? "⚠️ 确认永久删除"
-            : "确认标记拒绝"}
+            ? t("staging.confirm.deleteTitle")
+            : t("staging.confirm.rejectTitle")}
         </h3>
         <p
           style={{ color: "#4b5563", fontSize: "14px", lineHeight: "1.5" }}
         >
           {type === "delete"
-            ? `确定要永久删除选中的 ${count} 条暂存文献吗？此操作不可恢复！`
-            : `确定要将当前选中的 ${count} 条暂存文献标记为"已拒绝"吗？`}
+            ? t("staging.confirm.deleteMessage", { count })
+            : t("staging.confirm.rejectMessage", { count })}
         </p>
         {type === "reject" && (
           <div style={{ marginTop: 12 }}>
             <label
               style={{ fontSize: 13, color: "#374151", fontWeight: 500 }}
             >
-              排除原因:
+              {t("staging.confirm.exclusionReason")}
             </label>
             {exclusionTemplates && exclusionTemplates.length > 0 && (
               <select
@@ -90,16 +93,16 @@ export default function ConfirmModal({
                   cursor: "pointer",
                 }}
               >
-                <option value="">-- 选择预定义原因 --</option>
-                {exclusionTemplates.map((t) => (
-                  <option key={t} value={t}>{t}</option>
+                <option value="">{t("staging.confirm.selectTemplate")}</option>
+                {exclusionTemplates.map((tmpl) => (
+                  <option key={tmpl} value={tmpl}>{tmpl}</option>
                 ))}
               </select>
             )}
             <textarea
               value={exclusionReasonInput}
               onChange={(e) => setExclusionReasonInput(e.target.value)}
-              placeholder="选择上方模板或自行填写排除原因..."
+              placeholder={t("staging.confirm.exclusionPlaceholder")}
               style={{
                 width: "100%",
                 marginTop: 6,
@@ -132,7 +135,7 @@ export default function ConfirmModal({
               cursor: "pointer",
             }}
           >
-            取消
+            {t("staging.confirm.cancel")}
           </button>
           <button
             onClick={onConfirm}
@@ -147,7 +150,9 @@ export default function ConfirmModal({
               cursor: "pointer",
             }}
           >
-            确认{type === "delete" ? "删除" : "拒绝"}
+            {type === "delete"
+              ? t("staging.confirm.confirmDelete")
+              : t("staging.confirm.confirmReject")}
           </button>
         </div>
       </div>
