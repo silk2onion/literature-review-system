@@ -1,33 +1,7 @@
 import JournalTooltip, { type JournalInfoLookup } from "./JournalTooltip";
 import { API_BASE_URL } from "../../api/config";
 import { useLocale } from "../../hooks/useLocale";
-
-export type PaperResponse = {
-  id: number;
-  title: string;
-  authors?: string[];
-  abstract?: string;
-  publication_date?: string;
-  year?: number;
-  journal?: string | null;
-  journal_issn?: string | null;
-  venue?: string | null;
-  journal_impact_factor?: number | null;
-  journal_quartile?: string | null;
-  indexing?: string[] | null;
-  doi?: string | null;
-  arxiv_id?: string | null;
-  pmid?: string | null;
-  url?: string | null;
-  pdf_url?: string | null;
-  source?: string | null;
-  categories?: string[] | null;
-  keywords?: string[] | null;
-  citations_count?: number | null;
-  pdf_path?: string | null;
-  created_at: string;
-  updated_at: string;
-};
+import type { PaperResponse } from "../../types/paper";
 
 interface PapersTableProps {
   items: PaperResponse[];

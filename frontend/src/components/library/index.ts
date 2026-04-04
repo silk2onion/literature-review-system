@@ -8,4 +8,4 @@ export { default as AddToGroupModal } from "./AddToGroupModal";
 export { default as ConfirmDeleteModal } from "./ConfirmDeleteModal";
 
 export type { JournalInfoLookup } from "./JournalTooltip";
-export type { PaperResponse } from "./PapersTable";
+export type { PaperResponse } from "../../types/paper";
