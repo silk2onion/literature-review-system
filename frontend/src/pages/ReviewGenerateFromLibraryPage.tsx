@@ -54,7 +54,7 @@ export default function ReviewGenerateFromLibraryPage() {
   );
 
   return (
-    <div className="page-container" style={{ display: "flex", flexDirection: "row", overflow: "hidden" }}>
+    <div style={{ display: "flex", flexDirection: "row", height: "100%", overflow: "hidden" }}>
       {/* Main: PhD Pipeline */}
       <div style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
         <PhdPipelinePage
