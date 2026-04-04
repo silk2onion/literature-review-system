@@ -983,56 +983,67 @@ export default function LibraryPage({
           </div>
         </div>
 
-        {/* Citation Graph Panel — floating drawer */}
+        {/* Citation Graph Modal */}
         {selectedPaperId !== null && (
           <div
+            onClick={() => { setSelectedPaperId(null); setSelectedPaperTitle(""); }}
             style={{
               position: "fixed",
-              top: 0,
-              right: 0,
-              width: 560,
-              height: "100vh",
-              backgroundColor: "var(--bg-primary)",
-              borderLeft: "1px solid var(--border-color)",
-              boxShadow: "-4px 0 20px rgba(0,0,0,0.08)",
-              zIndex: 1000,
+              inset: 0,
+              backgroundColor: "rgba(0,0,0,0.3)",
+              backdropFilter: "blur(4px)",
+              zIndex: 2000,
               display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
+              justifyContent: "center",
+              alignItems: "center",
             }}
           >
             <div
+              onClick={(e) => e.stopPropagation()}
               style={{
-                padding: "14px 20px",
-                borderBottom: "1px solid var(--border-color)",
+                width: "80vw",
+                maxWidth: 900,
+                height: "80vh",
+                backgroundColor: "var(--bg-primary)",
+                borderRadius: 16,
+                boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
                 display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
+                flexDirection: "column",
+                overflow: "hidden",
               }}
             >
-              <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
-                {selectedPaperTitle}
-              </span>
-              <button
-                onClick={() => { setSelectedPaperId(null); setSelectedPaperTitle(""); }}
+              <div
                 style={{
-                  border: "none",
-                  background: "transparent",
-                  fontSize: 18,
-                  cursor: "pointer",
-                  color: "var(--text-secondary)",
-                  padding: "4px 8px",
-                  borderRadius: 4,
+                  padding: "16px 24px",
+                  borderBottom: "1px solid var(--border-color)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexShrink: 0,
                 }}
               >
-                ×
-              </button>
-            </div>
-            <div style={{ flex: 1, overflowY: "auto" }}>
-              <CitationGraphPanel
-                paperId={selectedPaperId}
-                title={selectedPaperTitle}
-              />
+                <span style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, marginRight: 16 }}>
+                  {selectedPaperTitle}
+                </span>
+                <button
+                  onClick={() => { setSelectedPaperId(null); setSelectedPaperTitle(""); }}
+                  style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    border: "none", background: "transparent",
+                    fontSize: 18, cursor: "pointer",
+                    color: "var(--text-secondary)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ flex: 1, overflowY: "auto" }}>
+                <CitationGraphPanel
+                  paperId={selectedPaperId}
+                  title={selectedPaperTitle}
+                />
+              </div>
             </div>
           </div>
         )}
