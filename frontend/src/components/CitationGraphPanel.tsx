@@ -128,9 +128,9 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
         marginTop: 16,
         padding: 12,
         borderRadius: 8,
-        border: '1px solid #1f2937',
-        backgroundColor: '#020617',
-        color: '#e5e7eb',
+        border: '1px solid #e2e8f0',
+        backgroundColor: '#f8fafc',
+        color: '#1e293b',
         fontSize: 12,
       }}
     >
@@ -185,7 +185,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
       </div>
 
       {error && (
-        <div style={{ color: '#f97373', marginBottom: 8 }}>{error}</div>
+        <div style={{ color: '#dc2626', marginBottom: 8 }}>{error}</div>
       )}
 
       {!graph && !loading && !error && (
@@ -249,8 +249,8 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
               style={{
                 padding: 8,
                 borderRadius: 6,
-                border: '1px solid #1f2937',
-                backgroundColor: '#020617',
+                border: '1px solid #e2e8f0',
+                backgroundColor: '#f8fafc',
               }}
             >
               <div style={{ fontWeight: 600, marginBottom: 4 }}>中心论文</div>
@@ -270,7 +270,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
               maxHeight: 220,
               overflow: 'auto',
               borderRadius: 6,
-              border: '1px solid #1f2937',
+              border: '1px solid #e2e8f0',
               padding: 6,
             }}
           >
@@ -291,7 +291,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
                       style={{
                         textAlign: 'left',
                         padding: '4px 6px',
-                        borderBottom: '1px solid #1f2937',
+                        borderBottom: '1px solid #e2e8f0',
                       }}
                     >
                       标题
@@ -300,7 +300,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
                       style={{
                         textAlign: 'left',
                         padding: '4px 6px',
-                        borderBottom: '1px solid #1f2937',
+                        borderBottom: '1px solid #e2e8f0',
                         width: 80,
                       }}
                     >
@@ -310,7 +310,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
                       style={{
                         textAlign: 'left',
                         padding: '4px 6px',
-                        borderBottom: '1px solid #1f2937',
+                        borderBottom: '1px solid #e2e8f0',
                         width: 80,
                       }}
                     >
@@ -320,7 +320,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
                       style={{
                         textAlign: 'left',
                         padding: '4px 6px',
-                        borderBottom: '1px solid #1f2937',
+                        borderBottom: '1px solid #e2e8f0',
                         width: 120,
                       }}
                     >
@@ -352,7 +352,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
                         style={{
                           padding: '4px 6px',
                           borderBottom: '1px solid #020617',
-                          color: '#e5e7eb',
+                          color: '#1e293b',
                         }}
                       >
                         {n.year ?? '-'}
@@ -378,7 +378,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
               maxHeight: 160,
               overflow: 'auto',
               borderRadius: 6,
-              border: '1px solid #1f2937',
+              border: '1px solid #e2e8f0',
               padding: 6,
             }}
           >
@@ -399,7 +399,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
                       style={{
                         textAlign: 'left',
                         padding: '4px 6px',
-                        borderBottom: '1px solid #1f2937',
+                        borderBottom: '1px solid #e2e8f0',
                         width: 70,
                       }}
                     >
@@ -409,7 +409,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
                       style={{
                         textAlign: 'left',
                         padding: '4px 6px',
-                        borderBottom: '1px solid #1f2937',
+                        borderBottom: '1px solid #e2e8f0',
                         width: 70,
                       }}
                     >
@@ -419,7 +419,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
                       style={{
                         textAlign: 'left',
                         padding: '4px 6px',
-                        borderBottom: '1px solid #1f2937',
+                        borderBottom: '1px solid #e2e8f0',
                         width: 120,
                       }}
                     >
@@ -429,7 +429,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
                       style={{
                         textAlign: 'left',
                         padding: '4px 6px',
-                        borderBottom: '1px solid #1f2937',
+                        borderBottom: '1px solid #e2e8f0',
                         width: 80,
                       }}
                     >
@@ -469,7 +469,7 @@ function CitationGraphPanel({ paperId, title }: CitationGraphPanelProps) {
                         style={{
                           padding: '4px 6px',
                           borderBottom: '1px solid #020617',
-                          color: '#e5e7eb',
+                          color: '#1e293b',
                         }}
                       >
                         {e.confidence.toFixed(2)}
