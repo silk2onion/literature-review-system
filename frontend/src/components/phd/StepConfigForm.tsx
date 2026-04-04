@@ -154,9 +154,12 @@ const StepConfigForm: React.FC<StepConfigFormProps> = ({
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
             {[
               "arxiv",
+              "crossref",
               "scholar_serpapi",
               "scopus",
               "semantic_scholar",
+              "openalex",
+              "wos",
               "local_rag",
             ].map((src) => (
               <label
