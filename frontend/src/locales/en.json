@@ -618,5 +618,10 @@
   "phd.closeRagDebug": "Close RAG Debug",
   "phd.backToAssistant": "Back to Assistant",
   "phd.currentReviewId": "Current Review ID:",
-  "phd.errorLabel": "Error: "
+  "phd.errorLabel": "Error: ",
+  "review.generate.paperBrowser": "Paper Browser",
+  "review.generate.selected": "{count} selected",
+  "review.generate.openBrowser": "Open Paper Browser",
+  "review.generate.closeBrowser": "Close Paper Browser",
+  "review.generate.noPapers": "No papers yet. Add papers to the library first."
 }

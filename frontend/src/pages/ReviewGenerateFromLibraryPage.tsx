@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import PhdPipelinePage from "./PhdPipelinePage";
 import { API_BASE_URL } from "../api/config";
 import { useLocale } from "../hooks/useLocale";
+import { ChevronRight, ChevronLeft, BookOpen } from "lucide-react";
 
 type PaperResponse = {
   id: number;
@@ -18,44 +19,18 @@ type SearchLocalResponse = {
   items: PaperResponse[];
 };
 
-type ReviewGenerateResponse = {
-  success: boolean;
-  review_id: number;
-  status: string;
-  message?: string;
-  preview_markdown?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  summary_stats?: any;
-};
-
 export default function ReviewGenerateFromLibraryPage() {
   const { t } = useLocale();
-  const [mode, setMode] = useState<"standard" | "phd">("standard");
 
-  // --- Paper Selection State ---
-  // const [sourceMode, setSourceMode] = useState<"manual" | "group">("manual");
+  // --- Paper Browser State (right panel, collapsible) ---
+  const [showPaperBrowser, setShowPaperBrowser] = useState(false);
   const [query, setQuery] = useState("");
   const [papers, setPapers] = useState<PaperResponse[]>([]);
-  // const [total, setTotal] = useState(0); // unused for now
   const [loadingPapers, setLoadingPapers] = useState(false);
   const [selectedPaperIds, setSelectedPaperIds] = useState<Set<number>>(
     new Set(),
   );
 
-  // --- Group Selection State ---
-  // const [groups, setGroups] = useState<LiteratureGroup[]>([]);
-  // const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
-
-  // --- Generation State ---
-  const [keywords, setKeywords] = useState("");
-  const [customPrompt, setCustomPrompt] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [generatedReview, setGeneratedReview] =
-    useState<ReviewGenerateResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // Fetch papers (simplified version of LibraryPage)
   const fetchPapers = async () => {
     try {
       setLoadingPapers(true);
@@ -65,12 +40,11 @@ export default function ReviewGenerateFromLibraryPage() {
         body: JSON.stringify({
           q: query.trim() || undefined,
           page: 1,
-          page_size: 100, // Fetch more for selection
+          page_size: 100,
         }),
       });
       const data: SearchLocalResponse = await resp.json();
       setPapers(data.items || []);
-      // setTotal(data.total);
     } catch (err) {
       console.error("Failed to fetch papers", err);
     } finally {
@@ -79,8 +53,10 @@ export default function ReviewGenerateFromLibraryPage() {
   };
 
   useEffect(() => {
-    fetchPapers();
-  }, []); // Initial load
+    if (showPaperBrowser && papers.length === 0) {
+      fetchPapers();
+    }
+  }, [showPaperBrowser]);
 
   const handleTogglePaper = (id: number) => {
     const newSet = new Set(selectedPaperIds);
@@ -92,264 +68,159 @@ export default function ReviewGenerateFromLibraryPage() {
     setSelectedPaperIds(newSet);
   };
 
-  const handleGenerate = async () => {
-    if (selectedPaperIds.size === 0) {
-      setError(t("review.generate.errorSelectPaper"));
-      return;
-    }
-    if (!keywords.trim()) {
-      setError(t("review.generate.errorEnterKeywords"));
-      return;
-    }
-
-    setGenerating(true);
-    setError(null);
-    setGeneratedReview(null);
-
-    try {
-      const payload = {
-        keywords: keywords
-          .split(/[,，]/)
-          .map((k) => k.trim())
-          .filter((k) => k),
-        paper_ids: Array.from(selectedPaperIds),
-        paper_limit: selectedPaperIds.size, // Explicitly use all selected
-        custom_prompt: customPrompt.trim() || undefined,
-        phd_pipeline: false, // Default to standard review for now
-      };
-
-      const resp = await fetch(`${API_BASE_URL}/api/reviews/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data: ReviewGenerateResponse = await resp.json();
-      if (data.success) {
-        setGeneratedReview(data);
-      } else {
-        setError(data.message || t("review.generate.generateFailed"));
-      }
-    } catch (err) {
-      setError(`${t("review.generate.requestFailed")}: ${err}`);
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const handleExport = async (format: "markdown" | "docx" | "pdf") => {
-    if (!generatedReview?.review_id) return;
-    setExporting(true);
-    try {
-      const resp = await fetch(
-        `${API_BASE_URL}/api/reviews/${generatedReview.review_id}/export`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ format, include_references: true }),
-        },
-      );
-      if (!resp.ok) throw new Error("Export failed");
-
-      const blob = await resp.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `review-${generatedReview.review_id}.${format === "markdown" ? "md" : format}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err) {
-      console.error(err);
-      alert(t("review.generate.exportFailed"));
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
-    <div className="page-container">
-      <header className="page-header">
-        <div className="page-title">
-          <h1>{t("review.generate.title")}</h1>
-          <p>{t("review.generate.subtitle")}</p>
-        </div>
-        <div className="view-switch">
-          <button
-            onClick={() => setMode("standard")}
-            className={`view-switch-button ${mode === "standard" ? "active" : ""}`}
-          >
-            {t("review.generate.standardMode")}
-          </button>
-          <button
-            onClick={() => setMode("phd")}
-            className={`view-switch-button ${mode === "phd" ? "active" : ""}`}
-          >
-            {t("review.generate.phdMode")}
-          </button>
-        </div>
-      </header>
+    <div className="page-container" style={{ display: "flex", flexDirection: "row", overflow: "hidden" }}>
+      {/* Main: PhD Pipeline (takes full width or shrinks when browser open) */}
+      <div style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
+        <PhdPipelinePage
+          embedded={true}
+          initialPaperIds={Array.from(selectedPaperIds)}
+        />
+      </div>
 
-      <div className="review-workbench-container">
-        {/* Left Panel: Paper Selection */}
-        {/* Left Panel: Paper Selection */}
-        <div className="paper-selection-panel">
-          <div className="panel-header">
-            <h3>{t("review.generate.selectPapers", { count: selectedPaperIds.size })}</h3>
-            <div className="search-bar-small">
+      {/* Toggle button for paper browser */}
+      <button
+        onClick={() => setShowPaperBrowser(!showPaperBrowser)}
+        title={showPaperBrowser ? t("review.generate.closeBrowser") : t("review.generate.openBrowser")}
+        style={{
+          width: 28,
+          minWidth: 28,
+          border: "none",
+          borderLeft: "1px solid #e2e8f0",
+          background: showPaperBrowser ? "#f0f9ff" : "#fafafa",
+          cursor: "pointer",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          padding: "8px 0",
+          color: "#64748b",
+          transition: "background 0.15s",
+        }}
+      >
+        <BookOpen size={14} />
+        {showPaperBrowser ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+      </button>
+
+      {/* Right: Paper Browser (collapsible) */}
+      {showPaperBrowser && (
+        <div
+          style={{
+            width: 380,
+            minWidth: 380,
+            borderLeft: "1px solid #e2e8f0",
+            display: "flex",
+            flexDirection: "column",
+            backgroundColor: "#fafafa",
+          }}
+        >
+          {/* Search bar */}
+          <div
+            style={{
+              padding: "14px 16px",
+              borderBottom: "1px solid #e2e8f0",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+                {t("review.generate.paperBrowser")}
+              </span>
+              {selectedPaperIds.size > 0 && (
+                <span style={{
+                  fontSize: 11, color: "#3b82f6", fontWeight: 500,
+                  padding: "2px 8px", backgroundColor: "#eff6ff", borderRadius: 10,
+                }}>
+                  {t("review.generate.selected", { count: selectedPaperIds.size })}
+                </span>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={t("review.generate.searchPlaceholder")}
-                className="filter-input"
                 onKeyDown={(e) => e.key === "Enter" && fetchPapers()}
+                style={{
+                  flex: 1,
+                  padding: "7px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #e2e8f0",
+                  fontSize: 12,
+                  backgroundColor: "#fff",
+                }}
               />
               <button
                 onClick={fetchPapers}
-                className="action-button primary small"
+                style={{
+                  padding: "7px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #e2e8f0",
+                  backgroundColor: "#fff",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  color: "#374151",
+                }}
               >
                 {t("review.generate.search")}
               </button>
             </div>
           </div>
 
-          <div className="paper-list-container">
+          {/* Paper list */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
             {loadingPapers ? (
-              <div className="loading-state">{t("common.loading")}</div>
+              <div style={{ padding: 20, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>
+                {t("common.loading")}
+              </div>
+            ) : papers.length === 0 ? (
+              <div style={{ padding: 20, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>
+                {t("review.generate.noPapers")}
+              </div>
             ) : (
-              <table className="paper-list-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: "40px", textAlign: "center" }}>
-                      <input
-                        type="checkbox"
-                        checked={
-                          papers.length > 0 &&
-                          selectedPaperIds.size === papers.length
-                        }
-                        onChange={() => {
-                          if (selectedPaperIds.size === papers.length) {
-                            setSelectedPaperIds(new Set());
-                          } else {
-                            setSelectedPaperIds(
-                              new Set(papers.map((p) => p.id)),
-                            );
-                          }
-                        }}
-                        style={{ cursor: "pointer" }}
-                      />
-                    </th>
-                    <th style={{ minWidth: 200 }}>{t("review.generate.tableTitle")}</th>
-                    <th style={{ width: 70, whiteSpace: "nowrap" }}>{t("review.generate.tableYear")}</th>
-                    <th style={{ width: 120, whiteSpace: "nowrap" }}>{t("review.generate.tableSource")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {papers.map((p) => (
-                    <tr
-                      key={p.id}
-                      className={`paper-row ${selectedPaperIds.has(p.id) ? "selected" : ""}`}
-                      onClick={() => handleTogglePaper(p.id)}
-                    >
-                      <td style={{ textAlign: "center" }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedPaperIds.has(p.id)}
-                          onChange={() => {}} // Handled by row click
-                          style={{ cursor: "pointer" }}
-                        />
-                      </td>
-                      <td>
-                        <div className="paper-title">{p.title}</div>
-                        <div className="paper-authors">
-                          {p.authors?.slice(0, 2).join(", ")}
-                        </div>
-                      </td>
-                      <td className="paper-meta">{p.year || "-"}</td>
-                      <td className="paper-meta">{p.source || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              papers.map((p) => (
+                <div
+                  key={p.id}
+                  onClick={() => handleTogglePaper(p.id)}
+                  style={{
+                    padding: "10px 16px",
+                    cursor: "pointer",
+                    borderBottom: "1px solid #f1f5f9",
+                    backgroundColor: selectedPaperIds.has(p.id) ? "#eff6ff" : "transparent",
+                    transition: "background 0.1s",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedPaperIds.has(p.id)}
+                      onChange={() => {}}
+                      style={{ marginTop: 3, cursor: "pointer", flexShrink: 0 }}
+                    />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 12, fontWeight: 500, color: "#1e293b",
+                        lineHeight: 1.4, overflow: "hidden",
+                        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                      }}>
+                        {p.title}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                        {p.authors?.slice(0, 2).join(", ")}
+                        {p.year ? ` · ${p.year}` : ""}
+                        {p.source ? ` · ${p.source}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>
-
-        {/* Right Panel: Configuration & Output */}
-        {/* Right Panel: Configuration & Output */}
-        <div className="config-panel">
-          {mode === "standard" ? (
-            <>
-              {/* Config Card */}
-              <div className="config-card">
-                <h3>{t("review.generate.settings")}</h3>
-
-                <div className="form-group">
-                  <label>{t("review.generate.keywordsLabel")}</label>
-                  <input
-                    value={keywords}
-                    onChange={(e) => setKeywords(e.target.value)}
-                    placeholder={t("review.generate.keywordsPlaceholder")}
-                    className="form-input"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>{t("review.generate.customPromptLabel")}</label>
-                  <textarea
-                    value={customPrompt}
-                    onChange={(e) => setCustomPrompt(e.target.value)}
-                    placeholder={t("review.generate.customPromptPlaceholder")}
-                    rows={3}
-                    className="form-textarea"
-                  />
-                </div>
-
-                <button
-                  onClick={handleGenerate}
-                  disabled={generating}
-                  className="action-button primary full-width"
-                >
-                  {generating ? t("review.generate.generating") : t("review.generate.startGenerate")}
-                </button>
-
-                {error && <div className="error-message">{error}</div>}
-              </div>
-
-              {/* Output Preview */}
-              {generatedReview && (
-                <div className="output-preview-card">
-                  <div className="card-header">
-                    <h3 className="success-title">{t("review.generate.success")}</h3>
-                    <div className="card-actions">
-                      <span className="review-id">
-                        ID: {generatedReview.review_id}
-                      </span>
-                      <button
-                        onClick={() => handleExport("markdown")}
-                        disabled={exporting}
-                        className="action-button small secondary"
-                      >
-                        {exporting ? t("review.generate.exporting") : t("review.generate.exportMd")}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="markdown-preview">
-                    {generatedReview.preview_markdown}
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <PhdPipelinePage
-              embedded={true}
-              initialPaperIds={Array.from(selectedPaperIds)}
-            />
-          )}
-        </div>
-      </div>
+      )}
     </div>
   );
 }
