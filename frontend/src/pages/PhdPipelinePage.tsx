@@ -188,6 +188,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
           sources: sources,
           year_from: yearFrom ? parseInt(yearFrom) : undefined,
           year_to: yearTo ? parseInt(yearTo) : undefined,
+          review_id: reviewId,
         }),
       });
 
@@ -331,6 +332,7 @@ const PhdPipelinePage: React.FC<PhdPipelinePageProps> = ({
           body: JSON.stringify({
             section_claim_table: sectionClaimTable,
             top_k: 5,
+            review_id: reviewId,
           }),
         },
       );

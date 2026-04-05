@@ -276,6 +276,138 @@ def list_tasks() -> List[Dict]:
     return result
 
 
+# ────────────────────────────────────────────────────────────
+# Manual flow task tracking helpers
+# ────────────────────────────────────────────────────────────
+
+# Map manual endpoint steps to pipeline step keys
+MANUAL_STEP_MAP = {
+    "init":      "framework",      # /phd/init -> framework + claims
+    "claims":    "claims",         # /phd/generate-claims
+    "auto_search": "auto_search",  # /phd/auto-search
+    "evidence":  "evidence",       # /phd/attach-evidence
+    "render":    "render",         # /phd/render-section or /phd/render-all
+    "assemble":  "assemble",       # /phd/assemble
+}
+
+
+def get_task_by_review_id(review_id: int) -> Optional[TaskState]:
+    """Find a PipelineTask linked to a review_id (manual flow)."""
+    # 1. Check memory
+    for task in _task_store.values():
+        if task.review_id == review_id:
+            return task
+
+    # 2. Check DB
+    try:
+        with SessionLocal() as db:
+            db_task = db.query(PipelineTask).filter(
+                PipelineTask.review_id == review_id
+            ).order_by(PipelineTask.created_at.desc()).first()
+            if db_task and db_task.state_data:
+                restored = TaskState.from_dict(db_task.state_data)
+                _task_store[restored.task_id] = restored
+                return restored
+    except Exception as e:
+        logger.error(f"Failed to find task by review_id {review_id}: {e}")
+
+    return None
+
+
+async def create_manual_task(
+    topic: str,
+    keywords: List[str],
+    review_id: int,
+    source: str = "manual",
+) -> TaskState:
+    """Create a PipelineTask for manual / agent-tool flow, linked to a review_id."""
+    task = await create_task(
+        topic=topic,
+        keywords=keywords,
+        papers_per_section=0,
+        sources=[],
+        language="zh-CN",
+        citation_style="harvard",
+    )
+    task.review_id = review_id
+    task.status = "running"
+    task.add_log(f"任务由 {source} 流程创建，关联 Review #{review_id}")
+
+    # Persist review_id + running status
+    _persist_task_snapshot(task)
+    return task
+
+
+def update_manual_task_step(
+    review_id: int,
+    step_key: str,
+    status: str = "done",
+    message: str = "",
+    error: str = "",
+):
+    """
+    Update a specific step on the PipelineTask linked to review_id.
+    Called by manual endpoints after each stage completes or fails.
+    """
+    task = get_task_by_review_id(review_id)
+    if not task:
+        return None
+
+    step = task.get_step(step_key)
+    if not step:
+        return task
+
+    if status == "running":
+        step.status = "running"
+        step.started_at = time.time()
+        step.message = message or f"正在执行：{step.label}"
+    elif status == "done":
+        step.status = "done"
+        step.finished_at = time.time()
+        step.message = message or "完成"
+        task.last_completed_step = step_key
+    elif status == "failed":
+        step.status = "failed"
+        step.finished_at = time.time()
+        step.message = f"失败: {error or message}"
+
+    # Check if all steps done -> mark task done
+    all_done = all(s.status == "done" for s in task.steps)
+    if all_done:
+        task.status = "done"
+        task.finished_at = datetime.now().isoformat()
+    elif status == "failed":
+        task.status = "failed"
+        task.error = error or message
+        task.finished_at = datetime.now().isoformat()
+
+    task.add_log(f"[{step_key}] {status}: {message or error or step.label}")
+    _persist_task_snapshot(task)
+    return task
+
+
+def _persist_task_snapshot(task: TaskState):
+    """Flush in-memory task state to DB."""
+    try:
+        with SessionLocal() as db_session:
+            db_task = db_session.query(PipelineTask).filter(
+                PipelineTask.task_id == task.task_id
+            ).first()
+            if db_task:
+                db_task.status = task.status
+                db_task.state_data = task.to_dict()
+                db_task.review_id = task.review_id
+                if task.finished_at:
+                    try:
+                        db_task.finished_at = datetime.fromisoformat(task.finished_at) if isinstance(task.finished_at, str) else datetime.utcnow()
+                    except Exception:
+                        db_task.finished_at = datetime.utcnow()
+                db_task.error = task.error
+                db_session.commit()
+    except Exception as e:
+        logger.error(f"Failed to persist manual task {task.task_id}: {e}")
+
+
 async def resume_task(task_id: str, db: Session) -> TaskState:
     """
     Resume a failed/stopped task from its last checkpoint.
