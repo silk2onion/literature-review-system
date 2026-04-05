@@ -54,6 +54,7 @@ export default function MonitoringDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"phd" | "crawler">("phd");
   const [resumingTaskId, setResumingTaskId] = useState<string | null>(null);
+  const [rerollingTaskId, setRerollingTaskId] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
@@ -234,28 +235,67 @@ export default function MonitoringDashboard() {
                       </div>
                     </div>
 
-                    {/* Step dots */}
-                    {task.steps && task.steps.length > 0 && (
-                      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                    {/* Step pills with re-roll */}
+                    {task.steps && task.steps.length > 0 && (() => {
+                      const taskBusy = rerollingTaskId === task.task_id || task.status === "running";
+                      return (
+                      <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
                         {task.steps.map((step: any, idx: number) => {
                           const dotColor =
                             step.status === "done" ? "#16a34a" :
                             step.status === "running" ? "#ca8a04" :
                             step.status === "failed" ? "#dc2626" : "#e2e8f0";
+                          const canReroll = (step.status === "done" || step.status === "failed") && !taskBusy;
                           return (
                             <div
                               key={idx}
-                              title={step.label}
+                              title={`${step.label}${step.message ? ` — ${step.message}` : ""}${canReroll ? "\n点击重跑此步骤" : ""}`}
+                              onClick={canReroll ? async () => {
+                                setRerollingTaskId(task.task_id);
+                                try {
+                                  const res = await fetch(
+                                    `${API_BASE_URL}/api/reviews/phd/task/${task.task_id}/reroll/${step.step}`,
+                                    { method: "POST" },
+                                  );
+                                  if (!res.ok) {
+                                    const errText = await res.text();
+                                    alert(`Re-roll 失败: ${errText}`);
+                                  }
+                                  await fetchData();
+                                } catch (e) {
+                                  alert(`Re-roll 请求失败: ${e}`);
+                                } finally {
+                                  setRerollingTaskId(null);
+                                }
+                              } : undefined}
                               style={{
-                                width: 10, height: 10, borderRadius: "50%",
-                                backgroundColor: dotColor,
-                                border: step.status === "pending" ? "1px solid #cbd5e1" : "none",
+                                display: "inline-flex", alignItems: "center", gap: 4,
+                                padding: "2px 8px", borderRadius: 12,
+                                backgroundColor: step.status === "pending" ? "#f8fafc" : `${dotColor}15`,
+                                border: `1px solid ${step.status === "pending" ? "#cbd5e1" : dotColor}`,
+                                color: step.status === "pending" ? "#94a3b8" : dotColor,
+                                fontSize: 11, fontWeight: 600,
+                                cursor: canReroll ? "pointer" : "default",
+                                opacity: taskBusy && step.status !== "running" ? 0.5 : 1,
+                                pointerEvents: taskBusy ? "none" : "auto",
+                                transition: "all 0.15s ease",
                               }}
-                            />
+                            >
+                              <span style={{
+                                width: 7, height: 7, borderRadius: "50%",
+                                backgroundColor: dotColor,
+                                flexShrink: 0,
+                              }} />
+                              {step.label}
+                              {canReroll && (
+                                <RefreshCw size={10} style={{ marginLeft: 2, opacity: 0.7 }} />
+                              )}
+                            </div>
                           );
                         })}
                       </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Current running step */}
                     {task.status === "running" && (
