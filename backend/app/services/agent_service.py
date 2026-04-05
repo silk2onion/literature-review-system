@@ -899,10 +899,11 @@ class AgentService:
             try:
                 from app.services.review import generate_review as core_generate_review
                 from app.schemas.review import ReviewGenerate
+                from app.services.task_runner import create_manual_task, update_manual_task_step
                 llm_svc = OpenAIService(settings=settings)
                 sem_svc = get_semantic_search_service()
                 pipeline = SectionReviewPipelineService(db=bg_db, llm_service=llm_svc, semantic_search_service=sem_svc)
-                
+
                 payload = ReviewGenerate(
                     keywords=keywords,
                     phd_pipeline=True,
@@ -912,10 +913,18 @@ class AgentService:
                 if gen_resp.success:
                     rid = gen_resp.review_id
                     framework = gen_resp.preview_markdown
+                    # Create PipelineTask for monitoring
+                    await create_manual_task(
+                        topic=keywords[0] if keywords else "Literature Review",
+                        keywords=keywords, review_id=rid, source="agent_tool",
+                    )
+                    update_manual_task_step(rid, "framework", "done", "框架生成完成")
+                    update_manual_task_step(rid, "claims", "running", "正在生成论点...")
                     await pipeline.generate_section_claims(
                         review_id=rid,
                         section_outline=framework or "",
                     )
+                    update_manual_task_step(rid, "claims", "done", "论点生成完成")
             except Exception as e:
                 logger.error(f"Async init failed: {e}")
             finally:
@@ -924,11 +933,15 @@ class AgentService:
         async def _run_evidence_bg(rid: int):
             bg_db = SessionLocal()
             try:
+                from app.services.task_runner import update_manual_task_step
                 llm_svc = OpenAIService(settings=settings)
                 sem_svc = get_semantic_search_service()
                 pipeline = SectionReviewPipelineService(db=bg_db, llm_service=llm_svc, semantic_search_service=sem_svc)
                 await pipeline.attach_evidence_for_review(review_id=rid)
+                update_manual_task_step(rid, "evidence", "done", "证据关联完成")
             except Exception as e:
+                from app.services.task_runner import update_manual_task_step
+                update_manual_task_step(rid, "evidence", "failed", error=str(e))
                 logger.error(f"Async evidence failed: {e}")
             finally:
                 bg_db.close()
@@ -936,11 +949,15 @@ class AgentService:
         async def _run_render_bg(rid: int):
             bg_db = SessionLocal()
             try:
+                from app.services.task_runner import update_manual_task_step
                 llm_svc = OpenAIService(settings=settings)
                 sem_svc = get_semantic_search_service()
                 pipeline = SectionReviewPipelineService(db=bg_db, llm_service=llm_svc, semantic_search_service=sem_svc)
                 await pipeline.render_review_sections(review_id=rid)
+                update_manual_task_step(rid, "render", "done", "章节渲染完成")
             except Exception as e:
+                from app.services.task_runner import update_manual_task_step
+                update_manual_task_step(rid, "render", "failed", error=str(e))
                 logger.error(f"Async render failed: {e}")
             finally:
                 bg_db.close()
@@ -955,7 +972,7 @@ class AgentService:
 
             if not keywords:
                 return {"error": "Please provide keywords for init stage"}
-            
+
             asyncio.create_task(_run_init_bg(keywords))
             return {
                 "stage": "init_started",
@@ -966,6 +983,15 @@ class AgentService:
             if not review_id_raw:
                 return {"error": "review_id is required for evidence stage"}
             rid = int(review_id_raw)
+            # Track in PipelineTask
+            from app.services.task_runner import update_manual_task_step, get_task_by_review_id, create_manual_task
+            task = get_task_by_review_id(rid)
+            if not task:
+                task = await create_manual_task(
+                    topic=params.get("topic", f"Review #{rid}"),
+                    keywords=[], review_id=rid, source="agent_tool",
+                )
+            update_manual_task_step(rid, "evidence", "running", "Agent 启动证据关联...")
             asyncio.create_task(_run_evidence_bg(rid))
             return {
                 "review_id": rid,
@@ -977,6 +1003,15 @@ class AgentService:
             if not review_id_raw:
                 return {"error": "review_id is required for render stage"}
             rid = int(review_id_raw)
+            # Track in PipelineTask
+            from app.services.task_runner import update_manual_task_step, get_task_by_review_id, create_manual_task
+            task = get_task_by_review_id(rid)
+            if not task:
+                task = await create_manual_task(
+                    topic=params.get("topic", f"Review #{rid}"),
+                    keywords=[], review_id=rid, source="agent_tool",
+                )
+            update_manual_task_step(rid, "render", "running", "Agent 启动章节渲染...")
             asyncio.create_task(_run_render_bg(rid))
             return {
                 "review_id": rid,

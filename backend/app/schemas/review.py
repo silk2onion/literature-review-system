@@ -291,9 +291,11 @@ class AttachEvidenceRequest(BaseModel):
     阶段 2：为每条 claim 附加 RAG 证据的请求
     - section_claim_table: 阶段 1 的输出
     - top_k: 每条论点希望检索的文献数量
+    - review_id: 可选，用于关联任务监控
     """
     section_claim_table: SectionClaimTable
     top_k: int = Field(default=5, ge=1, le=50, description="每条论点 RAG 检索的 top_k 文献数量")
+    review_id: Optional[int] = Field(default=None, description="关联综述 ID（用于任务监控跟踪）")
 
 
 class AttachEvidenceResponse(BaseModel):
@@ -340,6 +342,7 @@ class PhdPipelineInitResponse(BaseModel):
     """PhD Pipeline 初始化响应"""
     review_id: int
     claims: List[ClaimEvidence]
+    task_id: Optional[str] = Field(default=None, description="关联的 PipelineTask ID（用于任务监控）")
 
 
 # ========== 端到端编排管线 ==========

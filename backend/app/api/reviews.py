@@ -223,17 +223,33 @@ async def init_phd_pipeline(
     if not framework:
         raise HTTPException(status_code=500, detail="未能生成综述框架")
 
+    # 1.5 Create PipelineTask for monitoring
+    from app.services.task_runner import create_manual_task, update_manual_task_step
+    topic_str = payload.keywords[0] if payload.keywords else "Literature Review"
+    task = await create_manual_task(
+        topic=topic_str,
+        keywords=payload.keywords or [],
+        review_id=review_id,
+        source="manual",
+    )
+    # Mark framework step done (already completed by generate_review)
+    update_manual_task_step(review_id, "framework", "done", f"框架生成完成")
+    update_manual_task_step(review_id, "claims", "running", "正在生成论点...")
+
     # 2. 生成 Claims
     try:
         table = await service.generate_section_claims(
             review_id=review_id,
             section_outline=framework, # 使用整个框架作为 outline
         )
+        update_manual_task_step(review_id, "claims", "done", f"论点生成完成：{len(table.claims)} 条")
         return PhdPipelineInitResponse(
             review_id=review_id,
-            claims=table.claims
+            claims=table.claims,
+            task_id=task.task_id,
         )
     except Exception as e:
+        update_manual_task_step(review_id, "claims", "failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"生成论点失败: {e}")
 
 
@@ -247,7 +263,7 @@ async def generate_claims_for_section(
     service: SectionReviewPipelineService = Depends(get_section_review_pipeline_service),
 ):
     """
-    根据指定的综述 ID 和章节大纲，调用 LLM 生成一个结构化的“论点-证据”表。
+    根据指定的综述 ID 和章节大纲，调用 LLM 生成一个结构化的"论点-证据"表。
     这是 PhD 级综述管线的第一步。
     """
     try:
@@ -272,19 +288,30 @@ async def attach_evidence_to_claims(
     service: SectionReviewPipelineService = Depends(get_section_review_pipeline_service),
 ):
     """
-    接收一个“论点-证据”表，并为其中的每一条论点执行 RAG 检索，
+    接收一个"论点-证据"表，并为其中的每一条论点执行 RAG 检索，
     将找到的文献 ID 和片段附加到表中。
     这是 PhD 级综述管线的第二步。
     """
+    from app.services.task_runner import update_manual_task_step
+    review_id = payload.review_id
+    if review_id:
+        update_manual_task_step(review_id, "evidence", "running", "正在关联 RAG 证据...")
+
     try:
         updated_table = await service.attach_evidence_for_claims(
             table=payload.section_claim_table,
             top_k=payload.top_k,
         )
+        if review_id:
+            update_manual_task_step(review_id, "evidence", "done", "证据关联完成")
         return AttachEvidenceResponse(section_claim_table=updated_table)
     except HTTPException as e:
+        if review_id:
+            update_manual_task_step(review_id, "evidence", "failed", error=str(e.detail))
         raise e
     except Exception as e:
+        if review_id:
+            update_manual_task_step(review_id, "evidence", "failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"附加证据失败: {e}")
 
 
@@ -298,10 +325,15 @@ async def render_section_from_table(
     service: SectionReviewPipelineService = Depends(get_section_review_pipeline_service),
 ):
     """
-    接收一个已附加证据的“论点-证据”表，调用 LLM 将其渲染成
+    接收一个已附加证据的"论点-证据"表，调用 LLM 将其渲染成
     一段连贯的、带引用标记的学术段落。
     这是 PhD 级综述管线的最后一步。
     """
+    from app.services.task_runner import update_manual_task_step
+    review_id = payload.review_id
+    if review_id:
+        update_manual_task_step(review_id, "render", "running", f"正在渲染章节：{payload.section_claim_table.section_title}")
+
     try:
         rendered_section = await service.render_section_from_claims(
             table=payload.section_claim_table,
@@ -311,13 +343,19 @@ async def render_section_from_table(
             previous_sections_summary=payload.previous_sections_summary,
             all_sections_summary=payload.all_sections_summary,
         )
+        if review_id:
+            update_manual_task_step(review_id, "render", "done", "章节渲染完成")
         return RenderSectionFromClaimsResponse(
             section_id=payload.section_claim_table.section_id,
             rendered_section=rendered_section,
         )
     except HTTPException as e:
+        if review_id:
+            update_manual_task_step(review_id, "render", "failed", error=str(e.detail))
         raise e
     except Exception as e:
+        if review_id:
+            update_manual_task_step(review_id, "render", "failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"渲染章节失败: {e}")
 
 
@@ -344,15 +382,20 @@ async def auto_search_for_framework(
     """
     from app.services.crawl_service import create_crawl_job, run_crawl_job_once
     from app.schemas import CrawlJobCreate
+    from app.services.task_runner import update_manual_task_step
 
     sections = payload.get("sections", [])
     papers_per_section = int(payload.get("papers_per_section", 20))
     sources = payload.get("sources", ["semantic_scholar"])
     year_from = payload.get("year_from")
     year_to = payload.get("year_to")
+    review_id = payload.get("review_id")
 
     if not sections:
         raise HTTPException(status_code=400, detail="sections is required")
+
+    if review_id:
+        update_manual_task_step(review_id, "auto_search", "running", f"正在为 {len(sections)} 个章节搜索文献...")
 
     results = []
     total_new = 0
@@ -403,6 +446,9 @@ async def auto_search_for_framework(
                 "error": str(e),
             })
 
+    if review_id:
+        update_manual_task_step(review_id, "auto_search", "done", f"文献搜索完成，新增 {total_new} 篇")
+
     return {
         "total_new_papers": total_new,
         "sections_searched": len(results),
@@ -427,6 +473,7 @@ async def render_all_sections(
     }
     """
     from app.schemas.review import SectionClaimTable
+    from app.services.task_runner import update_manual_task_step
 
     tables_raw = payload.get("section_claim_tables", [])
     language = payload.get("language", "zh-CN")
@@ -434,6 +481,9 @@ async def render_all_sections(
 
     if not tables_raw:
         raise HTTPException(status_code=400, detail="section_claim_tables is required")
+
+    if review_id:
+        update_manual_task_step(review_id, "render", "running", f"正在渲染 {len(tables_raw)} 个章节...")
 
     rendered_sections = []
     all_citation_map = {}
@@ -462,6 +512,9 @@ async def render_all_sections(
                 "citation_map": {},
             })
 
+    if review_id:
+        update_manual_task_step(review_id, "render", "done", f"渲染完成：{len(rendered_sections)} 个章节")
+
     return {
         "rendered_sections": rendered_sections,
         "total_sections": len(rendered_sections),
@@ -488,6 +541,7 @@ async def assemble_full_review(
     """
     from app.services.reference_formatter import get_reference_formatter, CitationStyle
     from app.models.paper import Paper as PaperModel
+    from app.services.task_runner import update_manual_task_step
 
     title = payload.get("title", "Literature Review")
     sections = payload.get("rendered_sections", [])
@@ -496,6 +550,9 @@ async def assemble_full_review(
 
     if not sections:
         raise HTTPException(status_code=400, detail="rendered_sections is required")
+
+    if review_id:
+        update_manual_task_step(review_id, "assemble", "running", "正在组装最终文档...")
 
     # 1. Collect all cited paper IDs from citation maps
     all_paper_ids = set()
@@ -549,6 +606,7 @@ async def assemble_full_review(
         if review:
             review.content = full_markdown
             db.commit()
+        update_manual_task_step(review_id, "assemble", "done", f"综述组装完成，共引用 {len(cited_papers)} 篇文献")
 
     return {
         "full_markdown": full_markdown,
@@ -757,6 +815,96 @@ async def resume_pipeline_task(task_id: str, db: Session = Depends(get_db)):
 
 
 @router.post(
+    "/phd/task/{task_id}/reroll/{step_key}",
+    summary="Re-roll (re-run) a specific pipeline step",
+)
+async def reroll_pipeline_step(
+    task_id: str,
+    step_key: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Re-run a specific step of a pipeline task.
+    Valid step_keys: framework, auto_search, claims, evidence, render, assemble.
+    The step and all subsequent steps are reset to pending, then the pipeline
+    resumes from that step.
+    """
+    from app.services.task_runner import get_task, PipelineTaskRunner, _task_store, _persist_task_snapshot
+
+    VALID_STEPS = PipelineTaskRunner.STEP_ORDER
+
+    if step_key not in VALID_STEPS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid step_key '{step_key}'. Valid: {VALID_STEPS}",
+        )
+
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    # Reset the target step and all subsequent steps to pending
+    step_idx = VALID_STEPS.index(step_key)
+    for s in task.steps:
+        try:
+            s_idx = VALID_STEPS.index(s.step)
+        except ValueError:
+            continue
+        if s_idx >= step_idx:
+            s.status = "pending"
+            s.message = ""
+            s.started_at = None
+            s.finished_at = None
+
+    # Update last_completed_step to the step before the re-roll target
+    if step_idx > 0:
+        task.last_completed_step = VALID_STEPS[step_idx - 1]
+    else:
+        task.last_completed_step = None
+
+    task.status = "running"
+    task.error = None
+    task.finished_at = None
+    task.add_log(f"Re-roll requested from step '{step_key}'")
+    _persist_task_snapshot(task)
+
+    # Check if this is an async pipeline task (has checkpoint data) or manual task
+    has_checkpoint = bool(task.checkpoint_data)
+
+    if has_checkpoint:
+        # Async pipeline task: re-launch the runner from this step
+        async def _run_reroll():
+            from app.database import SessionLocal as SL
+            bg_db = SL()
+            try:
+                runner = PipelineTaskRunner(task=task, db=bg_db)
+                await runner.run(resume_from=step_key)
+            finally:
+                bg_db.close()
+
+        background_tasks.add_task(_run_reroll)
+
+        return {
+            "task_id": task.task_id,
+            "status": "rerolling",
+            "reroll_from": step_key,
+            "message": f"正在从 '{step_key}' 步骤重新执行（异步管线）。",
+            "stream_url": f"/api/reviews/phd/task/{task.task_id}/stream",
+        }
+    else:
+        # Manual task: just reset step status, frontend will re-trigger
+        _persist_task_snapshot(task)
+        return {
+            "task_id": task.task_id,
+            "status": "running",
+            "reroll_from": step_key,
+            "review_id": task.review_id,
+            "message": f"步骤 '{step_key}' 已重置，请重新触发该步骤。",
+        }
+
+
+@router.post(
     "/{review_id}/export",
     response_model=ReviewFullExport,
     summary="导出综述（Markdown/Docx/PDF），同时返回关联文献信息",
@@ -881,7 +1029,7 @@ def get_latest_review(db: Session = Depends(get_db)):
 @router.post("/generate", response_model=ReviewGenerateResponse)
 async def generate_review(payload: ReviewGenerate, db: Session = Depends(get_db)) -> ReviewGenerateResponse:
     """
-    生成文献综述（前端“生成文献综述”按钮调用的接口）
+    生成文献综述（前端"生成文献综述"按钮调用的接口）
 
     新版实现：
     - 直接调用核心服务 app.services.review.generate_review
