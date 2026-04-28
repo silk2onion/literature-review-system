@@ -51,6 +51,16 @@ class ReferenceFormatterService:
         if isinstance(authors, list):
             return [str(a).strip() for a in authors if a]
         if isinstance(authors, str):
+            # 尝试解析 JSON 字符串，如 '["Author A", "Author B"]'
+            stripped = authors.strip()
+            if stripped.startswith("["):
+                try:
+                    import json
+                    parsed = json.loads(stripped)
+                    if isinstance(parsed, list):
+                        return [str(a).strip() for a in parsed if a]
+                except (json.JSONDecodeError, ValueError):
+                    pass
             return [a.strip() for a in authors.split(";") if a.strip()]
         return []
 

@@ -31,10 +31,18 @@ from app.services.llm.prompts import (
     ORCHESTRATE_FRAMEWORK_PROMPT,
     ORCHESTRATE_SECTION_PROMPT_EN,
     ORCHESTRATE_SECTION_PROMPT_ZH,
+    ORCHESTRATE_INTRO_PROMPT_ZH,
+    ORCHESTRATE_INTRO_PROMPT_EN,
     GENERATE_ABSTRACT_PROMPT_ZH,
     GENERATE_ABSTRACT_PROMPT_EN,
     GENERATE_CONCLUSION_PROMPT_ZH,
     GENERATE_CONCLUSION_PROMPT_EN,
+    STRUCTURED_SUMMARY_PROMPT_ZH,
+    STRUCTURED_SUMMARY_PROMPT_EN,
+    EVIDENCE_MATRIX_HINT_ZH,
+    EVIDENCE_MATRIX_HINT_EN,
+    REVIEW_TYPE_CONSTRAINTS,
+    REVIEW_TYPE_CONSTRAINTS_ZH,
     get_framework_system_prompt,
     get_section_system_prompt,
 )
@@ -86,9 +94,17 @@ class ReviewOrchestrationService:
         framework = await self._generate_framework(request)
         logger.info(f"[Orchestrate] Framework generated: {framework.title}, {len(framework.sections)} sections")
 
-        # --- Step 2: 按节检索文献 ---
+        # --- Step 2: 按节检索文献 (Opt-2: 去重降权, Opt-3: 必引保底) ---
         all_papers: Dict[int, Paper] = {}
         section_papers: Dict[str, List[Paper]] = {}
+        assigned_paper_ids: Set[int] = set()  # Opt-2: 已被前面章节强引用的论文
+
+        # Opt-3: 预加载必引文献
+        must_cite_papers: List[Paper] = []
+        if request.must_cite_paper_ids:
+            must_cite_papers = self._load_papers_by_ids(request.must_cite_paper_ids)
+            for p in must_cite_papers:
+                all_papers[p.id] = p
 
         for section in framework.sections:
             papers = await self._search_papers_for_section(
@@ -98,7 +114,15 @@ class ReviewOrchestrationService:
                 year_from=request.year_from,
                 year_to=request.year_to,
                 use_local_only=request.use_local_only,
+                deprioritize_ids=assigned_paper_ids,  # Opt-2
             )
+            # Opt-3: 注入必引文献（去重）
+            if must_cite_papers:
+                existing_ids = {(p.id if isinstance(p, Paper) else p.get("id")) for p in papers}
+                for mp in must_cite_papers:
+                    if mp.id not in existing_ids:
+                        papers.append(mp)
+
             section_papers[section.id] = papers
             for p in papers:
                 pid = p.id if isinstance(p, Paper) else p.get("id")
@@ -118,7 +142,10 @@ class ReviewOrchestrationService:
 
         import re as _re
         def _is_discussion(title: str) -> bool:
-            return bool(_re.search(r'讨论|总结|结论|展望|discussion|conclusion|future|summary', title, _re.IGNORECASE))
+            return bool(_re.search(r'讨论|总结|结论|展望|discussion|conclusion|future|summary|gap|limitation', title, _re.IGNORECASE))
+
+        def _is_introduction(title: str) -> bool:
+            return bool(_re.search(r'引言|背景|导论|introduction|background', title, _re.IGNORECASE))
 
         for idx, section in enumerate(framework.sections):
             papers = section_papers.get(section.id, [])
@@ -132,15 +159,15 @@ class ReviewOrchestrationService:
                 ))
                 continue
 
-            # 讨论/结论章节或最后一章：传全文汇总
+            # 讨论/结论章节或最后一章：Opt-6 结构化全文汇总
             is_last = (idx == total_fw_sections - 1)
             is_disc = _is_discussion(section.title)
             all_summary = None
             if (is_disc or is_last) and sections:
-                all_summary = "\n\n".join(
-                    f"【{s.section_title}】{s.text[:300]}..."
-                    for s in sections if s.text and not s.text.startswith("*")
-                )
+                all_summary = await self._build_structured_summary(sections, request.language)
+
+            # Opt-7: 引言章节标记
+            is_intro = (section.id == "1" or _is_introduction(section.title))
 
             result = await self._generate_section(
                 section=section,
@@ -149,13 +176,28 @@ class ReviewOrchestrationService:
                 citation_style=request.citation_style,
                 previous_sections_summary=prev_summary or None,
                 all_sections_summary=all_summary,
+                is_introduction=is_intro,  # Opt-7
+                review_type=request.review_type,  # Opt-9
+                use_claims_pipeline=request.use_claims_pipeline,  # Opt-10
             )
             sections.append(result)
             all_cited_paper_ids.update(result.cited_paper_ids)
 
+            # Opt-2: 更新已分配论文 ID
+            assigned_paper_ids.update(result.cited_paper_ids)
+
+            # Opt-8: 引用覆盖率检查
+            provided_count = len(papers)
+            cited_count = len(result.cited_paper_ids)
+            if provided_count > 5 and cited_count / max(provided_count, 1) < 0.25:
+                logger.warning(
+                    f"[Orchestrate] Section '{section.title}': low citation coverage "
+                    f"{cited_count}/{provided_count} ({cited_count/max(provided_count,1):.0%})"
+                )
+
             # 累积前文摘要
             if result.text and not result.text.startswith("*"):
-                prev_summary += f"【{section.title}】{result.text[:200]}...\n"
+                prev_summary += f"【{section.title}】{result.text[:600]}...\n"
 
         # --- Step 5: 构建参考文献列表 ---
         cited_papers = self._load_papers_by_ids(list(all_cited_paper_ids))
@@ -228,6 +270,16 @@ class ReviewOrchestrationService:
     async def _generate_framework(self, request: OrchestrationRequest) -> ReviewFramework:
         lang_label = "中文" if request.language.startswith("zh") else "English"
         custom = request.custom_instructions or ""
+
+        # Opt-9: 注入综述类型约束
+        review_type = getattr(request, "review_type", "narrative") or "narrative"
+        if request.language.startswith("zh"):
+            type_constraint = REVIEW_TYPE_CONSTRAINTS_ZH.get(review_type, "")
+        else:
+            type_constraint = REVIEW_TYPE_CONSTRAINTS.get(review_type, "")
+        if type_constraint:
+            custom = f"【综述类型要求】\n{type_constraint}\n\n{custom}" if custom else f"【综述类型要求】\n{type_constraint}"
+
         if custom:
             custom = f"【用户自定义要求】\n{custom}"
 
@@ -260,13 +312,14 @@ class ReviewOrchestrationService:
         year_from: Optional[int] = None,
         year_to: Optional[int] = None,
         use_local_only: bool = False,
+        deprioritize_ids: Optional[Set[int]] = None,
     ) -> List[Any]:
-        """为单个章节检索相关文献"""
+        """为单个章节检索相关文献 (Opt-1: 两轮检索, Opt-2: 去重降权)"""
         keywords = section.search_keywords or global_keywords
 
         papers: List[Any] = []
 
-        # 优先使用本地语义检索
+        # 第一轮：使用 framework 生成的关键词做语义检索
         try:
             hits, _ = await self.search.search(
                 db=self.db,
@@ -281,6 +334,40 @@ class ReviewOrchestrationService:
                     papers.append(h.paper)
         except Exception as e:
             logger.warning(f"[Orchestrate] Semantic search failed for section {section.id}: {e}")
+
+        # Opt-1: 第二轮检索 — 用章节描述做语义检索，补充遗漏
+        if section.description and len(papers) < limit:
+            try:
+                desc_keywords = [section.description[:200]]
+                hits2, _ = await self.search.search(
+                    db=self.db,
+                    keywords=desc_keywords,
+                    year_from=year_from,
+                    year_to=year_to,
+                    limit=limit // 2,
+                    source=f"orchestrate_section_{section.id}_round2",
+                )
+                existing_ids = {(p.id if isinstance(p, Paper) else p.get("id")) for p in papers}
+                for h in hits2:
+                    if hasattr(h, "paper") and h.paper:
+                        pid = h.paper.id
+                        if pid not in existing_ids:
+                            papers.append(h.paper)
+                            existing_ids.add(pid)
+            except Exception as e:
+                logger.debug(f"[Orchestrate] Round-2 search failed for section {section.id}: {e}")
+
+        # Opt-2: 对已被前面章节强引用的论文降权（排到列表末尾）
+        if deprioritize_ids:
+            primary = []
+            deprioritized = []
+            for p in papers:
+                pid = p.id if isinstance(p, Paper) else p.get("id")
+                if pid in deprioritize_ids:
+                    deprioritized.append(p)
+                else:
+                    primary.append(p)
+            papers = primary + deprioritized
 
         # 如果本地检索结果不足且允许在线搜索，尝试在线源
         if len(papers) < 5 and not use_local_only:
@@ -359,13 +446,18 @@ class ReviewOrchestrationService:
         citation_style: str = "harvard",
         previous_sections_summary: Optional[str] = None,
         all_sections_summary: Optional[str] = None,
+        is_introduction: bool = False,
+        review_type: str = "narrative",
+        use_claims_pipeline: bool = False,
     ) -> SectionResult:
-        """为单个章节生成综述正文（双层 RAG：chunk 优先 → paper 回退）
+        """为单个章节生成综述正文
 
-        策略：
-        1. 先尝试 chunk-level RAG：用章节标题+描述做语义检索，召回带页码的文本片段
-        2. 如果有 chunk 结果，使用 [[REF_x:pN]] 页码级引用
-        3. 如果无 chunk 结果，回退到 paper-level [[REF_x]] 引用（兼容无 PDF 场景）
+        增强策略 (Opt-5/7/9/10)：
+        - Opt-5: 证据矩阵提示注入
+        - Opt-7: 引言章节使用专用 prompt
+        - Opt-9: review_type 约束注入 system_prompt
+        - Opt-10: 可选 claims-evidence-render 三阶段管线
+        - 双层 RAG：chunk 优先 → paper 回退
         """
         lang_code = language[:2]
 
@@ -432,17 +524,30 @@ class ReviewOrchestrationService:
                     "falling back to paper-level RAG"
                 )
 
-        # 选择 prompt
-        if language.lower().startswith("en"):
-            prompt_template = ORCHESTRATE_SECTION_PROMPT_EN
+        # Opt-7: 引言使用专用 prompt；Opt-5: 正文注入证据矩阵提示
+        if is_introduction:
+            if language.lower().startswith("en"):
+                prompt_template = ORCHESTRATE_INTRO_PROMPT_EN
+            else:
+                prompt_template = ORCHESTRATE_INTRO_PROMPT_ZH
         else:
-            prompt_template = ORCHESTRATE_SECTION_PROMPT_ZH
+            if language.lower().startswith("en"):
+                prompt_template = ORCHESTRATE_SECTION_PROMPT_EN
+            else:
+                prompt_template = ORCHESTRATE_SECTION_PROMPT_ZH
 
         prompt = prompt_template.format(
             section_title=section.title,
             section_description=section.description,
             papers_context=context_block,
         )
+
+        # Opt-5: 正文章节注入证据矩阵比较维度提示（引言除外）
+        if not is_introduction:
+            if language.lower().startswith("en"):
+                prompt += EVIDENCE_MATRIX_HINT_EN
+            else:
+                prompt += EVIDENCE_MATRIX_HINT_ZH
 
         # 注入上下文
         if previous_sections_summary:
@@ -479,6 +584,27 @@ class ReviewOrchestrationService:
         base_section_prompt = get_section_system_prompt(self.db)
         system_prompt = f"{base_section_prompt}\n{ref_instruction}"
 
+        # Opt-9: 注入综述类型约束到 system prompt
+        if review_type and review_type != "narrative":
+            lang_key = language[:2]
+            if lang_key == "zh":
+                type_hint = REVIEW_TYPE_CONSTRAINTS_ZH.get(review_type, "")
+            else:
+                type_hint = REVIEW_TYPE_CONSTRAINTS.get(review_type, "")
+            if type_hint:
+                system_prompt += f"\n\n【综述类型】{type_hint}"
+
+        # Opt-10: 如果启用 claims pipeline，委托给三阶段管线
+        if use_claims_pipeline:
+            return await self._generate_section_via_claims(
+                section=section,
+                papers=papers,
+                language=language,
+                citation_style=citation_style,
+                previous_sections_summary=previous_sections_summary,
+                all_sections_summary=all_sections_summary,
+            )
+
         try:
             raw_text = await self.llm.complete(
                 prompt=prompt,
@@ -513,6 +639,147 @@ class ReviewOrchestrationService:
             text=resolved_text,
             cited_paper_ids=resolved_ids,
         )
+
+    # ------------------------------------------------------------------
+    # Opt-6: 结构化全文汇总（替代简单截断）
+    # ------------------------------------------------------------------
+
+    async def _build_structured_summary(
+        self, sections: List[SectionResult], language: str = "zh-CN"
+    ) -> str:
+        """用 LLM 从前面所有章节中提取结构化汇总，供讨论/结论章节使用"""
+        body = "\n\n".join(
+            f"【{s.section_title}】\n{s.text[:800]}"
+            for s in sections if s.text and not s.text.startswith("*")
+        )
+        if not body:
+            return ""
+
+        if language.lower().startswith("en"):
+            prompt = STRUCTURED_SUMMARY_PROMPT_EN.format(sections_content=body)
+        else:
+            prompt = STRUCTURED_SUMMARY_PROMPT_ZH.format(sections_content=body)
+
+        try:
+            result = await self.llm.complete_json(
+                prompt=prompt,
+                system_prompt="You are a senior academic researcher skilled at synthesizing research findings.",
+                temperature=0.3,
+            )
+            # 将 JSON 结构转为可读的文本摘要
+            if isinstance(result, dict):
+                parts = []
+                consensus = result.get("consensus", [])
+                if consensus:
+                    parts.append("【核心共识】\n" + "\n".join(f"- {c}" for c in consensus))
+                controversies = result.get("controversies", [])
+                if controversies:
+                    parts.append("【主要矛盾与争议】\n" + "\n".join(f"- {c}" for c in controversies))
+                limitations = result.get("methodological_limitations", [])
+                if limitations:
+                    parts.append("【方法论共性局限】\n" + "\n".join(f"- {l}" for l in limitations))
+                gaps = result.get("research_gaps", [])
+                if gaps:
+                    parts.append("【研究空白】\n" + "\n".join(f"- {g}" for g in gaps))
+                return "\n\n".join(parts)
+            return str(result)
+        except Exception as e:
+            logger.warning(f"[Orchestrate] Structured summary generation failed: {e}")
+            # Fallback: 简单截断
+            return "\n\n".join(
+                f"【{s.section_title}】{s.text[:600]}..."
+                for s in sections if s.text and not s.text.startswith("*")
+            )
+
+    # ------------------------------------------------------------------
+    # Opt-10: 三阶段 claims pipeline 委托
+    # ------------------------------------------------------------------
+
+    async def _generate_section_via_claims(
+        self,
+        section: FrameworkSection,
+        papers: List[Any],
+        language: str = "zh-CN",
+        citation_style: str = "harvard",
+        previous_sections_summary: Optional[str] = None,
+        all_sections_summary: Optional[str] = None,
+    ) -> SectionResult:
+        """通过 claims-evidence-render 三阶段管线生成章节（Opt-10）"""
+        from app.services.citation_anchoring import extract_ref_ids, resolve_ref_placeholders
+
+        try:
+            from app.services.review import SectionReviewPipelineService
+            pipeline = SectionReviewPipelineService(
+                db=self.db,
+                llm_service=self.llm,
+                semantic_search_service=self.search,
+            )
+
+            # Phase 1: 生成论点
+            section_outline = f"## {section.title}\n{section.description}"
+            claim_table = await pipeline.generate_section_claims(
+                review_id=0,  # 新综述，无 review_id
+                section_outline=section_outline,
+            )
+
+            # Phase 2: 为论点附加证据
+            paper_ids = []
+            for p in papers:
+                pid = p.id if isinstance(p, Paper) else (p.get("id") if isinstance(p, dict) else None)
+                if pid:
+                    paper_ids.append(pid)
+
+            claim_table = await pipeline.attach_evidence_for_claims(
+                table=claim_table,
+                top_k=5,
+                paper_ids=paper_ids,
+            )
+
+            # Phase 3: 渲染章节
+            rendered = await pipeline.render_section_from_claims(
+                table=claim_table,
+                language=language,
+                previous_sections_summary=previous_sections_summary,
+                all_sections_summary=all_sections_summary,
+            )
+
+            # 提取引用 ID
+            cited_ids = extract_ref_ids(rendered.text)
+            # resolve placeholders
+            resolved_text, resolved_ids, missing_ids = resolve_ref_placeholders(
+                text=rendered.text,
+                db=self.db,
+                citation_style=citation_style,
+                linkable=True,
+            )
+
+            if missing_ids:
+                logger.warning(
+                    f"[Orchestrate/Claims] Section '{section.title}': "
+                    f"{len(missing_ids)} missing refs: {missing_ids}"
+                )
+
+            return SectionResult(
+                section_id=section.id,
+                section_title=section.title,
+                text=resolved_text,
+                cited_paper_ids=resolved_ids,
+            )
+        except Exception as e:
+            logger.error(f"[Orchestrate] Claims pipeline failed for section {section.id}: {e}")
+            logger.info("[Orchestrate] Falling back to direct generation")
+            # Fallback: 使用标准直接生成
+            return await self._generate_section(
+                section=section,
+                papers=papers,
+                language=language,
+                citation_style=citation_style,
+                previous_sections_summary=previous_sections_summary,
+                all_sections_summary=all_sections_summary,
+                is_introduction=False,
+                review_type="narrative",
+                use_claims_pipeline=False,  # 防止递归
+            )
 
     # ------------------------------------------------------------------
     # Step 5 & 6: Abstract / Conclusion 生成
@@ -721,8 +988,8 @@ class ReviewOrchestrationService:
             formatted = ""
             try:
                 formatted = self.ref_formatter.format_one(paper, style=style_enum)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[References] format_one failed for paper {pid}: {e}")
 
             # 从 citation_map 获取 citation_key
             map_info = key_to_info.get(pid, {})

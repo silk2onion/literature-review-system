@@ -251,6 +251,46 @@ class OpenAIService:
             logger.error(f"文本补全失败: {e}")
             raise
 
+    async def complete_stream(
+        self,
+        prompt: str,
+        system_prompt: str = "You are a helpful assistant.",
+        temperature: float = 0.7,
+        max_tokens: int = 16000,
+        model_override: Optional[str] = None,
+    ):
+        """
+        流式文本补全 — 逐 token 返回。
+        与 complete() 参数一致，返回 async generator。
+        """
+        _t0 = time.perf_counter()
+        use_model = model_override or self.model
+        full_content = []
+        try:
+            stream = await self.client.chat.completions.create(
+                model=use_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    full_content.append(delta.content)
+                    yield delta.content
+
+            total = "".join(full_content)
+            logger.info(f"流式补全成功 (Model: {use_model})，总长度: {len(total)}")
+            _safe_log_llm(use_model, "complete_stream", None, (time.perf_counter() - _t0) * 1000)
+        except Exception as e:
+            _safe_log_llm(model_override or self.model, "complete_stream", None, (time.perf_counter() - _t0) * 1000, error=str(e))
+            logger.error(f"流式补全失败: {e}")
+            raise
+
     async def complete_json(
         self,
         prompt: str,

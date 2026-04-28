@@ -26,7 +26,10 @@ import { useLocale } from "./hooks/useLocale";
 
 const STORAGE_KEY = "agent_chat_sessions";
 
-function makeWelcomeMsg(mode: ChatMode, t: (key: string) => string): ChatMessageData {
+function makeWelcomeMsg(
+  mode: ChatMode,
+  t: (key: string) => string
+): ChatMessageData {
   return {
     id: "welcome",
     role: "assistant",
@@ -35,18 +38,25 @@ function makeWelcomeMsg(mode: ChatMode, t: (key: string) => string): ChatMessage
   };
 }
 
-function createNewSession(mode: ChatMode = "agent", t?: (key: string) => string): ChatSession {
+function createNewSession(
+  mode: ChatMode = "agent",
+  t?: (key: string) => string
+): ChatSession {
   return {
     id: `sess-${Date.now()}`,
     title: t ? t("agent.newConversation") : "新对话",
     updatedAt: new Date().toISOString(),
     mode,
-    messages: t ? [makeWelcomeMsg(mode, t)] : [{
-      id: "welcome",
-      role: "assistant",
-      content: "",
-      timestamp: new Date().toISOString(),
-    }],
+    messages: t
+      ? [makeWelcomeMsg(mode, t)]
+      : [
+          {
+            id: "welcome",
+            role: "assistant",
+            content: "",
+            timestamp: new Date().toISOString(),
+          },
+        ],
   };
 }
 
@@ -122,7 +132,7 @@ function saveSessions(sessions: ChatSession[]) {
 async function callAgent(
   message: string,
   history: { role: string; content: string }[],
-  mode: ChatMode = "agent",
+  mode: ChatMode = "agent"
 ): Promise<{ reply: string; action: ActionResult | null }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 300_000);
@@ -146,6 +156,92 @@ async function callAgent(
   }
 }
 
+/** SSE 流式调用 Agent */
+async function callAgentStream(
+  message: string,
+  history: { role: string; content: string }[],
+  mode: ChatMode,
+  callbacks: {
+    onPhase: (phase: string, message: string, tool?: string) => void;
+    onAction: (action: ActionResult) => void;
+    onDelta: (content: string) => void;
+    onDone: () => void;
+    onError: (message: string) => void;
+  },
+  signal?: AbortSignal
+): Promise<void> {
+  const resp = await fetch(`${API_BASE_URL}/api/agent/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, history, mode }),
+    signal,
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(`HTTP ${resp.status}: ${text.slice(0, 200)}`);
+  }
+
+  const reader = resp.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE events from buffer
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || ""; // last part may be incomplete
+
+      for (const part of parts) {
+        if (!part.trim()) continue;
+
+        let eventType = "message";
+        let eventData = "";
+
+        for (const line of part.split("\n")) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            eventData = line.slice(6);
+          }
+        }
+
+        if (!eventData) continue;
+
+        try {
+          const data = JSON.parse(eventData);
+          switch (eventType) {
+            case "phase":
+              callbacks.onPhase(data.phase, data.message, data.tool);
+              break;
+            case "action":
+              callbacks.onAction(data);
+              break;
+            case "delta":
+              callbacks.onDelta(data.content);
+              break;
+            case "done":
+              callbacks.onDone();
+              break;
+            case "error":
+              callbacks.onError(data.message);
+              break;
+          }
+        } catch {
+          // Malformed JSON — skip this event
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 // ── Main Panel Component ──────────────────────────────
 
 interface AgentChatPanelProps {
@@ -159,7 +255,7 @@ interface AgentChatPanelProps {
       | "rag"
       | "draft"
       | "orchestrate"
-      | "monitoring",
+      | "monitoring"
   ) => void;
 }
 
@@ -178,9 +274,11 @@ export default function AgentChatPanel({
   }, [onNavigate]);
 
   // Session State
-  const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions(t));
+  const [sessions, setSessions] = useState<ChatSession[]>(() =>
+    loadSessions(t)
+  );
   const [activeSessionId, setActiveSessionId] = useState<string>(
-    () => sessions[0]?.id,
+    () => sessions[0]?.id
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -197,6 +295,8 @@ export default function AgentChatPanel({
   const [editText, setEditText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /** 用于中断当前流式请求 */
+  const abortRef = useRef<AbortController | null>(null);
 
   // Persist on change
   useEffect(() => {
@@ -235,7 +335,7 @@ export default function AgentChatPanel({
 
             setSessions((prevSessions) => {
               const targetIdx = prevSessions.findIndex(
-                (s) => s.id === activeSessionId,
+                (s) => s.id === activeSessionId
               );
               if (targetIdx < 0) return prevSessions;
               const newSessions = [...prevSessions];
@@ -271,6 +371,8 @@ export default function AgentChatPanel({
   // ── Session management ─────────────────────────────
 
   const handleNewChat = () => {
+    abortRef.current?.abort(); // 中断当前流式请求
+    setLoading(false);
     const newSession = createNewSession("agent", t);
     setSessions((prev) => [newSession, ...prev]);
     setActiveSessionId(newSession.id);
@@ -293,7 +395,7 @@ export default function AgentChatPanel({
   };
 
   const updateActiveSession = (
-    updateFn: (session: ChatSession) => ChatSession,
+    updateFn: (session: ChatSession) => ChatSession
   ) => {
     setSessions((prev) => {
       const targetIdx = prev.findIndex((s) => s.id === activeSessionId);
@@ -325,62 +427,160 @@ export default function AgentChatPanel({
         newTitle = text.length > 15 ? text.slice(0, 15) + "..." : text;
       }
 
+      // Create placeholder AI message
+      const aiMsgId = `ai-${Date.now()}`;
+      const aiMsg: ChatMessageData = {
+        id: aiMsgId,
+        role: "assistant",
+        content: "",
+        timestamp: new Date().toISOString(),
+        _streamPhase: "thinking",
+        _streamPhaseMsg: "正在思考...",
+      };
+
       updateActiveSession((s) => ({
         ...s,
         title: newTitle,
-        messages: updatedMessages,
+        messages: [...updatedMessages, aiMsg],
         updatedAt: new Date().toISOString(),
       }));
 
       setInput("");
       setLoading(true);
 
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 300_000);
+
+      let accumulatedContent = "";
+      let hasError = false;
+
       try {
         const historyData = updatedMessages
           .filter((m) => m.id !== "welcome")
           .map((m) => ({ role: m.role, content: m.content }));
 
-        const data = await callAgent(text.trim(), historyData, mode);
-
-        const aiMsg: ChatMessageData = {
-          id: `ai-${Date.now()}`,
-          role: "assistant",
-          content: data.reply || t("agent.emptyReply"),
-          action: data.action,
-          timestamp: new Date().toISOString(),
-        };
-
-        updateActiveSession((s) => ({
-          ...s,
-          messages: [...s.messages, aiMsg],
-          updatedAt: new Date().toISOString(),
-        }));
+        await callAgentStream(
+          text.trim(),
+          historyData,
+          mode,
+          {
+            onPhase: (phase, phaseMsg) => {
+              updateActiveSession((s) => ({
+                ...s,
+                messages: s.messages.map((m) =>
+                  m.id === aiMsgId
+                    ? { ...m, _streamPhase: phase, _streamPhaseMsg: phaseMsg }
+                    : m
+                ),
+              }));
+            },
+            onAction: (action) => {
+              updateActiveSession((s) => ({
+                ...s,
+                messages: s.messages.map((m) =>
+                  m.id === aiMsgId ? { ...m, action } : m
+                ),
+              }));
+            },
+            onDelta: (content) => {
+              accumulatedContent += content;
+              const snapshot = accumulatedContent;
+              updateActiveSession((s) => ({
+                ...s,
+                messages: s.messages.map((m) =>
+                  m.id === aiMsgId ? { ...m, content: snapshot } : m
+                ),
+              }));
+            },
+            onDone: () => {
+              if (hasError) return; // Error already handled — don't overwrite
+              const finalContent = accumulatedContent;
+              updateActiveSession((s) => ({
+                ...s,
+                messages: s.messages.map((m) => {
+                  if (m.id !== aiMsgId) return m;
+                  const { _streamPhase, _streamPhaseMsg, ...rest } = m;
+                  return {
+                    ...rest,
+                    content: finalContent || t("agent.emptyReply"),
+                  };
+                }),
+                updatedAt: new Date().toISOString(),
+              }));
+            },
+            onError: (errMsg) => {
+              hasError = true;
+              const errorContent = accumulatedContent
+                ? `${accumulatedContent}\n\n⚠️ ${errMsg}`
+                : `${t("agent.requestFailed")}${errMsg}\n\n${t(
+                    "agent.errorHint"
+                  )}`;
+              updateActiveSession((s) => ({
+                ...s,
+                messages: s.messages.map((m) =>
+                  m.id === aiMsgId
+                    ? {
+                        ...m,
+                        content: errorContent,
+                        _streamPhase: undefined,
+                        _streamPhaseMsg: undefined,
+                      }
+                    : m
+                ),
+                updatedAt: new Date().toISOString(),
+              }));
+            },
+          },
+          controller.signal
+        );
       } catch (err) {
-        const errName =
-          (err as Error).name === "AbortError"
-            ? t("agent.requestTimeout")
-            : (err as Error).message;
-        const errorMsg: ChatMessageData = {
-          id: `err-${Date.now()}`,
-          role: "assistant",
-          content: `${t("agent.requestFailed")}${errName}\n\n${t("agent.errorHint")}`,
-          timestamp: new Date().toISOString(),
-        };
+        if (!hasError) {
+          const errName =
+            (err as Error).name === "AbortError"
+              ? t("agent.requestTimeout")
+              : (err as Error).message;
+          updateActiveSession((s) => ({
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === aiMsgId
+                ? {
+                    ...m,
+                    content: `${t("agent.requestFailed")}${errName}\n\n${t(
+                      "agent.errorHint"
+                    )}`,
+                    _streamPhase: undefined,
+                    _streamPhaseMsg: undefined,
+                  }
+                : m
+            ),
+            updatedAt: new Date().toISOString(),
+          }));
+        }
+      } finally {
+        clearTimeout(timeout);
+        abortRef.current = null;
+        setLoading(false);
+        // 确保流式状态总是被清理（防止异常断流导致消息卡在 streaming 状态）
         updateActiveSession((s) => ({
           ...s,
-          messages: [...s.messages, errorMsg],
-          updatedAt: new Date().toISOString(),
+          messages: s.messages.map((m) => {
+            if (m.id !== aiMsgId || !m._streamPhase) return m;
+            const { _streamPhase, _streamPhaseMsg, ...rest } = m;
+            return {
+              ...rest,
+              content:
+                rest.content || accumulatedContent || t("agent.emptyReply"),
+            };
+          }),
         }));
-      } finally {
-        setLoading(false);
       }
     },
-    [loading, messages, activeSession.title, activeSessionId, mode, t],
+    [loading, messages, activeSession.title, activeSessionId, mode, t]
   );
 
   const regenerate = useCallback(() => {
     const lastUserIdx = messages.findLastIndex(
-      (m: ChatMessageData) => m.role === "user",
+      (m: ChatMessageData) => m.role === "user"
     );
     if (lastUserIdx < 0) return;
 
@@ -407,7 +607,7 @@ export default function AgentChatPanel({
 
       sendMessage(editText, truncated);
     },
-    [messages, editText, sendMessage],
+    [messages, editText, sendMessage]
   );
 
   const deleteMessage = (msgId: string) => {
@@ -466,7 +666,11 @@ export default function AgentChatPanel({
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="agent-close-btn"
-              title={sidebarOpen ? t("agent.collapseSidebar") : t("agent.expandSidebar")}
+              title={
+                sidebarOpen
+                  ? t("agent.collapseSidebar")
+                  : t("agent.expandSidebar")
+              }
             >
               {sidebarOpen ? (
                 <PanelLeftClose size={18} />
@@ -475,7 +679,9 @@ export default function AgentChatPanel({
               )}
             </button>
             <Bot size={18} />
-            <span style={{ fontWeight: 600, fontSize: 14 }}>{t("agent.title")}</span>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>
+              {t("agent.title")}
+            </span>
             <span
               style={{
                 fontSize: 11,
@@ -485,7 +691,9 @@ export default function AgentChatPanel({
                 borderRadius: 8,
               }}
             >
-              {t("agent.messageCount", { count: messages.filter((m) => m.id !== "welcome").length })}
+              {t("agent.messageCount", {
+                count: messages.filter((m) => m.id !== "welcome").length,
+              })}
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -520,7 +728,9 @@ export default function AgentChatPanel({
             />
           ))}
 
-          {loading && <ChatLoadingIndicator />}
+          {loading && !messages.some((m) => m._streamPhase) && (
+            <ChatLoadingIndicator />
+          )}
 
           <div ref={messagesEndRef} />
         </div>

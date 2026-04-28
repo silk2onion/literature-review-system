@@ -21,17 +21,17 @@ export default function CrawlerSearchPage() {
 
   // Search State — 从缓存恢复
   const [keywords, setKeywords] = useState(
-    () => sessionStorage.getItem("crawl_keywords") || "",
+    () => sessionStorage.getItem("crawl_keywords") || ""
   );
   const [selectedSources, setSelectedSources] = useState<string[]>(() => {
     const cached = sessionStorage.getItem("crawl_selectedSources");
     return cached ? JSON.parse(cached) : ["arxiv", "crossref"];
   });
   const [yearFrom, setYearFrom] = useState(
-    () => sessionStorage.getItem("crawl_yearFrom") || "",
+    () => sessionStorage.getItem("crawl_yearFrom") || ""
   );
   const [yearTo, setYearTo] = useState(
-    () => sessionStorage.getItem("crawl_yearTo") || "",
+    () => sessionStorage.getItem("crawl_yearTo") || ""
   );
   const [maxResults, setMaxResults] = useState(() => {
     const cached = sessionStorage.getItem("crawl_maxResults");
@@ -62,7 +62,7 @@ export default function CrawlerSearchPage() {
   useEffect(() => {
     sessionStorage.setItem(
       "crawl_selectedSources",
-      JSON.stringify(selectedSources),
+      JSON.stringify(selectedSources)
     );
   }, [selectedSources]);
   useEffect(() => {
@@ -104,7 +104,7 @@ export default function CrawlerSearchPage() {
     setSelectedSources((prev) =>
       prev.includes(source)
         ? prev.filter((s) => s !== source)
-        : [...prev, source],
+        : [...prev, source]
     );
   };
 
@@ -124,7 +124,7 @@ export default function CrawlerSearchPage() {
       setSubmitMessage(null);
 
       const keywordList = keywords
-        .split(/[,，]/)
+        .split(/[,，;；\n]/)
         .map((k) => k.trim())
         .filter(Boolean);
 
@@ -134,8 +134,8 @@ export default function CrawlerSearchPage() {
         keywordList.length === 1
           ? keywordList
           : keywords.match(/\b(OR|AND)\b/i)
-            ? [keywords.trim()]
-            : keywordList;
+          ? [keywords.trim()]
+          : keywordList;
 
       const payload: CrawlJobPayload = {
         keywords: finalKeywords,
@@ -179,19 +179,15 @@ export default function CrawlerSearchPage() {
 
   const handleJobAction = async (
     jobId: number,
-    action: "run_once" | "pause" | "resume" | "retry",
+    action: "run_once" | "pause" | "resume" | "retry"
   ) => {
-    if (
-      action === "retry" &&
-      !window.confirm(t("crawl.confirmRetry"))
-    )
-      return;
+    if (action === "retry" && !window.confirm(t("crawl.confirmRetry"))) return;
 
     setActioningJobId(jobId);
     try {
       const res = await fetch(
         `${API_BASE_URL}/api/crawl/jobs/${jobId}/${action}`,
-        { method: "POST" },
+        { method: "POST" }
       );
       if (!res.ok) throw new Error("Action failed");
       await fetchJobs();

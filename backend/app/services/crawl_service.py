@@ -199,11 +199,17 @@ def run_crawl_job_once(db: Session, job_id: int) -> Tuple[CrawlJob, int]:
         sources_all: List[str] = job.sources or []
 
         # ━━━ 布尔查询解析 ━━━
-        # 将关键词列表拼接为一个查询字符串，然后通过 QueryParser 解析布尔表达式
-        # 例如 ["TOD OR transit oriented development AND qingdao"]
-        #   → 子查询: ["TOD qingdao", "transit oriented development qingdao"]
-        raw_query = " ".join(kw.strip() for kw in keywords if kw and kw.strip())
-        sub_queries = parse_boolean_query(raw_query) if raw_query else [raw_query or ""]
+        # 将每个关键词独立解析布尔表达式，多个关键词视为 OR 关系
+        # 例如 ["TOD qingdao", "transit oriented development"] → 两个独立子查询
+        sub_queries = []
+        for kw in keywords:
+            kw = kw.strip()
+            if not kw:
+                continue
+            parsed = parse_boolean_query(kw)
+            sub_queries.extend(parsed)
+        if not sub_queries:
+            sub_queries = [""]
 
         if len(sub_queries) > 1:
             job.append_log({

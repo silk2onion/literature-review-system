@@ -695,3 +695,194 @@ Write a comprehensive conclusion section based on the following complete literat
 【Output Format】
 Output conclusion body text ONLY (Markdown format). No "Conclusion" heading or extra explanations. Use \\n\\n between paragraphs.
 """
+
+# ========================================================================
+# Opt-5: 证据矩阵提示（嵌入 section prompt 的比较维度引导）
+# ========================================================================
+
+EVIDENCE_MATRIX_HINT_ZH = """
+
+**6. 跨文献比较维度（重要）**
+在行文中，请从以下维度对比上述文献，而不是逐篇介绍：
+- **研究方法**：定量 vs 定性 vs 混合方法，各自的适用场景和局限
+- **数据规模与情境**：样本量、城市数量、地域差异如何影响结论的可推广性
+- **核心发现**：哪些研究支持同一论点？哪些结论相互矛盾？在什么条件下结论成立？
+- **方法论局限**：横截面 vs 纵向、因果识别强度、数据可得性约束
+用综合论述段落呈现这些对比，避免"A做了X，B做了Y，C做了Z"的简单罗列。
+"""
+
+EVIDENCE_MATRIX_HINT_EN = """
+
+**6. Cross-study Comparison Dimensions (Important)**
+When writing, compare the literature along these dimensions rather than summarizing paper by paper:
+- **Research methods**: quantitative vs qualitative vs mixed, their applicability and limitations
+- **Data scale & context**: sample sizes, number of cities/cases, how geography affects generalizability
+- **Core findings**: which studies support the same argument? which contradict? under what conditions?
+- **Methodological limitations**: cross-sectional vs longitudinal, causal identification strength, data constraints
+Present these comparisons in synthesized paragraphs, avoiding the "A did X, B did Y, C did Z" pattern.
+"""
+
+# ========================================================================
+# Opt-7: 引言专用 prompt（区别于正文章节）
+# ========================================================================
+
+ORCHESTRATE_INTRO_PROMPT_ZH = """
+你是一位精通学术写作的资深研究者，擅长撰写文献综述的引言章节。
+
+【任务】
+撰写一篇文献综述的引言/背景章节。注意：这是综述论文的引言，不是研究论文的引言。
+
+【章节信息】
+- 标题: {section_title}
+- 描述: {section_description}
+
+【可引用的文献列表】
+{papers_context}
+
+【写作规范】
+
+**1. 篇幅要求**
+- 本章节 **600-1200 字**（中文），包含 **4-6 个**自然段。
+
+**2. 引言结构（按顺序组织）**
+- **第一段：宏观背景**——该领域的重要性和现实意义（1-2 个宏观引用即可）
+- **第二段：核心问题界定**——该综述要回答的核心问题是什么？现有研究存在什么不足？
+- **第三段：关键概念/理论演变**——简要梳理核心概念的发展脉络（引用奠基性文献）
+- **第四段：综述范围与组织结构**——本综述覆盖哪些方面？后续各章节将讨论什么？
+- **（可选）第五段：综述的预期贡献**——本综述与已有综述的区别和创新点
+
+**3. 引用策略**
+- 引用密度**适中**（每段 1-3 篇即可），不需要像正文章节那样密集引用。
+- 优先引用**奠基性/高引文献**和**最新综述文章**。
+- 使用 [[REF_x]] 锚定系统，零幻觉规则照常适用。
+
+**4. 语气**
+- 使用宏观、概括性的语言，建立"大图景"
+- 避免过早进入技术细节
+- 最后一段应自然引出后续章节
+
+**5. 输出格式**
+- 仅输出引言正文（Markdown），不要输出章节标题或额外说明。
+"""
+
+ORCHESTRATE_INTRO_PROMPT_EN = """
+You are an expert academic researcher skilled at writing introduction sections for literature reviews.
+
+【Task】
+Write an introduction/background section for a literature review paper. Note: this is an introduction for a REVIEW paper, not an original research paper.
+
+【Section Information】
+- Title: {section_title}
+- Description: {section_description}
+
+【Available References】
+{papers_context}
+
+【Writing Standards】
+
+**1. Length**: 600-1200 words (English), 4-6 paragraphs.
+
+**2. Introduction Structure (in order)**
+- **Para 1: Macro context** — importance and real-world significance of the field (1-2 broad citations)
+- **Para 2: Core problem** — what questions does this review address? what gaps exist in current research?
+- **Para 3: Key concepts/theory evolution** — brief lineage of core concepts (cite foundational works)
+- **Para 4: Review scope & organization** — what does this review cover? how are subsequent sections organized?
+- **(Optional) Para 5: Expected contribution** — how does this review differ from existing reviews?
+
+**3. Citation Strategy**
+- **Moderate** citation density (1-3 per paragraph). No need for dense citations like body sections.
+- Prioritize **foundational/high-impact** papers and **recent review articles**.
+- Use [[REF_x]] anchoring system; zero hallucination rule applies.
+
+**4. Tone**: broad, establishing the "big picture". Avoid premature technical detail.
+
+**5. Output**: Section body text ONLY (Markdown). No heading or preamble.
+"""
+
+# ========================================================================
+# Opt-6: Discussion 章节的结构化全文汇总 prompt
+# ========================================================================
+
+STRUCTURED_SUMMARY_PROMPT_ZH = """
+你是一位资深学术研究者。请从以下文献综述各章节的内容中，提取结构化的学术汇总。
+
+【各章节内容】
+{sections_content}
+
+【输出要求】
+请用以下 JSON 格式输出，不要添加额外说明：
+{{
+  "consensus": [
+    "跨章节的核心共识1（1-2句）",
+    "跨章节的核心共识2（1-2句）"
+  ],
+  "controversies": [
+    "文献间的主要矛盾/争议1（1-2句，指出哪些研究支持哪一方）",
+    "文献间的主要矛盾/争议2"
+  ],
+  "methodological_limitations": [
+    "方法论上的共性局限1（1-2句）",
+    "方法论上的共性局限2"
+  ],
+  "research_gaps": [
+    "尚未充分研究的问题1",
+    "尚未充分研究的问题2"
+  ]
+}}
+
+要求：
+- consensus 3-5 条，controversies 2-4 条，methodological_limitations 2-3 条，research_gaps 3-5 条
+- 每条都必须是具体的、有学术深度的陈述，不要泛泛而谈
+- 尽量引用各章节中出现的具体研究发现，而不是重复章节标题
+"""
+
+STRUCTURED_SUMMARY_PROMPT_EN = """
+You are a senior academic researcher. Extract a structured summary from the following literature review sections.
+
+【Section Contents】
+{sections_content}
+
+【Output Requirements】
+Output in the following JSON format with no additional text:
+{{
+  "consensus": [
+    "Core consensus across sections 1 (1-2 sentences)",
+    "Core consensus across sections 2"
+  ],
+  "controversies": [
+    "Major contradiction/debate 1 (1-2 sentences, note which studies support which side)",
+    "Major contradiction/debate 2"
+  ],
+  "methodological_limitations": [
+    "Common methodological limitation 1 (1-2 sentences)",
+    "Common methodological limitation 2"
+  ],
+  "research_gaps": [
+    "Under-researched question 1",
+    "Under-researched question 2"
+  ]
+}}
+
+Requirements:
+- consensus: 3-5 items, controversies: 2-4 items, methodological_limitations: 2-3 items, research_gaps: 3-5 items
+- Each item must be specific and academically substantive, not generic platitudes
+- Reference specific research findings from the sections, not just section titles
+"""
+
+# ========================================================================
+# Opt-9: 综述类型 → 框架约束映射
+# ========================================================================
+
+REVIEW_TYPE_CONSTRAINTS = {
+    "narrative": "This is a NARRATIVE literature review. Organize thematically, emphasize critical synthesis and theoretical evolution. No need for PRISMA or systematic search methodology sections.",
+    "systematic": "This is a SYSTEMATIC literature review. MUST include: search strategy section (databases, keywords, inclusion/exclusion criteria), PRISMA flow description, quality assessment methodology, and systematic evidence synthesis.",
+    "scoping": "This is a SCOPING review (Arksey & O'Malley framework). MUST include: research question definition, search strategy, study selection, data charting, and collating/summarizing results. Focus on breadth of coverage rather than depth of critique.",
+    "critical": "This is a CRITICAL literature review. Emphasize critical evaluation of theoretical frameworks, methodological rigor assessment, identification of contradictions and biases, and original interpretive synthesis. Each section should contain explicit critique.",
+}
+
+REVIEW_TYPE_CONSTRAINTS_ZH = {
+    "narrative": "这是一篇叙述性综述（Narrative Review）。按主题组织，强调批判性综合和理论演化脉络。不需要 PRISMA 流程或系统检索方法章节。",
+    "systematic": "这是一篇系统性综述（Systematic Review）。必须包含：检索策略章节（数据库、关键词、纳入排除标准）、PRISMA 流程描述、文献质量评估方法、系统化证据综合。",
+    "scoping": "这是一篇范围综述（Scoping Review，Arksey & O'Malley 框架）。必须包含：研究问题界定、检索策略、文献筛选、数据提取、结果归类与汇总。侧重覆盖广度而非批判深度。",
+    "critical": "这是一篇批判性综述（Critical Review）。强调对理论框架的批判性评价、方法论严谨性评估、矛盾与偏见的识别、原创性解读综合。每个章节都应包含明确的批判性分析。",
+}

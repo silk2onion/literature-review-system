@@ -6,6 +6,7 @@ AI Agent 服务 — 自然语言驱动的文献综述系统操作
 2. 后端执行对应操作
 3. LLM 将结果用自然语言总结反馈
 """
+import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -29,7 +30,7 @@ TOOLS_SCHEMA = [
         "name": "search_papers",
         "description": "在 Semantic Scholar / arXiv / CrossRef 等数据源上搜索文献并加入暂存库",
         "parameters": {
-            "keywords": "搜索关键词，用逗号分隔",
+            "keywords": "搜索关键词列表（JSON 数组），每个元素是一个独立的搜索主题。用户给多组关键词时必须拆成数组，例如 [\"TOD walkability\", \"pedestrian accessibility evaluation\"]。切勿将所有关键词塞成一条长字符串。",
             "sources": "数据源列表，可选 arxiv/crossref/semantic_scholar",
             "max_results": "最大结果数（默认 50）",
         },
@@ -236,10 +237,13 @@ INTENT_SYSTEM_PROMPT = f"""你是一个文献综述系统的 AI 助手。用户�
 - "reasoning": 为什么匹配到这个工具（中文）
 
 ### 示例：
-用户：“搜一下城市设计中的人工智能”
-回复：{{"tool": "search_papers", "params": {{"keywords": "人工智能, 城市设计"}}, "reasoning": "用户请求搜索特定领域的文献"}}
+用户："搜一下城市设计中的人工智能"
+回复：{{"tool": "search_papers", "params": {{"keywords": ["人工智能 城市设计"]}}, "reasoning": "用户请求搜索特定领域的文献"}}
 
-用户：“用PHD管线去做这个课题” (历史提到过 TOD 项目)
+用户："帮我搜：青岛 TOD 步行可达性; transit-oriented development walkability; walkable city urban design"
+回复：{{"tool": "search_papers", "params": {{"keywords": ["青岛 TOD 步行可达性", "transit-oriented development walkability", "walkable city urban design"]}}, "reasoning": "用户提供了分号分隔的多组关键词，拆分为独立搜索主题"}}
+
+用户："用PHD管线去做这个课题" (历史提到过 TOD 项目)
 回复：{{"tool": "start_review_task", "params": {{"topic": "TOD综合评估模型"}}, "reasoning": "用户明确要求使用PHD管线，从历史中提取研究课题"}}
 
 只输出 JSON，严禁任何解释性文字。"""
@@ -334,6 +338,153 @@ class AgentService:
             "reply": summary,
             "action": {"tool": tool, "params": params, "result": result},
         }
+
+    # ── Streaming chat ────────────────────────────────
+
+    async def chat_stream(
+        self,
+        message: str,
+        history: List[Dict[str, str]],
+        db: Session,
+        mode: str = "agent",
+    ):
+        """
+        流式版本的 chat()。yield SSE 格式的事件字符串。
+        Events: phase, action, delta, done, error
+        """
+        def _sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+        try:
+            if mode == "ask":
+                yield _sse("phase", {"phase": "thinking", "message": "正在思考..."})
+                async for chunk in self._ask_mode_stream(message, history, db):
+                    yield chunk
+                yield _sse("done", {})
+                return
+
+            # ── Agent 模式 ──
+
+            # Step 1: Intent identification (non-streaming)
+            yield _sse("phase", {"phase": "thinking", "message": "正在理解你的指令..."})
+            try:
+                intent = await self._identify_intent(message, history, db)
+            except Exception as e:
+                logger.exception("Agent 意图识别失败")
+                yield _sse("error", {"message": f"理解指令时遇到了问题：{e}", "phase": "thinking"})
+                return
+
+            tool = intent.get("tool", "general_chat")
+            params = intent.get("params", {})
+            reasoning = intent.get("reasoning", "")
+            logger.info("[Agent Stream] tool=%s params=%s", tool, params)
+
+            # Step 2: Tool execution (non-streaming)
+            yield _sse("phase", {"phase": "executing", "tool": tool, "message": f"正在执行：{tool}..."})
+            try:
+                result = await self._execute_tool(tool, params, db)
+            except Exception as e:
+                logger.exception("Agent 工具执行失败: tool=%s", tool)
+                yield _sse("action", {"tool": tool, "params": params, "result": {"error": str(e)}})
+                yield _sse("error", {"message": f"执行操作时出错了：{e}", "phase": "executing"})
+                return
+
+            # Emit action event (so frontend renders ToolActionCard immediately)
+            yield _sse("action", {"tool": tool, "params": params, "result": result})
+
+            # Step 3: Summarize with streaming
+            yield _sse("phase", {"phase": "summarizing", "message": "正在生成回复..."})
+            try:
+                async for chunk in self._summarize_result_stream(message, tool, params, result, db):
+                    yield _sse("delta", {"content": chunk})
+            except Exception as e:
+                logger.exception("Agent 结果总结失败")
+                fallback = f"操作已完成。结果：{json.dumps(result, ensure_ascii=False, default=str)[:500]}"
+                yield _sse("delta", {"content": fallback})
+
+            yield _sse("done", {})
+
+        except asyncio.CancelledError:
+            logger.info("[Agent Stream] Client disconnected")
+            return
+        except Exception as e:
+            logger.exception("[Agent Stream] Unexpected error")
+            yield _sse("error", {"message": f"服务器内部错误：{e}", "phase": "unknown"})
+
+    async def _ask_mode_stream(
+        self, message: str, history: List[Dict[str, str]], db: Session
+    ):
+        """Ask 模式流式版 — 复用 _ask_mode 的 prompt 逻辑，流式返回 LLM 输出。"""
+        def _sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+        history_text = ""
+        if history:
+            recent = history[-6:]
+            history_text = "\n".join(
+                f"{'用户' if m['role'] == 'user' else 'AI'}: {m['content'][:300]}"
+                for m in recent
+            )
+
+        prompt = message
+        if history_text:
+            prompt = f"对话历史：\n{history_text}\n\n用户最新提问：\n{message}"
+
+        try:
+            async for chunk in self.llm.complete_stream(
+                prompt=prompt,
+                system_prompt=self._build_system_prompt(
+                    "你是一个专业的学术研究助手。用户会就学术概念、研究方法、"
+                    "文献综述写作等问题向你提问。\n\n"
+                    "要求：\n"
+                    "1. 用中文回答，语言简洁专业\n"
+                    "2. 如果涉及具体理论或概念，引用相关学者和文献\n"
+                    "3. 可以使用 markdown 格式（加粗、列表等）来组织回答\n"
+                    "4. 保持亲切自然的语气",
+                    db,
+                ),
+                temperature=0.7,
+                max_tokens=2000,
+            ):
+                yield _sse("delta", {"content": chunk})
+        except Exception as e:
+            logger.exception("Ask 模式流式调用失败")
+            yield _sse("error", {"message": f"回答时遇到了问题：{e}", "phase": "thinking"})
+
+    async def _summarize_result_stream(
+        self,
+        user_message: str,
+        tool: str,
+        params: Dict,
+        result: Dict,
+        db: Session,
+    ):
+        """流式版本的 _summarize_result — yield token chunks。"""
+        if tool == "general_chat":
+            async for chunk in self.llm.complete_stream(
+                prompt=user_message,
+                system_prompt="你是一个学术研究助手，请用中文简洁回答用户的问题。",
+                temperature=0.7,
+                max_tokens=2000,
+            ):
+                yield chunk
+            return
+
+        result_text = json.dumps(result, ensure_ascii=False, default=str)[:2000]
+        prompt = f"""用户指令：{user_message}
+执行的工具：{tool}
+工具参数：{json.dumps(params, ensure_ascii=False)}
+执行结果：{result_text}
+
+请用友好的中文总结这次操作的结果。"""
+
+        async for chunk in self.llm.complete_stream(
+            prompt=prompt,
+            system_prompt=self._build_system_prompt(SUMMARY_SYSTEM_PROMPT, db),
+            temperature=0.5,
+            max_tokens=1000,
+        ):
+            yield chunk
 
     # ── Ask 模式 ──────────────────────────────────────
 
@@ -524,10 +675,14 @@ class AgentService:
             or ""
         )
         if isinstance(keywords_raw, list):
-            keywords = [str(k).strip() for k in keywords_raw if str(k).strip()]
+            # LLM 可能返回 ["kw1;kw2;kw3"] 这种单元素数组，需要二次拆分
+            keywords = []
+            for k in keywords_raw:
+                parts = re.split(r'[,，;；]', str(k))
+                keywords.extend(p.strip() for p in parts if p.strip())
         else:
-            # 同时支持中英文逗号分隔
-            keywords = [k.strip() for k in re.split(r'[,，]', str(keywords_raw)) if k.strip()]
+            # 同时支持中英文逗号、分号分隔
+            keywords = [k.strip() for k in re.split(r'[,，;；]', str(keywords_raw)) if k.strip()]
         if not keywords:
             return {"error": "请提供搜索关键词"}
 
