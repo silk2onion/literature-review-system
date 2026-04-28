@@ -1,13 +1,24 @@
 /* Kaomoji Easter Egg */
 @keyframes kaomojiWiggle {
-  0%, 100% { transform: rotate(0deg); }
-  25% { transform: rotate(-3deg) scale(1.02); }
-  75% { transform: rotate(3deg) scale(1.02); }
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-3deg) scale(1.02);
+  }
+  75% {
+    transform: rotate(3deg) scale(1.02);
+  }
 }
 
 @keyframes kaomojiSpin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .kaomoji-party .sidebar-item {
@@ -51,9 +62,7 @@
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  transition:
-    width 0.3s ease,
-    opacity 0.3s ease;
+  transition: width 0.3s ease, opacity 0.3s ease;
   flex-shrink: 0;
 }
 
@@ -1523,6 +1532,17 @@
   }
 }
 
+.agent-cursor {
+  animation: agent-cursor-blink 0.8s step-end infinite;
+  color: #3b82f6;
+  font-weight: bold;
+}
+@keyframes agent-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 /* Input Area */
 .agent-input-area {
   display: flex;
@@ -1547,9 +1567,7 @@
   font-family: inherit;
   line-height: 1.5;
   outline: none;
-  transition:
-    border-color 0.2s,
-    background 0.2s;
+  transition: border-color 0.2s, background 0.2s;
   min-height: 40px;
   max-height: 100px;
 }

@@ -395,6 +395,21 @@ class OrchestrationRequest(BaseModel):
         default=False,
         description="是否仅使用本地已有文献（不进行在线搜索）"
     )
+    # Opt-3: 必引文献保底
+    must_cite_paper_ids: List[int] = Field(
+        default_factory=list,
+        description="必须引用的文献 ID 列表，无论检索结果如何都注入每节 context"
+    )
+    # Opt-9: 综述类型
+    review_type: str = Field(
+        default="narrative",
+        description="综述类型: 'narrative'(叙述性), 'systematic'(系统性), 'scoping'(范围), 'critical'(批判性)"
+    )
+    # Opt-10: 使用结构化 claims pipeline
+    use_claims_pipeline: bool = Field(
+        default=False,
+        description="是否使用 claims-evidence-render 三阶段管线（更精准但更慢）"
+    )
 
     class Config:
         json_schema_extra = {

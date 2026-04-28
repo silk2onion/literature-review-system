@@ -118,6 +118,32 @@ def references_json_to_markdown(refs_json: Any) -> str:
     for item in items:
         formatted = item.get("formatted", "")
         paper_id = item.get("paper_id")
+
+        # Fallback: 如果 formatted 为空，从 raw 字段重建基本引用
+        if not formatted:
+            raw = item.get("raw", {})
+            if raw:
+                authors_raw = raw.get("authors", [])
+                if isinstance(authors_raw, list):
+                    author_str = ", ".join(str(a) for a in authors_raw[:3])
+                    if len(authors_raw) > 3:
+                        author_str += " et al."
+                elif authors_raw:
+                    author_str = str(authors_raw)
+                else:
+                    author_str = "Unknown"
+                year = raw.get("year", "n.d.")
+                title = raw.get("title", "Untitled")
+                journal = raw.get("journal", "")
+                doi = raw.get("doi", "")
+                formatted = f"{author_str} ({year}) '{title}'"
+                if journal:
+                    formatted += f", *{journal}*"
+                formatted += "."
+                if doi:
+                    doi_url = doi if doi.startswith("http") else f"https://doi.org/{doi}"
+                    formatted += f" Available at: {doi_url}."
+
         if formatted:
             if paper_id:
                 lines.append(f'- <a id="ref-{paper_id}"></a>{formatted}')

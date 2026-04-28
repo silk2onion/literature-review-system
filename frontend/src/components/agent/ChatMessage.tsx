@@ -16,6 +16,9 @@ export type ChatMessageData = {
   content: string;
   action?: ActionResult | null;
   timestamp: string;
+  /** Streaming-only transient fields */
+  _streamPhase?: string;
+  _streamPhaseMsg?: string;
 };
 
 interface ChatMessageProps {
@@ -56,9 +59,7 @@ export default function ChatMessage({
 
         {/* Text or Edit Mode */}
         {editingId === msg.id ? (
-          <div
-            style={{ display: "flex", flexDirection: "column", gap: 6 }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <textarea
               value={editText}
               onChange={(e) => setEditText(e.target.value)}
@@ -75,22 +76,32 @@ export default function ChatMessage({
               >
                 <Check size={12} /> 发送
               </button>
-              <button
-                onClick={onCancelEdit}
-                className="agent-action-btn"
-              >
+              <button onClick={onCancelEdit} className="agent-action-btn">
                 取消
               </button>
             </div>
           </div>
         ) : (
           <div className="agent-msg-text">
-            {msg.content.split("\n").map((line, i) => (
-              <span key={i}>
-                {line}
-                {i < msg.content.split("\n").length - 1 && <br />}
-              </span>
-            ))}
+            {/* Phase indicator during streaming */}
+            {msg._streamPhase && !msg.content && (
+              <div className="agent-thinking">
+                <Loader size={14} className="agent-spinner" />
+                <span>{msg._streamPhaseMsg || "处理中..."}</span>
+              </div>
+            )}
+            {/* Content (supports partial/streaming) */}
+            {msg.content &&
+              msg.content.split("\n").map((line, i) => (
+                <span key={i}>
+                  {line}
+                  {i < msg.content.split("\n").length - 1 && <br />}
+                </span>
+              ))}
+            {/* Streaming cursor */}
+            {msg._streamPhase && msg.content && (
+              <span className="agent-cursor">▌</span>
+            )}
           </div>
         )}
 

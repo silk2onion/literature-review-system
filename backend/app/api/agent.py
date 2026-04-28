@@ -62,6 +62,40 @@ async def agent_chat(
     return ChatResponse(**result)
 
 
+@router.post("/chat/stream")
+async def agent_chat_stream(
+    payload: ChatRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    流式 AI Agent 对话端点 (SSE)。
+    输入同 /chat，返回 Server-Sent Events 流。
+    Events: phase, action, delta, done, error
+    """
+    from fastapi.responses import StreamingResponse
+
+    service = get_agent_service()
+
+    async def event_generator():
+        async for event in service.chat_stream(
+            message=payload.message,
+            history=[{"role": m.role, "content": m.content} for m in payload.history],
+            db=db,
+            mode=payload.mode,
+        ):
+            yield event
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @router.websocket("/ws")
 async def agent_ws(websocket: WebSocket):
     """WebSocket endpoint for proactive agent notifications."""

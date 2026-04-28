@@ -29,6 +29,47 @@ logger = logging.getLogger(__name__)
 # Pattern to match [[REF_x]] where x is a positive integer (paper ID)
 REF_PATTERN = re.compile(r'\[\[REF_(\d+)\]\]')
 
+# Opt-4: 方法论关键词提取（从 abstract 中正则匹配常见方法术语）
+_METHOD_KEYWORDS = [
+    # Quantitative
+    "regression", "GIS", "spatial analysis", "machine learning", "deep learning",
+    "cluster analysis", "factor analysis", "PCA", "SEM", "structural equation",
+    "meta-analysis", "systematic review", "survey", "questionnaire",
+    "simulation", "agent-based", "cellular automata", "network analysis",
+    "entropy", "DEA", "TOPSIS", "AHP", "fuzzy", "Bayesian",
+    # Qualitative
+    "case study", "interview", "ethnograph", "grounded theory", "content analysis",
+    "participat", "observation", "focus group", "discourse analysis",
+    # Data/Tech
+    "remote sensing", "satellite", "LiDAR", "street view", "POI",
+    "GPS", "mobile phone", "social media", "big data", "open data",
+    "OSM", "OpenStreetMap", "Space Syntax",
+    # Mixed
+    "mixed method", "triangulat", "multi-criteria",
+]
+_METHOD_PATTERN = re.compile(
+    r'\b(' + '|'.join(re.escape(k) for k in _METHOD_KEYWORDS) + r')',
+    re.IGNORECASE
+)
+
+
+def _extract_method_tags(abstract: str) -> list[str]:
+    """从 abstract 中提取方法论标签（去重、最多 5 个）"""
+    if not abstract:
+        return []
+    matches = _METHOD_PATTERN.findall(abstract)
+    # 去重并保持首次出现顺序
+    seen = set()
+    tags = []
+    for m in matches:
+        m_lower = m.lower()
+        if m_lower not in seen:
+            seen.add(m_lower)
+            tags.append(m)
+        if len(tags) >= 5:
+            break
+    return tags
+
 # Enhanced pattern to match [[REF_x:pN]] (paper ID with page number)
 # Group 1: paper_id, Group 2: page_number (optional)
 REF_PAGE_PATTERN = re.compile(r'\[\[REF_(\d+)(?::p(\d+))?\]\]')
@@ -129,6 +170,12 @@ def build_paper_context_block(
             if len(abs_text) > 500:
                 abs_text = abs_text[:497] + "..."
             lines.append(f"Abstract: {abs_text}")
+
+        # Opt-4: 提取方法论关键词（从 abstract 中简单正则匹配）
+        if abstract:
+            method_tags = _extract_method_tags(abstract)
+            if method_tags:
+                lines.append(f"Methods: {', '.join(method_tags)}")
 
         lines.append("---")
 
